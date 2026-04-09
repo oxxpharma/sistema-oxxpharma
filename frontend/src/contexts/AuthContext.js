@@ -1,20 +1,36 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-// Use relative URL for same-origin requests (works with Kubernetes ingress)
-// Falls back to env variable for external API calls
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 const AuthContext = createContext(null);
 
 export const ACCESS_LEVELS = {
-  0: { name: 'Admin Técnico', slug: 'admin_tecnico' },
-  1: { name: 'Admin Geral', slug: 'admin_geral' },
-  2: { name: 'Supervisor', slug: 'supervisor' },
-  3: { name: 'Líder', slug: 'lider' },
-  4: { name: 'Revendedor', slug: 'revendedor' },
-  5: { name: 'Cliente', slug: 'cliente' },
-  6: { name: 'Embaixador', slug: 'embaixador' },
+  0: { name: 'Administrador', slug: 'admin' },
+  1: { name: 'Nacional', slug: 'nacional' },
+  2: { name: 'Estadual', slug: 'estadual' },
+  3: { name: 'Regional', slug: 'regional' },
+  4: { name: 'Cidade', slug: 'cidade' },
+  5: { name: 'Indicador', slug: 'indicador' },
+  6: { name: 'Unidade Indicadora', slug: 'unidade_indicadora' },
 };
+
+export const LEVEL_NAMES = {
+  0: 'Administrador',
+  1: 'Nacional',
+  2: 'Estadual',
+  3: 'Regional',
+  4: 'Cidade',
+  5: 'Indicador',
+  6: 'Unidade Indicadora',
+};
+
+function formatApiError(detail) {
+  if (!detail) return 'Algo deu errado. Tente novamente.';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map(e => e?.msg || JSON.stringify(e)).join(' ');
+  if (detail?.msg) return detail.msg;
+  return String(detail);
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -41,8 +57,7 @@ export function AuthProvider({ children }) {
       } else {
         logout();
       }
-    } catch (err) {
-      console.error('Auth error:', err);
+    } catch {
       logout();
     } finally {
       setLoading(false);
@@ -56,12 +71,10 @@ export function AuthProvider({ children }) {
       credentials: 'include',
       body: JSON.stringify({ email, password })
     });
-    
     if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.detail || 'Falha no login');
+      const err = await res.json();
+      throw new Error(formatApiError(err.detail));
     }
-    
     const data = await res.json();
     localStorage.setItem('token', data.token);
     setToken(data.token);
@@ -76,31 +89,10 @@ export function AuthProvider({ children }) {
       credentials: 'include',
       body: JSON.stringify(userData)
     });
-    
     if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.detail || 'Falha no registro');
+      const err = await res.json();
+      throw new Error(formatApiError(err.detail));
     }
-    
-    const data = await res.json();
-    localStorage.setItem('token', data.token);
-    setToken(data.token);
-    setUser(data.user);
-    return data.user;
-  };
-
-  const handleGoogleSession = async (sessionId) => {
-    const res = await fetch(`${API_URL}/api/auth/session`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ session_id: sessionId })
-    });
-    
-    if (!res.ok) {
-      throw new Error('Falha na autenticação Google');
-    }
-    
     const data = await res.json();
     localStorage.setItem('token', data.token);
     setToken(data.token);
@@ -110,13 +102,8 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await fetch(`${API_URL}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
-    } catch (err) {
-      console.error('Logout error:', err);
-    }
+      await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+    } catch {}
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
@@ -128,17 +115,11 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user,
-      token,
-      loading,
-      login,
-      register,
-      logout,
-      handleGoogleSession,
-      updateUser,
+      user, token, loading,
+      login, register, logout, updateUser,
       isAuthenticated: !!user,
       accessLevel: user?.access_level ?? 99,
-      hasAccess: (minLevel) => (user?.access_level ?? 99) <= minLevel
+      hasAccess: (minLevel) => (user?.access_level ?? 99) <= minLevel,
     }}>
       {children}
     </AuthContext.Provider>
@@ -146,9 +127,7 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 };

@@ -7,41 +7,44 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        primary: {
-          main: '#0f172a',
-          light: '#334155',
-          dark: '#020617',
-        },
         brand: {
-          main: '#2563eb',
-          light: '#60a5fa',
-          dark: '#1e40af',
-          subtle: '#eff6ff',
-        },
-        sidebar: {
-          bg: '#0f172a',
-          hover: '#1e293b',
-          border: '#1e293b',
+          main: '#0047AB',
+          hover: '#003380',
+          light: '#E8F0FE',
         },
         accent: {
-          main: '#f59e0b',
-          light: '#fbbf24',
+          green: '#10B981',
+          red: '#DC2626',
         },
-        success: {
-          main: '#10b981',
-          light: '#34d399',
-        }
+        surface: '#FFFFFF',
+        bg: {
+          primary: '#FFFFFF',
+          secondary: '#F9FAFB',
+        },
+        txt: {
+          primary: '#111827',
+          secondary: '#4B5563',
+        },
+        border: '#E5E7EB',
+        sidebar: {
+          bg: '#FFFFFF',
+          hover: '#F3F4F6',
+          active: '#0047AB',
+        },
       },
       fontFamily: {
-        heading: ['Manrope', 'sans-serif'],
-        body: ['Inter', 'sans-serif'],
+        heading: ['Chivo', 'sans-serif'],
+        body: ['IBM Plex Sans', 'sans-serif'],
       },
       width: {
-        'sidebar': '18rem',
+        sidebar: '17rem',
       },
       spacing: {
-        'sidebar': '18rem',
-      }
+        sidebar: '17rem',
+      },
+      borderRadius: {
+        DEFAULT: '6px',
+      },
     },
   },
   plugins: [],

@@ -1,6 +1,6 @@
 """
-MLM Vanguard System - Backend API Testing
-Tests all major functionality of the MLM system
+OxxPharma MLM System - Backend API Testing
+Tests all major functionality of the OxxPharma MLM system
 """
 
 import requests
@@ -8,10 +8,11 @@ import sys
 import json
 from datetime import datetime
 
-class MLMAPITester:
-    def __init__(self, base_url="http://localhost:8001"):
+class OxxPharmaAPITester:
+    def __init__(self, base_url="https://oxx-franchise-system.preview.emergentagent.com"):
         self.base_url = base_url
         self.admin_token = None
+        self.nacional_token = None
         self.regular_token = None
         self.tests_run = 0
         self.tests_passed = 0
@@ -97,12 +98,28 @@ class MLMAPITester:
             "POST",
             "auth/login",
             200,
-            data={"email": "admin@vanguard.com", "password": "admin123"},
+            data={"email": "admin@oxxpharma.com", "password": "admin123"},
             description="Login with admin credentials"
         )
         if success and 'token' in response:
             self.admin_token = response['token']
             print(f"   🎫 Admin token acquired")
+            return True
+        return False
+
+    def test_nacional_login(self):
+        """Test nacional login"""
+        success, response = self.run_test(
+            "Nacional Login",
+            "POST",
+            "auth/login",
+            200,
+            data={"email": "nacional@oxxpharma.com", "password": "nacional123"},
+            description="Login with nacional credentials"
+        )
+        if success and 'token' in response:
+            self.nacional_token = response['token']
+            print(f"   🎫 Nacional token acquired")
             return True
         return False
 
@@ -144,7 +161,9 @@ class MLMAPITester:
             "name": "Test User",
             "phone": "+5511999999999",
             "cpf": "12345678901",
-            "access_level": 5  # Cliente
+            "access_level": 5,  # Indicador
+            "state": "SP",
+            "city": "São Paulo"
         }
         
         success, response = self.run_test(
@@ -153,7 +172,7 @@ class MLMAPITester:
             "auth/register",
             200,
             data=user_data,
-            description="Register new user as Cliente"
+            description="Register new user as Indicador"
         )
         
         if success and 'token' in response:
@@ -172,7 +191,7 @@ class MLMAPITester:
         return self.run_test(
             "User Dashboard",
             "GET",
-            "dashboard/reseller",
+            "dashboard/user",
             200,
             headers={'Authorization': f'Bearer {self.regular_token}'},
             description="Get regular user dashboard data"
@@ -196,10 +215,10 @@ class MLMAPITester:
             
         product_data = {
             "name": f"Test Product {datetime.now().strftime('%H%M%S')}",
-            "description": "Test product for MLM system",
+            "description": "Test product for OxxPharma system",
             "price": 99.99,
             "discount_price": 79.99,
-            "category": "Teste",
+            "category": "Medicamentos",
             "stock": 100,
             "active": True
         }
@@ -218,6 +237,89 @@ class MLMAPITester:
             self.created_resources['products'].append(response['product_id'])
             return True
         return False
+
+    def test_user_creation_admin(self):
+        """Test user creation by admin"""
+        if not self.admin_token:
+            print("❌ Skipping user creation - no admin token")
+            return False
+            
+        user_data = {
+            "email": f"admin_created_{datetime.now().strftime('%H%M%S')}@test.com",
+            "password": "TestPass123!",
+            "name": "Admin Created User",
+            "phone": "+5511888888888",
+            "cpf": "98765432100",
+            "access_level": 4,  # Cidade
+            "state": "RJ",
+            "city": "Rio de Janeiro"
+        }
+        
+        success, response = self.run_test(
+            "User Creation by Admin",
+            "POST",
+            "users/create",
+            200,
+            data=user_data,
+            headers={'Authorization': f'Bearer {self.admin_token}'},
+            description="Create new user via admin endpoint"
+        )
+        
+        if success and 'user_id' in response:
+            self.created_resources['users'].append(response['user_id'])
+            return True
+        return False
+
+    def test_settings_update(self):
+        """Test settings update"""
+        if not self.admin_token:
+            print("❌ Skipping settings update - no admin token")
+            return False
+            
+        return self.run_test(
+            "Settings Update",
+            "PUT",
+            "settings",
+            200,
+            data={"key": "commission_gen_1", "value": "10"},
+            headers={'Authorization': f'Bearer {self.admin_token}'},
+            description="Update commission settings"
+        )
+
+    def test_franchises_list(self):
+        """Test franchises listing"""
+        if not self.admin_token:
+            print("❌ Skipping franchises - no admin token")
+            return False
+            
+        return self.run_test(
+            "Franchises List",
+            "GET",
+            "franchises",
+            200,
+            headers={'Authorization': f'Bearer {self.admin_token}'},
+            description="List franchise information"
+        )
+
+    def test_states_reference(self):
+        """Test states reference data"""
+        return self.run_test(
+            "States Reference",
+            "GET",
+            "reference/states",
+            200,
+            description="Get Brazilian states reference data"
+        )
+
+    def test_ddds_reference(self):
+        """Test DDDs reference data"""
+        return self.run_test(
+            "DDDs Reference",
+            "GET",
+            "reference/ddds?state=SP",
+            200,
+            description="Get DDDs for São Paulo state"
+        )
 
     def test_users_list(self):
         """Test users listing (admin/supervisor only)"""
@@ -310,7 +412,7 @@ class MLMAPITester:
     def print_summary(self):
         """Print test results summary"""
         print("\n" + "="*60)
-        print("🎯 MLM BACKEND TEST RESULTS")
+        print("🎯 OXXPHARMA BACKEND TEST RESULTS")
         print("="*60)
         
         success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
@@ -333,15 +435,16 @@ class MLMAPITester:
 
 def main():
     """Run all backend tests"""
-    print("🚀 Starting MLM Backend API Tests")
+    print("🚀 Starting OxxPharma Backend API Tests")
     print("="*60)
     
-    tester = MLMAPITester()
+    tester = OxxPharmaAPITester()
     
     # Core connectivity and auth tests
     print("\n📡 CONNECTIVITY & AUTHENTICATION")
     tester.test_health_check()
     tester.test_admin_login()
+    tester.test_nacional_login()
     tester.test_user_registration()
     
     # Dashboard and data access
@@ -349,6 +452,7 @@ def main():
     tester.test_admin_dashboard()
     tester.test_user_dashboard()
     tester.test_settings_access()
+    tester.test_settings_update()
     
     # Core business logic
     print("\n🛍️ BUSINESS LOGIC")
@@ -359,12 +463,19 @@ def main():
     # User management and network
     print("\n👥 USER MANAGEMENT & NETWORK")
     tester.test_users_list()
+    tester.test_user_creation_admin()
     tester.test_network_tree()
     
     # Financial features
     print("\n💰 FINANCIAL FEATURES")
     tester.test_wallet_access()
     tester.test_commissions_list()
+    tester.test_franchises_list()
+    
+    # Reference data
+    print("\n📋 REFERENCE DATA")
+    tester.test_states_reference()
+    tester.test_ddds_reference()
     
     # Security
     print("\n🔒 SECURITY")

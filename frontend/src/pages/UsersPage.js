@@ -1,583 +1,329 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth, ACCESS_LEVELS } from '../contexts/AuthContext';
-import AppLayout, { StatCard, DashCard } from '../components/layout/AppLayout';
-import { Input } from '../components/ui/Input';
-import { Button } from '../components/ui/Button';
-import { formatDate, formatCurrency } from '../lib/utils';
-import { toast } from '../components/ui/toast';
-import { 
-  Search, UserPlus, Edit2, Trash2, X, Users,
-  ChevronLeft, ChevronRight, Mail, Phone, Eye, 
-  CheckCircle, XCircle, Shield, Save, UserCog
-} from 'lucide-react';
+import { useAuth, LEVEL_NAMES } from '../contexts/AuthContext';
+import AppLayout, { DashCard } from '../components/layout/AppLayout';
+import { Search, Plus, Edit2, Trash2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function UsersPage() {
-  const { token } = useAuth();
+  const { token, accessLevel } = useAuth();
   const [users, setUsers] = useState([]);
-  const [supervisors, setSupervisors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState({ access_level: '', status: '' });
+  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalUsers, setTotalUsers] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [search, setSearch] = useState('');
+  const [filterLevel, setFilterLevel] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    password: '',
-    access_level: 5,
-    status: 'active',
-    cpf: '',
-    available_balance: 0,
-    blocked_balance: 0,
-    points: 0,
-    supervisor_id: ''
+  const [editUser, setEditUser] = useState(null);
+  const [states, setStates] = useState([]);
+  const [ddds, setDdds] = useState([]);
+
+  const [form, setForm] = useState({
+    name: '', email: '', password: '', phone: '', cpf: '',
+    access_level: 4, state: '', ddd: '', city: '', status: 'active',
+    franchise_value: 0, annual_revenue: 0,
   });
 
-  useEffect(() => {
-    fetchUsers();
-    fetchSupervisors();
-  }, [page, filter]);
+  useEffect(() => { fetchUsers(); }, [page, search, filterLevel]);
+  useEffect(() => { fetchStates(); }, []);
+
+  const fetchStates = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/reference/states`);
+      if (res.ok) { const d = await res.json(); setStates(d.states); }
+    } catch {}
+  };
+
+  const fetchDDDs = async (state) => {
+    try {
+      const res = await fetch(`${API_URL}/api/reference/ddds?state=${state}`);
+      if (res.ok) { const d = await res.json(); setDdds(d.ddds); }
+    } catch {}
+  };
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: 20 });
-      if (filter.access_level) params.append('access_level', filter.access_level);
-      if (filter.status) params.append('status', filter.status);
-      if (search) params.append('search', search);
-
-      const res = await fetch(`${API_URL}/api/users?${params}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
+      let url = `${API_URL}/api/users?page=${page}&limit=15`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (filterLevel !== '') url += `&access_level=${filterLevel}`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users);
-        setTotalPages(data.pages);
-        setTotalUsers(data.total);
+        const d = await res.json();
+        setUsers(d.users);
+        setTotal(d.total);
+        setPages(d.pages);
       }
-    } catch (error) {
-      toast.error('Erro ao carregar usuários');
-    } finally {
-      setLoading(false);
-    }
+    } catch {} finally { setLoading(false); }
   };
 
-  const fetchSupervisors = async () => {
+  const openCreate = () => {
+    setEditUser(null);
+    setForm({ name: '', email: '', password: '', phone: '', cpf: '', access_level: 4, state: '', ddd: '', city: '', status: 'active', franchise_value: 0, annual_revenue: 0 });
+    setShowModal(true);
+  };
+
+  const openEdit = (u) => {
+    setEditUser(u);
+    setForm({
+      name: u.name || '', email: u.email || '', password: '', phone: u.phone || '', cpf: u.cpf || '',
+      access_level: u.access_level, state: u.state || '', ddd: u.ddd || '', city: u.city || '',
+      status: u.status || 'active', franchise_value: u.franchise_value || 0, annual_revenue: u.annual_revenue || 0,
+    });
+    if (u.state) fetchDDDs(u.state);
+    setShowModal(true);
+  };
+
+  const handleSave = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/supervisors`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        setSupervisors(data.supervisors || []);
+      if (editUser) {
+        const body = { ...form };
+        if (!body.password) delete body.password;
+        body.access_level = parseInt(body.access_level);
+        body.franchise_value = parseFloat(body.franchise_value) || 0;
+        body.annual_revenue = parseFloat(body.annual_revenue) || 0;
+        await fetch(`${API_URL}/api/users/${editUser.user_id}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        await fetch(`${API_URL}/api/users/create`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...form, access_level: parseInt(form.access_level) }),
+        });
       }
-    } catch (error) {
-      console.error('Error fetching supervisors:', error);
-    }
+      setShowModal(false);
+      fetchUsers();
+    } catch {}
   };
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    setPage(1);
+  const handleDelete = async (uid) => {
+    if (!window.confirm('Deseja desativar este usuario?')) return;
+    await fetch(`${API_URL}/api/users/${uid}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
     fetchUsers();
   };
 
-  const openCreateModal = () => {
-    setEditingUser(null);
-    setFormData({
-      name: '',
-      email: '',
-      phone: '',
-      password: '',
-      access_level: 5,
-      status: 'active',
-      cpf: '',
-      available_balance: 0,
-      blocked_balance: 0,
-      points: 0,
-      supervisor_id: ''
-    });
-    setShowModal(true);
-  };
-
-  const openEditModal = (user) => {
-    setEditingUser(user);
-    setFormData({
-      name: user.name || '',
-      email: user.email || '',
-      phone: user.phone || '',
-      password: '',
-      access_level: user.access_level,
-      status: user.status || 'active',
-      cpf: user.cpf || '',
-      available_balance: user.available_balance || 0,
-      blocked_balance: user.blocked_balance || 0,
-      points: user.points || 0,
-      supervisor_id: user.supervisor_id || ''
-    });
-    setShowModal(true);
-  };
-
-  const closeModal = () => {
-    setShowModal(false);
-    setEditingUser(null);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    try {
-      if (editingUser) {
-        // Update user
-        const updateData = { ...formData };
-        if (!updateData.password) delete updateData.password;
-        
-        const res = await fetch(`${API_URL}/api/users/${editingUser.user_id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(updateData)
-        });
-
-        if (res.ok) {
-          toast.success('Usuário atualizado com sucesso!');
-          fetchUsers();
-          closeModal();
-        } else {
-          const error = await res.json();
-          toast.error(error.detail || 'Erro ao atualizar usuário');
-        }
-      } else {
-        // Create user
-        if (!formData.password) {
-          toast.error('Senha é obrigatória para novo usuário');
-          return;
-        }
-        
-        const res = await fetch(`${API_URL}/api/auth/register`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(formData)
-        });
-
-        if (res.ok) {
-          toast.success('Usuário criado com sucesso!');
-          fetchUsers();
-          closeModal();
-        } else {
-          const error = await res.json();
-          toast.error(error.detail || 'Erro ao criar usuário');
-        }
-      }
-    } catch (error) {
-      toast.error('Erro ao salvar usuário');
-    }
-  };
-
-  const handleStatusChange = async (userId, newStatus) => {
-    try {
-      const res = await fetch(`${API_URL}/api/users/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ status: newStatus })
-      });
-
-      if (res.ok) {
-        toast.success(`Usuário ${newStatus === 'active' ? 'ativado' : 'suspenso'}!`);
-        fetchUsers();
-      }
-    } catch (error) {
-      toast.error('Erro ao alterar status');
-    }
-  };
-
-  const getStatusBadge = (status) => {
-    const styles = {
-      active: 'bg-emerald-100 text-emerald-700',
-      suspended: 'bg-amber-100 text-amber-700',
-      cancelled: 'bg-red-100 text-red-700'
-    };
-    const labels = {
-      active: 'Ativo',
-      suspended: 'Suspenso',
-      cancelled: 'Cancelado'
-    };
-    return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${styles[status] || styles.active}`}>
-        {labels[status] || status}
-      </span>
-    );
-  };
-
-  const getRoleBadge = (level) => {
+  const levelBadge = (lvl) => {
     const colors = {
       0: 'bg-red-100 text-red-700',
-      1: 'bg-purple-100 text-purple-700',
-      2: 'bg-blue-100 text-blue-700',
-      3: 'bg-indigo-100 text-indigo-700',
-      4: 'bg-emerald-100 text-emerald-700',
-      5: 'bg-slate-100 text-slate-700',
-      6: 'bg-amber-100 text-amber-700'
+      1: 'bg-blue-100 text-blue-700',
+      2: 'bg-emerald-100 text-emerald-700',
+      3: 'bg-violet-100 text-violet-700',
+      4: 'bg-amber-100 text-amber-700',
+      5: 'bg-slate-100 text-slate-600',
+      6: 'bg-pink-100 text-pink-700',
     };
     return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${colors[level] || colors[5]}`}>
-        {ACCESS_LEVELS[level]?.name || 'Usuário'}
+      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${colors[lvl] || 'bg-gray-100'}`}>
+        {LEVEL_NAMES[lvl] || lvl}
       </span>
     );
   };
 
   return (
-    <AppLayout title="Usuários" subtitle="Gerencie todos os usuários do sistema">
-      <div className="space-y-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard icon={Users} label="Total de Usuários" value={totalUsers} color="blue" />
-          <StatCard icon={CheckCircle} label="Ativos" value={users.filter(u => u.status === 'active').length} color="green" />
-          <StatCard icon={XCircle} label="Suspensos" value={users.filter(u => u.status === 'suspended').length} color="amber" />
-          <StatCard icon={Shield} label="Admins" value={users.filter(u => u.access_level <= 1).length} color="purple" />
-        </div>
-
+    <AppLayout title="Usuarios" subtitle={`${total} registros`}>
+      <div className="space-y-4 fade-in">
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <form onSubmit={handleSearch} className="flex-1 flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar por nome ou email..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full h-10 pl-10 pr-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-main focus:border-brand-main"
-                />
-              </div>
-              <button type="submit" className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors">
-                Buscar
-              </button>
-            </form>
-
-            <div className="flex gap-2">
-              <select
-                value={filter.access_level}
-                onChange={(e) => setFilter({ ...filter, access_level: e.target.value })}
-                className="h-10 px-3 border border-slate-200 rounded-lg bg-white"
-              >
-                <option value="">Todos os níveis</option>
-                {Object.entries(ACCESS_LEVELS).map(([level, info]) => (
-                  <option key={level} value={level}>{info.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={filter.status}
-                onChange={(e) => setFilter({ ...filter, status: e.target.value })}
-                className="h-10 px-3 border border-slate-200 rounded-lg bg-white"
-              >
-                <option value="">Todos os status</option>
-                <option value="active">Ativos</option>
-                <option value="suspended">Suspensos</option>
-                <option value="cancelled">Cancelados</option>
-              </select>
-
-              <button
-                onClick={openCreateModal}
-                className="flex items-center gap-2 px-4 py-2 bg-brand-main text-white rounded-lg hover:bg-blue-700 transition-colors"
-                data-testid="create-user-btn"
-              >
-                <UserPlus className="w-4 h-4" />
-                Novo Usuário
-              </button>
-            </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-txt-secondary" />
+            <input
+              type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Buscar por nome ou email..."
+              className="w-full pl-9 pr-3 py-2.5 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-main"
+              data-testid="users-search"
+            />
           </div>
+          <select
+            value={filterLevel} onChange={e => { setFilterLevel(e.target.value); setPage(1); }}
+            className="px-3 py-2.5 border border-border rounded-md text-sm bg-white"
+            data-testid="users-level-filter"
+          >
+            <option value="">Todos os Niveis</option>
+            {Object.entries(LEVEL_NAMES).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          {accessLevel <= 2 && (
+            <button
+              onClick={openCreate}
+              className="flex items-center gap-2 px-4 py-2.5 bg-brand-main text-white rounded-md text-sm font-semibold hover:bg-brand-hover transition-all"
+              data-testid="create-user-btn"
+            >
+              <Plus className="w-4 h-4" /> Novo Usuario
+            </button>
+          )}
         </div>
 
-        {/* Users Table */}
-        <DashCard noPadding>
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="w-8 h-8 border-4 border-brand-main border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : users.length === 0 ? (
-            <div className="text-center py-12">
-              <Users className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <p className="text-slate-500">Nenhum usuário encontrado</p>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50">
-                      <th className="text-left p-4 font-medium text-slate-600 text-sm">Usuário</th>
-                      <th className="text-left p-4 font-medium text-slate-600 text-sm">Nível</th>
-                      <th className="text-left p-4 font-medium text-slate-600 text-sm">Status</th>
-                      <th className="text-left p-4 font-medium text-slate-600 text-sm">Saldo</th>
-                      <th className="text-left p-4 font-medium text-slate-600 text-sm">Cadastro</th>
-                      <th className="text-right p-4 font-medium text-slate-600 text-sm">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map((user) => (
-                      <tr key={user.user_id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-brand-main/10 flex items-center justify-center">
-                              <span className="text-brand-main font-bold">
-                                {user.name?.charAt(0)?.toUpperCase() || '?'}
-                              </span>
-                            </div>
-                            <div>
-                              <p className="font-medium text-slate-900">{user.name}</p>
-                              <p className="text-sm text-slate-500">{user.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-4">{getRoleBadge(user.access_level)}</td>
-                        <td className="p-4">{getStatusBadge(user.status)}</td>
-                        <td className="p-4">
-                          <p className="font-medium text-slate-900">{formatCurrency(user.available_balance || 0)}</p>
-                          <p className="text-xs text-slate-500">Bloq: {formatCurrency(user.blocked_balance || 0)}</p>
-                        </td>
-                        <td className="p-4 text-sm text-slate-600">{formatDate(user.created_at)}</td>
-                        <td className="p-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => openEditModal(user)}
-                              className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                              title="Editar"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            {user.status === 'active' ? (
-                              <button
-                                onClick={() => handleStatusChange(user.user_id, 'suspended')}
-                                className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                                title="Suspender"
-                              >
-                                <XCircle className="w-4 h-4" />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleStatusChange(user.user_id, 'active')}
-                                className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                                title="Ativar"
-                              >
-                                <CheckCircle className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {/* Table */}
+        <div className="bg-white border border-border rounded-md overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-bg-secondary">
+                  <th className="text-left px-4 py-3 font-semibold text-txt-secondary text-xs uppercase tracking-wide">Nome</th>
+                  <th className="text-left px-4 py-3 font-semibold text-txt-secondary text-xs uppercase tracking-wide">Email</th>
+                  <th className="text-left px-4 py-3 font-semibold text-txt-secondary text-xs uppercase tracking-wide">Nivel</th>
+                  <th className="text-left px-4 py-3 font-semibold text-txt-secondary text-xs uppercase tracking-wide">Estado</th>
+                  <th className="text-left px-4 py-3 font-semibold text-txt-secondary text-xs uppercase tracking-wide">Status</th>
+                  <th className="text-right px-4 py-3 font-semibold text-txt-secondary text-xs uppercase tracking-wide">Acoes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={6} className="text-center py-12 text-txt-secondary">Carregando...</td></tr>
+                ) : users.length === 0 ? (
+                  <tr><td colSpan={6} className="text-center py-12 text-txt-secondary">Nenhum usuario encontrado</td></tr>
+                ) : users.map(u => (
+                  <tr key={u.user_id} className="border-b border-border hover:bg-bg-secondary/50 transition-colors" data-testid={`user-row-${u.user_id}`}>
+                    <td className="px-4 py-3 font-medium text-txt-primary">{u.name}</td>
+                    <td className="px-4 py-3 text-txt-secondary">{u.email}</td>
+                    <td className="px-4 py-3">{levelBadge(u.access_level)}</td>
+                    <td className="px-4 py-3 text-txt-secondary">{u.state || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${u.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                        {u.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEdit(u)} className="p-1.5 hover:bg-bg-secondary rounded-md" data-testid={`edit-user-${u.user_id}`}>
+                          <Edit2 className="w-4 h-4 text-txt-secondary" />
+                        </button>
+                        {accessLevel === 0 && (
+                          <button onClick={() => handleDelete(u.user_id)} className="p-1.5 hover:bg-red-50 rounded-md" data-testid={`delete-user-${u.user_id}`}>
+                            <Trash2 className="w-4 h-4 text-accent-red" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {pages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+              <span className="text-xs text-txt-secondary">Pagina {page} de {pages}</span>
+              <div className="flex gap-1">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-1.5 rounded-md hover:bg-bg-secondary disabled:opacity-30">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button onClick={() => setPage(p => Math.min(pages, p + 1))} disabled={page === pages} className="p-1.5 rounded-md hover:bg-bg-secondary disabled:opacity-30">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
-
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between p-4 border-t border-slate-100">
-                  <p className="text-sm text-slate-600">
-                    Página {page} de {totalPages}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                      className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50 transition-colors"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                      disabled={page === totalPages}
-                      className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50 transition-colors"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
+            </div>
           )}
-        </DashCard>
-      </div>
+        </div>
 
-      {/* Create/Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-2xl my-8 shadow-2xl">
-            <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h2 className="font-heading font-bold text-xl text-slate-900">
-                {editingUser ? 'Editar Usuário' : 'Novo Usuário'}
-              </h2>
-              <button onClick={closeModal} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Nome Completo *"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                />
-                
-                <Input
-                  label="Email *"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                />
+        {/* Modal */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" data-testid="user-modal">
+            <div className="bg-white rounded-md border border-border w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+                <h3 className="font-heading font-bold text-lg">{editUser ? 'Editar Usuario' : 'Novo Usuario'}</h3>
+                <button onClick={() => setShowModal(false)} className="p-1 hover:bg-bg-secondary rounded-md">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Telefone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="(00) 00000-0000"
-                />
-                
-                <Input
-                  label="CPF"
-                  value={formData.cpf}
-                  onChange={(e) => setFormData({ ...formData, cpf: e.target.value })}
-                  placeholder="000.000.000-00"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label={editingUser ? "Nova Senha (deixe vazio para manter)" : "Senha *"}
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  required={!editingUser}
-                />
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Nível de Acesso *</label>
-                  <select
-                    value={formData.access_level}
-                    onChange={(e) => setFormData({ ...formData, access_level: parseInt(e.target.value) })}
-                    className="w-full h-10 px-3 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-brand-main"
-                    required
-                  >
-                    {Object.entries(ACCESS_LEVELS).map(([level, info]) => (
-                      <option key={level} value={level}>{info.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    className="w-full h-10 px-3 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-brand-main"
-                  >
-                    <option value="active">Ativo</option>
-                    <option value="suspended">Suspenso</option>
-                    <option value="cancelled">Cancelado</option>
-                  </select>
-                </div>
-                
-                <Input
-                  label="Pontos"
-                  type="number"
-                  value={formData.points}
-                  onChange={(e) => setFormData({ ...formData, points: parseInt(e.target.value) || 0 })}
-                />
-              </div>
-
-              {/* Supervisor - Only for Resellers/Leaders */}
-              {(formData.access_level === 3 || formData.access_level === 4) && (
-                <div className="grid grid-cols-1 gap-4">
+              <div className="p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Nome</label>
+                    <input value={form.name} onChange={e => setForm({...form, name: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="user-form-name" />
+                  </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      <UserCog className="w-4 h-4 inline-block mr-1" />
-                      Supervisor Responsável
-                    </label>
-                    <select
-                      value={formData.supervisor_id}
-                      onChange={(e) => setFormData({ ...formData, supervisor_id: e.target.value })}
-                      className="w-full h-10 px-3 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-brand-main"
-                    >
-                      <option value="">Nenhum supervisor atribuído</option>
-                      {supervisors.map((sup) => (
-                        <option key={sup.user_id} value={sup.user_id}>
-                          {sup.name} ({sup.email})
-                        </option>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Email</label>
+                    <input value={form.email} onChange={e => setForm({...form, email: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="user-form-email" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Senha {editUser && '(vazio = manter)'}</label>
+                    <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="user-form-password" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Telefone</label>
+                    <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">CPF</label>
+                    <input value={form.cpf} onChange={e => setForm({...form, cpf: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Nivel</label>
+                    <select value={form.access_level} onChange={e => setForm({...form, access_level: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm bg-white" data-testid="user-form-level">
+                      {Object.entries(LEVEL_NAMES).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
                       ))}
                     </select>
-                    <p className="text-xs text-slate-500 mt-1">
-                      O supervisor terá acesso aos dados deste revendedor/líder
-                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Status</label>
+                    <select value={form.status} onChange={e => setForm({...form, status: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm bg-white">
+                      <option value="active">Ativo</option>
+                      <option value="suspended">Suspenso</option>
+                      <option value="cancelled">Cancelado</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Estado</label>
+                    <select value={form.state} onChange={e => { setForm({...form, state: e.target.value, ddd: ''}); fetchDDDs(e.target.value); }}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm bg-white" data-testid="user-form-state">
+                      <option value="">Selecione</option>
+                      {states.map(s => <option key={s.uf} value={s.uf}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">DDD</label>
+                    <select value={form.ddd} onChange={e => setForm({...form, ddd: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm bg-white" data-testid="user-form-ddd">
+                      <option value="">Selecione</option>
+                      {ddds.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Cidade</label>
+                    <input value={form.city} onChange={e => setForm({...form, city: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="user-form-city" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Valor Franquia (R$)</label>
+                    <input type="number" value={form.franchise_value} onChange={e => setForm({...form, franchise_value: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Receita Anual (R$)</label>
+                    <input type="number" value={form.annual_revenue} onChange={e => setForm({...form, annual_revenue: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" />
                   </div>
                 </div>
-              )}
-
-              {editingUser && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
-                  <Input
-                    label="Saldo Disponível (R$)"
-                    type="number"
-                    step="0.01"
-                    value={formData.available_balance}
-                    onChange={(e) => setFormData({ ...formData, available_balance: parseFloat(e.target.value) || 0 })}
-                  />
-                  
-                  <Input
-                    label="Saldo Bloqueado (R$)"
-                    type="number"
-                    step="0.01"
-                    value={formData.blocked_balance}
-                    onChange={(e) => setFormData({ ...formData, blocked_balance: parseFloat(e.target.value) || 0 })}
-                  />
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-4">
-                <button 
-                  type="button" 
-                  onClick={closeModal} 
-                  className="flex-1 px-5 py-2.5 border border-slate-200 text-slate-700 font-medium rounded-xl hover:bg-slate-50 transition-colors"
-                >
+              </div>
+              <div className="flex justify-end gap-3 px-5 py-3.5 border-t border-border">
+                <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-txt-secondary hover:bg-bg-secondary rounded-md">
                   Cancelar
                 </button>
-                <button 
-                  type="submit" 
-                  className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 bg-brand-main text-white font-medium rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
-                >
-                  <Save className="w-4 h-4" />
-                  {editingUser ? 'Salvar Alterações' : 'Criar Usuário'}
+                <button onClick={handleSave} className="px-4 py-2 bg-brand-main text-white text-sm font-semibold rounded-md hover:bg-brand-hover" data-testid="save-user-btn">
+                  Salvar
                 </button>
               </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </AppLayout>
   );
 }

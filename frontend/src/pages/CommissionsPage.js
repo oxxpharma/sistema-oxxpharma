@@ -1,356 +1,122 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import AppLayout, { StatCard, DashCard } from '../components/layout/AppLayout';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
+import AppLayout, { DashCard, StatCard } from '../components/layout/AppLayout';
+import { DollarSign, Clock, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { toast } from '../components/ui/toast';
-import { 
-  DollarSign, TrendingUp, Clock, CheckCircle, 
-  RefreshCw, ArrowUpRight, ArrowDownRight, Filter,
-  ChevronLeft, ChevronRight, Calendar, Layers
-} from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function CommissionsPage() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [commissions, setCommissions] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [statusFilter, setStatusFilter] = useState('');
-  const limit = 15;
+  const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchCommissions();
-    fetchSummary();
-  }, [page, statusFilter]);
+  useEffect(() => { fetchData(); }, [page, filter]);
 
-  const fetchCommissions = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit });
-      if (statusFilter) params.append('status', statusFilter);
-      
-      const res = await fetch(`${API_URL}/api/commissions?${params}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        setCommissions(data.commissions || []);
-        setTotal(data.total || 0);
-      }
-    } catch (error) {
-      toast.error('Erro ao carregar comissões');
-    } finally {
-      setLoading(false);
-    }
+      let url = `${API_URL}/api/commissions?page=${page}&limit=20`;
+      if (filter) url += `&status=${filter}`;
+      const [cRes, sRes] = await Promise.all([
+        fetch(url, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/commissions/summary`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      ]);
+      if (cRes.ok) { const d = await cRes.json(); setCommissions(d.commissions); setTotal(d.total); }
+      if (sRes.ok) setSummary(await sRes.json());
+    } catch {} finally { setLoading(false); }
   };
 
-  const fetchSummary = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/commissions/summary`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        setSummary(data);
-      }
-    } catch (error) {
-      console.error('Error fetching summary:', error);
-    }
-  };
+  const genLabel = (g) => g === 0 ? 'Nacional' : `${g}a Geracao`;
 
-  const getStatusBadge = (status) => {
-    const styles = {
-      blocked: { variant: 'warning', label: 'Bloqueado', icon: Clock },
-      available: { variant: 'success', label: 'Disponível', icon: CheckCircle },
-      reversed: { variant: 'destructive', label: 'Estornado', icon: RefreshCw },
-      paid: { variant: 'default', label: 'Pago', icon: CheckCircle }
-    };
-    
-    const style = styles[status] || { variant: 'secondary', label: status, icon: Clock };
-    const Icon = style.icon;
-    
-    return (
-      <Badge variant={style.variant} className="gap-1">
-        <Icon className="w-3 h-3" />
-        {style.label}
-      </Badge>
-    );
-  };
-
-  const getLevelLabel = (level) => {
-    if (level === 0) return 'Indicação Direta';
-    return `${level}º Nível`;
-  };
-
-  const getLevelColor = (level) => {
+  const statusBadge = (s) => {
     const colors = {
-      0: 'text-emerald-600 bg-emerald-50',
-      1: 'text-blue-600 bg-blue-50',
-      2: 'text-purple-600 bg-purple-50',
-      3: 'text-amber-600 bg-amber-50'
+      blocked: 'bg-amber-100 text-amber-700',
+      available: 'bg-green-100 text-green-700',
+      reversed: 'bg-red-100 text-red-600',
     };
-    return colors[level] || 'text-slate-600 bg-slate-50';
+    const labels = { blocked: 'Bloqueado', available: 'Disponivel', reversed: 'Estornado' };
+    return <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${colors[s] || 'bg-gray-100'}`}>{labels[s] || s}</span>;
   };
-
-  const totalPages = Math.ceil(total / limit);
-
-  const statsCards = [
-    {
-      title: 'Total Disponível',
-      value: formatCurrency(summary?.available_balance || 0),
-      icon: DollarSign,
-      color: 'green'
-    },
-    {
-      title: 'Total Bloqueado',
-      value: formatCurrency(summary?.blocked_balance || 0),
-      icon: Clock,
-      color: 'amber'
-    },
-    {
-      title: 'Este Mês',
-      value: formatCurrency(summary?.this_month || 0),
-      icon: Calendar,
-      color: 'blue'
-    },
-    {
-      title: 'Total de Transações',
-      value: total,
-      icon: Layers,
-      color: 'purple'
-    }
-  ];
 
   return (
-    <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Minhas Comissões</h1>
-            <p className="text-slate-500 mt-1">Acompanhe seus ganhos da rede MLM</p>
+    <AppLayout title="Comissoes" subtitle="Acompanhe suas comissoes">
+      <div className="space-y-6 fade-in">
+        {summary && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <StatCard icon={DollarSign} label="Este Mes" value={formatCurrency(summary.this_month)} color="blue" />
+            <StatCard icon={TrendingUp} label="Disponivel" value={formatCurrency(summary.available_balance)} color="green" />
+            <StatCard icon={Clock} label="Bloqueado" value={formatCurrency(summary.blocked_balance)} color="amber" />
           </div>
-          <Button 
-            variant="outline" 
-            onClick={() => { fetchCommissions(); fetchSummary(); }}
-            disabled={loading}
-            className="gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Atualizar
-          </Button>
-        </div>
+        )}
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {statsCards.map((stat, index) => (
-            <StatCard
-              key={index}
-              label={stat.title}
-              value={stat.value}
-              icon={stat.icon}
-              color={stat.color}
-            />
-          ))}
-        </div>
-
-        {/* Commission by Level */}
-        {summary?.by_level && Object.keys(summary.by_level).length > 0 && (
-          <DashCard title="Comissões por Nível" icon={Layers}>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {Object.entries(summary.by_level).map(([level, data]) => (
-                <div 
-                  key={level} 
-                  className={`p-4 rounded-xl ${getLevelColor(parseInt(level))}`}
-                >
-                  <p className="text-sm font-medium opacity-80">
-                    {getLevelLabel(parseInt(level))}
-                  </p>
-                  <p className="text-xl font-bold mt-1">
-                    {formatCurrency(data.total)}
-                  </p>
-                  <p className="text-xs opacity-60 mt-1">
-                    {data.count} {data.count === 1 ? 'comissão' : 'comissões'}
-                  </p>
+        {summary?.by_generation && Object.keys(summary.by_generation).length > 0 && (
+          <DashCard title="Comissoes por Geracao">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {Object.entries(summary.by_generation).map(([gen, data]) => (
+                <div key={gen} className="px-3 py-2 bg-bg-secondary rounded-md border border-border text-center">
+                  <p className="text-[11px] text-txt-secondary font-medium">{genLabel(parseInt(gen))}</p>
+                  <p className="text-sm font-heading font-bold text-brand-main mt-0.5">{formatCurrency(data.total)}</p>
+                  <p className="text-[10px] text-txt-secondary">{data.count} vendas</p>
                 </div>
               ))}
             </div>
           </DashCard>
         )}
 
-        {/* Filters */}
-        <div className="flex items-center gap-3">
-          <Filter className="w-4 h-4 text-slate-400" />
-          <div className="flex gap-2">
-            {[
-              { value: '', label: 'Todas' },
-              { value: 'blocked', label: 'Bloqueadas' },
-              { value: 'available', label: 'Disponíveis' },
-              { value: 'reversed', label: 'Estornadas' }
-            ].map(filter => (
-              <Button
-                key={filter.value}
-                variant={statusFilter === filter.value ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => { setStatusFilter(filter.value); setPage(1); }}
-              >
-                {filter.label}
-              </Button>
-            ))}
+        <DashCard title="Historico" action={
+          <select value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }}
+            className="text-xs border border-border rounded-md px-2 py-1 bg-white" data-testid="commission-filter">
+            <option value="">Todos</option>
+            <option value="blocked">Bloqueados</option>
+            <option value="available">Disponiveis</option>
+            <option value="reversed">Estornados</option>
+          </select>
+        } noPadding>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-bg-secondary">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-txt-secondary uppercase">Pedido</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-txt-secondary uppercase">Geracao</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-txt-secondary uppercase">Taxa</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-txt-secondary uppercase">Valor</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-txt-secondary uppercase">Status</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-txt-secondary uppercase">Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={6} className="text-center py-8 text-txt-secondary">Carregando...</td></tr>
+                ) : commissions.length === 0 ? (
+                  <tr><td colSpan={6} className="text-center py-8 text-txt-secondary">Nenhuma comissao</td></tr>
+                ) : commissions.map(c => (
+                  <tr key={c.commission_id} className="border-b border-border hover:bg-bg-secondary/50">
+                    <td className="px-4 py-2.5 font-mono text-xs text-txt-secondary">{c.order_id}</td>
+                    <td className="px-4 py-2.5">{genLabel(c.generation)}</td>
+                    <td className="px-4 py-2.5 text-txt-secondary">{c.rate}%</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-brand-main">{formatCurrency(c.amount)}</td>
+                    <td className="px-4 py-2.5">{statusBadge(c.status)}</td>
+                    <td className="px-4 py-2.5 text-xs text-txt-secondary">{formatDate(c.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-
-        {/* Commissions Table */}
-        <DashCard 
-          title="Histórico de Comissões" 
-          icon={TrendingUp}
-        >
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <RefreshCw className="w-8 h-8 animate-spin text-brand-main" />
-            </div>
-          ) : commissions.length === 0 ? (
-            <div className="text-center py-12">
-              <DollarSign className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500">Nenhuma comissão encontrada</p>
-              <p className="text-sm text-slate-400 mt-1">
-                Suas comissões aparecerão aqui quando sua rede fizer vendas
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Data
-                      </th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Pedido
-                      </th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Nível
-                      </th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Taxa
-                      </th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Base
-                      </th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Valor
-                      </th>
-                      <th className="text-center py-3 px-4 text-xs font-semibold text-slate-500 uppercase">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {commissions.map((commission) => (
-                      <tr 
-                        key={commission.commission_id} 
-                        className="border-b border-slate-50 hover:bg-slate-25 transition-colors"
-                      >
-                        <td className="py-4 px-4">
-                          <span className="text-sm text-slate-600">
-                            {formatDate(commission.created_at)}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="text-sm font-mono text-slate-500">
-                            {commission.order_id?.slice(0, 12)}...
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getLevelColor(commission.level)}`}>
-                            {getLevelLabel(commission.level)}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="text-sm font-medium text-slate-700">
-                            {commission.rate}%
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <span className="text-sm text-slate-500">
-                            {formatCurrency(commission.base_amount)}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <span className="text-sm font-semibold text-emerald-600">
-                            +{formatCurrency(commission.amount)}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-center">
-                          {getStatusBadge(commission.status)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {total > 20 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+              <span className="text-xs text-txt-secondary">Pagina {page}</span>
+              <div className="flex gap-1">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="p-1.5 rounded-md hover:bg-bg-secondary disabled:opacity-30"><ChevronLeft className="w-4 h-4" /></button>
+                <button onClick={() => setPage(p => p + 1)} disabled={commissions.length < 20} className="p-1.5 rounded-md hover:bg-bg-secondary disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
               </div>
-
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                  <p className="text-sm text-slate-500">
-                    Mostrando {((page - 1) * limit) + 1} - {Math.min(page * limit, total)} de {total}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </Button>
-                    <span className="flex items-center px-3 text-sm text-slate-600">
-                      {page} / {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                      disabled={page === totalPages}
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </>
+            </div>
           )}
         </DashCard>
-
-        {/* Info Card */}
-        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-100">
-          <CardContent className="pt-6">
-            <div className="flex gap-4">
-              <div className="p-3 rounded-xl bg-blue-100">
-                <Clock className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-800">Como funcionam as comissões?</h3>
-                <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                  <li>• Comissões ficam <strong>bloqueadas por 7 dias</strong> após o pagamento do pedido</li>
-                  <li>• Após esse período, o valor é liberado para sua carteira</li>
-                  <li>• Se o pedido for cancelado em até 7 dias, a comissão é estornada</li>
-                  <li>• Você recebe comissão de até <strong>3 níveis</strong> da sua rede (10%, 5%, 5%)</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </AppLayout>
   );

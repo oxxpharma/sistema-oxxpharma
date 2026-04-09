@@ -1,481 +1,210 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import AppLayout, { StatCard, DashCard } from '../components/layout/AppLayout';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Input, Textarea, Select } from '../components/ui/Input';
-import { Badge } from '../components/ui/Badge';
+import AppLayout, { DashCard } from '../components/layout/AppLayout';
+import { Plus, Edit2, Trash2, X, Search, Package } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
-import { toast } from '../components/ui/toast';
-import { 
-  Plus, Edit, Trash2, Package, Search, Image,
-  ChevronLeft, ChevronRight
-} from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+const PLACEHOLDER_IMG = 'https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/6815fa61cc87672743238a27b5dfa9219f796815878c776f3f29d10b600f2040.png';
 
 export default function ProductsPage() {
   const { token } = useAuth();
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    price: '',
-    discount_price: '',
-    category: '',
-    stock: '',
-    weight: '',
-    dimensions: { width: '', height: '', length: '' },
-    images: [''],
-    active: true
+  const [editProd, setEditProd] = useState(null);
+  const [form, setForm] = useState({
+    name: '', description: '', price: '', discount_price: '',
+    category: '', stock: '', images: [], active: true,
   });
 
-  useEffect(() => {
-    fetchProducts();
-    fetchCategories();
-  }, [page, selectedCategory]);
+  useEffect(() => { fetchProducts(); }, [page, search]);
 
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: 12 });
-      if (selectedCategory) params.append('category', selectedCategory);
-      if (search) params.append('search', search);
-
-      const res = await fetch(`${API_URL}/api/products?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data.products);
-        setTotalPages(data.pages);
-      }
-    } catch (error) {
-      toast.error('Erro ao carregar produtos');
-    } finally {
-      setLoading(false);
-    }
+      let url = `${API_URL}/api/products?page=${page}&limit=12&active=`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) { const d = await res.json(); setProducts(d.products); setTotal(d.total); }
+    } catch {} finally { setLoading(false); }
   };
 
-  const fetchCategories = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/categories`);
-      if (res.ok) {
-        const data = await res.json();
-        setCategories(data.categories);
-      }
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-    }
+  const openCreate = () => {
+    setEditProd(null);
+    setForm({ name: '', description: '', price: '', discount_price: '', category: '', stock: '', images: [], active: true });
+    setShowModal(true);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    const productData = {
-      ...formData,
-      price: parseFloat(formData.price),
-      discount_price: formData.discount_price ? parseFloat(formData.discount_price) : null,
-      stock: parseInt(formData.stock) || 0,
-      weight: formData.weight ? parseFloat(formData.weight) : null,
-      dimensions: formData.dimensions.width ? formData.dimensions : null,
-      images: formData.images.filter(img => img.trim())
-    };
-
-    try {
-      const url = editingProduct 
-        ? `${API_URL}/api/products/${editingProduct.product_id}`
-        : `${API_URL}/api/products`;
-      
-      const res = await fetch(url, {
-        method: editingProduct ? 'PUT' : 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(productData)
-      });
-
-      if (res.ok) {
-        toast.success(editingProduct ? 'Produto atualizado!' : 'Produto criado!');
-        setShowModal(false);
-        resetForm();
-        fetchProducts();
-      } else {
-        const error = await res.json();
-        toast.error(error.detail || 'Erro ao salvar produto');
-      }
-    } catch (error) {
-      toast.error('Erro ao salvar produto');
-    }
-  };
-
-  const handleDelete = async (productId) => {
-    if (!window.confirm('Tem certeza que deseja excluir este produto?')) return;
-
-    try {
-      const res = await fetch(`${API_URL}/api/products/${productId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (res.ok) {
-        toast.success('Produto excluído!');
-        fetchProducts();
-      }
-    } catch (error) {
-      toast.error('Erro ao excluir produto');
-    }
-  };
-
-  const openEditModal = (product) => {
-    setEditingProduct(product);
-    setFormData({
-      name: product.name,
-      description: product.description,
-      price: product.price.toString(),
-      discount_price: product.discount_price?.toString() || '',
-      category: product.category,
-      stock: product.stock.toString(),
-      weight: product.weight?.toString() || '',
-      dimensions: product.dimensions || { width: '', height: '', length: '' },
-      images: product.images?.length ? product.images : [''],
-      active: product.active
+  const openEdit = (p) => {
+    setEditProd(p);
+    setForm({
+      name: p.name, description: p.description, price: p.price, discount_price: p.discount_price || '',
+      category: p.category, stock: p.stock, images: p.images || [], active: p.active,
     });
     setShowModal(true);
   };
 
-  const resetForm = () => {
-    setEditingProduct(null);
-    setFormData({
-      name: '',
-      description: '',
-      price: '',
-      discount_price: '',
-      category: '',
-      stock: '',
-      weight: '',
-      dimensions: { width: '', height: '', length: '' },
-      images: [''],
-      active: true
-    });
+  const handleSave = async () => {
+    const body = {
+      ...form,
+      price: parseFloat(form.price) || 0,
+      discount_price: form.discount_price ? parseFloat(form.discount_price) : null,
+      stock: parseInt(form.stock) || 0,
+    };
+    try {
+      if (editProd) {
+        await fetch(`${API_URL}/api/products/${editProd.product_id}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        await fetch(`${API_URL}/api/products`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
+      setShowModal(false);
+      fetchProducts();
+    } catch {}
   };
 
-  const addImageField = () => {
-    setFormData(prev => ({
-      ...prev,
-      images: [...prev.images, '']
-    }));
+  const handleDelete = async (pid) => {
+    if (!window.confirm('Excluir este produto?')) return;
+    await fetch(`${API_URL}/api/products/${pid}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    fetchProducts();
   };
 
   return (
-    <AppLayout title="Produtos" subtitle="Gerencie os produtos da loja">
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="font-heading font-bold text-2xl text-primary-main" data-testid="products-title">
-              Produtos
-            </h1>
-            <p className="text-slate-600">Gerencie o catálogo de produtos</p>
+    <AppLayout title="Produtos" subtitle={`${total} produtos`}>
+      <div className="space-y-4 fade-in">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-txt-secondary" />
+            <input
+              type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Buscar produtos..."
+              className="w-full pl-9 pr-3 py-2.5 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-main"
+              data-testid="products-search"
+            />
           </div>
-          
-          <Button onClick={() => { resetForm(); setShowModal(true); }} data-testid="add-product-btn">
-            <Plus className="w-4 h-4" />
-            Novo Produto
-          </Button>
+          <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2.5 bg-brand-main text-white rounded-md text-sm font-semibold hover:bg-brand-hover" data-testid="create-product-btn">
+            <Plus className="w-4 h-4" /> Novo Produto
+          </button>
         </div>
 
-        {/* Filters */}
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <Input
-                  placeholder="Buscar produtos..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchProducts()}
-                  className="pl-10"
-                />
-              </div>
-              
-              <Select
-                value={selectedCategory}
-                onChange={(e) => { setSelectedCategory(e.target.value); setPage(1); }}
-                className="w-full md:w-48"
-              >
-                <option value="">Todas categorias</option>
-                {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Products Grid */}
         {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="w-8 h-8 border-4 border-primary-main border-t-transparent rounded-full spinner" />
-          </div>
+          <div className="flex justify-center py-20"><div className="w-8 h-8 border-3 border-brand-main border-t-transparent rounded-full spinner" /></div>
         ) : products.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <Package className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <p className="text-slate-500">Nenhum produto encontrado</p>
-            </CardContent>
-          </Card>
+          <DashCard>
+            <div className="text-center py-12">
+              <Package className="w-12 h-12 mx-auto text-border mb-3" />
+              <p className="text-txt-secondary">Nenhum produto cadastrado</p>
+            </div>
+          </DashCard>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {products.map((product) => (
-              <Card key={product.product_id} className="overflow-hidden">
-                <div className="aspect-square bg-slate-100 relative">
-                  {product.images?.[0] ? (
-                    <img 
-                      src={product.images[0]} 
-                      alt={product.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Image className="w-12 h-12 text-slate-300" />
-                    </div>
-                  )}
-                  {!product.active && (
-                    <div className="absolute top-2 left-2">
-                      <Badge variant="error">Inativo</Badge>
-                    </div>
-                  )}
-                  {product.discount_price && (
-                    <div className="absolute top-2 right-2">
-                      <Badge variant="gold">Promoção</Badge>
-                    </div>
-                  )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {products.map(p => (
+              <div key={p.product_id} className="bg-white border border-border rounded-md overflow-hidden hover:-translate-y-0.5 hover:shadow-sm transition-all" data-testid={`product-card-${p.product_id}`}>
+                <div className="h-40 bg-bg-secondary flex items-center justify-center overflow-hidden">
+                  <img src={p.images?.[0] || PLACEHOLDER_IMG} alt={p.name} className="h-full w-full object-cover" />
                 </div>
-                <CardContent className="p-4">
-                  <p className="text-xs text-slate-500 mb-1">{product.category}</p>
-                  <h3 className="font-heading font-bold text-primary-main mb-2 line-clamp-1">
-                    {product.name}
-                  </h3>
-                  <div className="flex items-baseline gap-2 mb-3">
-                    {product.discount_price ? (
-                      <>
-                        <span className="text-lg font-bold text-accent-main">
-                          {formatCurrency(product.discount_price)}
-                        </span>
-                        <span className="text-sm text-slate-400 line-through">
-                          {formatCurrency(product.price)}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-lg font-bold text-primary-main">
-                        {formatCurrency(product.price)}
-                      </span>
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="font-heading font-semibold text-sm text-txt-primary">{p.name}</h4>
+                      <p className="text-xs text-txt-secondary mt-0.5">{p.category}</p>
+                    </div>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${p.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                      {p.active ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex items-baseline gap-2">
+                    <span className="text-lg font-heading font-bold text-brand-main">{formatCurrency(p.price)}</span>
+                    {p.discount_price && (
+                      <span className="text-xs text-txt-secondary line-through">{formatCurrency(p.discount_price)}</span>
                     )}
                   </div>
-                  <p className="text-sm text-slate-500 mb-4">
-                    Estoque: {product.stock} unidades
-                  </p>
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="secondary" 
-                      size="sm" 
-                      className="flex-1"
-                      onClick={() => openEditModal(product)}
-                    >
-                      <Edit className="w-4 h-4" />
-                      Editar
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => handleDelete(product.product_id)}
-                    >
-                      <Trash2 className="w-4 h-4 text-red-500" />
-                    </Button>
+                  <p className="text-xs text-txt-secondary mt-1">Estoque: {p.stock}</p>
+                  <div className="flex gap-1 mt-3 pt-3 border-t border-border">
+                    <button onClick={() => openEdit(p)} className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium text-brand-main hover:bg-brand-light rounded-md" data-testid={`edit-product-${p.product_id}`}>
+                      <Edit2 className="w-3 h-3" /> Editar
+                    </button>
+                    <button onClick={() => handleDelete(p.product_id)} className="flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium text-accent-red hover:bg-red-50 rounded-md" data-testid={`delete-product-${p.product_id}`}>
+                      <Trash2 className="w-3 h-3" /> Excluir
+                    </button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             ))}
           </div>
         )}
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-4">
-            <Button
-              variant="secondary"
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-            >
-              <ChevronLeft className="w-4 h-4" />
-              Anterior
-            </Button>
-            <span className="text-sm text-slate-600">
-              Página {page} de {totalPages}
-            </span>
-            <Button
-              variant="secondary"
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-            >
-              Próximo
-              <ChevronRight className="w-4 h-4" />
-            </Button>
+        {/* Modal */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" data-testid="product-modal">
+            <div className="bg-white rounded-md border border-border w-full max-w-md max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+                <h3 className="font-heading font-bold text-lg">{editProd ? 'Editar Produto' : 'Novo Produto'}</h3>
+                <button onClick={() => setShowModal(false)} className="p-1 hover:bg-bg-secondary rounded-md"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-txt-secondary mb-1">Nome</label>
+                  <input value={form.name} onChange={e => setForm({...form, name: e.target.value})}
+                    className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="product-form-name" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-txt-secondary mb-1">Descricao</label>
+                  <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})}
+                    rows={3} className="w-full px-3 py-2 border border-border rounded-md text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Preco (R$)</label>
+                    <input type="number" value={form.price} onChange={e => setForm({...form, price: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="product-form-price" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Preco Desconto</label>
+                    <input type="number" value={form.discount_price} onChange={e => setForm({...form, discount_price: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Categoria</label>
+                    <input value={form.category} onChange={e => setForm({...form, category: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="product-form-category" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-txt-secondary mb-1">Estoque</label>
+                    <input type="number" value={form.stock} onChange={e => setForm({...form, stock: e.target.value})}
+                      className="w-full px-3 py-2 border border-border rounded-md text-sm" data-testid="product-form-stock" />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={form.active} onChange={e => setForm({...form, active: e.target.checked})}
+                    className="rounded border-border" id="active-check" />
+                  <label htmlFor="active-check" className="text-sm text-txt-primary">Produto ativo</label>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 px-5 py-3.5 border-t border-border">
+                <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-txt-secondary hover:bg-bg-secondary rounded-md">Cancelar</button>
+                <button onClick={handleSave} className="px-4 py-2 bg-brand-main text-white text-sm font-semibold rounded-md hover:bg-brand-hover" data-testid="save-product-btn">Salvar</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
-
-      {/* Product Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl my-8">
-            <h2 className="font-heading font-bold text-xl mb-6">
-              {editingProduct ? 'Editar Produto' : 'Novo Produto'}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Nome do Produto"
-                  value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  required
-                />
-                <Input
-                  label="Categoria"
-                  value={formData.category}
-                  onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                  placeholder="Ex: Saúde, Beleza"
-                  required
-                />
-              </div>
-
-              <Textarea
-                label="Descrição"
-                value={formData.description}
-                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                rows={3}
-                required
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Input
-                  label="Preço (R$)"
-                  type="number"
-                  step="0.01"
-                  value={formData.price}
-                  onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
-                  required
-                />
-                <Input
-                  label="Preço Promocional"
-                  type="number"
-                  step="0.01"
-                  value={formData.discount_price}
-                  onChange={(e) => setFormData(prev => ({ ...prev, discount_price: e.target.value }))}
-                />
-                <Input
-                  label="Estoque"
-                  type="number"
-                  value={formData.stock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, stock: e.target.value }))}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Input
-                  label="Peso (kg)"
-                  type="number"
-                  step="0.01"
-                  value={formData.weight}
-                  onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
-                />
-                <Input
-                  label="Largura (cm)"
-                  type="number"
-                  value={formData.dimensions.width}
-                  onChange={(e) => setFormData(prev => ({ 
-                    ...prev, 
-                    dimensions: { ...prev.dimensions, width: e.target.value }
-                  }))}
-                />
-                <Input
-                  label="Altura (cm)"
-                  type="number"
-                  value={formData.dimensions.height}
-                  onChange={(e) => setFormData(prev => ({ 
-                    ...prev, 
-                    dimensions: { ...prev.dimensions, height: e.target.value }
-                  }))}
-                />
-                <Input
-                  label="Comprimento (cm)"
-                  type="number"
-                  value={formData.dimensions.length}
-                  onChange={(e) => setFormData(prev => ({ 
-                    ...prev, 
-                    dimensions: { ...prev.dimensions, length: e.target.value }
-                  }))}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  URLs das Imagens
-                </label>
-                {formData.images.map((url, idx) => (
-                  <div key={idx} className="flex gap-2 mb-2">
-                    <Input
-                      placeholder="https://..."
-                      value={url}
-                      onChange={(e) => {
-                        const newImages = [...formData.images];
-                        newImages[idx] = e.target.value;
-                        setFormData(prev => ({ ...prev, images: newImages }));
-                      }}
-                    />
-                  </div>
-                ))}
-                <Button type="button" variant="ghost" size="sm" onClick={addImageField}>
-                  <Plus className="w-4 h-4" /> Adicionar imagem
-                </Button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="active"
-                  checked={formData.active}
-                  onChange={(e) => setFormData(prev => ({ ...prev, active: e.target.checked }))}
-                  className="w-4 h-4"
-                />
-                <label htmlFor="active" className="text-sm text-slate-700">Produto ativo</label>
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <Button 
-                  variant="secondary" 
-                  type="button" 
-                  onClick={() => setShowModal(false)} 
-                  className="flex-1"
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit" className="flex-1">
-                  {editingProduct ? 'Atualizar' : 'Criar Produto'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </AppLayout>
   );
 }

@@ -1,82 +1,82 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, ACCESS_LEVELS } from '../../contexts/AuthContext';
-import { 
-  LayoutDashboard, Users, ShoppingBag, Wallet, Settings, 
-  Network, LogOut, Menu, X, Package, FileText, UserCircle, 
-  BarChart3, ClipboardList, Trophy, Target, Link2, Store,
-  ChevronRight, Bell, TrendingUp, DollarSign, ChevronDown, FileSpreadsheet,
-  MessageCircle, Headphones
+import {
+  LayoutDashboard, Users, Package, Wallet, Settings,
+  Network, LogOut, UserCircle, BarChart3, DollarSign,
+  ChevronRight, Store, ShoppingBag, Link2, Building2,
+  MapPin, Globe2
 } from 'lucide-react';
 import { cn, formatCurrency } from '../../lib/utils';
+
+const LOGO_URL = 'https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/11999c45dfa606ad3f30f54326fa63e71a49f9d047fe241b470a9da4e5771ede.png';
 
 const getMenuItems = (accessLevel) => {
   const items = [];
 
-  // Admin Técnico (0) e Admin Geral (1)
+  // Admin (0) e Nacional (1)
   if (accessLevel <= 1) {
-    items.push({ section: 'Principal' });
+    items.push({ section: 'Gestao' });
     items.push({ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' });
-    items.push({ icon: MessageCircle, label: 'Chat', path: '/chat' });
-    items.push({ icon: Headphones, label: 'Suporte', path: '/support' });
-    items.push({ icon: Users, label: 'Usuários', path: '/users' });
-    items.push({ icon: ClipboardList, label: 'Pedidos', path: '/orders' });
-    items.push({ section: 'Análises' });
-    items.push({ icon: BarChart3, label: 'Relatórios', path: '/reports' });
-    items.push({ icon: Trophy, label: 'Ranking', path: '/ranking' });
-    items.push({ icon: Target, label: 'Metas', path: '/goals' });
-    items.push({ section: 'Financeiro' });
-    items.push({ icon: Wallet, label: 'Saques', path: '/withdrawals' });
-    items.push({ icon: FileSpreadsheet, label: 'Relatório de Saques', path: '/withdrawals-report' });
-    items.push({ icon: FileText, label: 'Logs', path: '/logs' });
-    items.push({ section: 'Loja' });
+    items.push({ icon: Users, label: 'Usuarios', path: '/users' });
+    items.push({ icon: Network, label: 'Rede', path: '/network' });
+    items.push({ icon: Building2, label: 'Franquias', path: '/franchises' });
+    items.push({ section: 'Comercial' });
     items.push({ icon: Package, label: 'Produtos', path: '/products' });
+    items.push({ icon: ShoppingBag, label: 'Pedidos', path: '/orders' });
+    items.push({ section: 'Financeiro' });
+    items.push({ icon: DollarSign, label: 'Comissoes', path: '/commissions' });
+    items.push({ icon: Wallet, label: 'Saques', path: '/withdrawals' });
+    items.push({ icon: BarChart3, label: 'Relatorios', path: '/reports' });
   }
 
-  // Admin Técnico (0) only
+  // Admin (0) only
   if (accessLevel === 0) {
     items.push({ section: 'Sistema' });
-    items.push({ icon: Settings, label: 'Configurações', path: '/settings' });
+    items.push({ icon: Settings, label: 'Configuracoes', path: '/settings' });
   }
 
-  // Supervisor (2)
+  // Estadual (2)
   if (accessLevel === 2) {
-    items.push({ section: 'Principal' });
+    items.push({ section: 'Meu Estado' });
     items.push({ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' });
-    items.push({ icon: MessageCircle, label: 'Chat', path: '/chat' });
-    items.push({ icon: Headphones, label: 'Suporte', path: '/support' });
-    items.push({ icon: Users, label: 'Minha Carteira', path: '/my-portfolio' });
-    items.push({ icon: Trophy, label: 'Ranking', path: '/ranking' });
-  }
-
-  // Líder (3) e Revendedor (4)
-  if (accessLevel === 3 || accessLevel === 4) {
-    items.push({ section: 'Principal' });
-    items.push({ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' });
-    items.push({ icon: MessageCircle, label: 'Chat', path: '/chat' });
-    items.push({ icon: Headphones, label: 'Suporte', path: '/support' });
-    items.push({ icon: Network, label: 'Minha Rede', path: '/network' });
-    items.push({ section: 'Performance' });
-    items.push({ icon: Trophy, label: 'Ranking', path: '/ranking' });
-    items.push({ icon: Target, label: 'Metas', path: '/goals' });
-    items.push({ icon: Link2, label: 'Link de Indicação', path: '/referral-links' });
+    items.push({ icon: MapPin, label: 'Minhas Regionais', path: '/users' });
+    items.push({ icon: Network, label: 'Rede', path: '/network' });
     items.push({ section: 'Financeiro' });
-    items.push({ icon: DollarSign, label: 'Comissões', path: '/commissions' });
-    items.push({ icon: ShoppingBag, label: 'Meus Pedidos', path: '/my-orders' });
-    items.push({ icon: Wallet, label: 'Minha Carteira', path: '/wallet' });
+    items.push({ icon: DollarSign, label: 'Comissoes', path: '/commissions' });
+    items.push({ icon: Wallet, label: 'Carteira', path: '/wallet' });
   }
 
-  // Cliente (5) e Embaixador (6)
-  if (accessLevel === 5 || accessLevel === 6) {
+  // Regional (3)
+  if (accessLevel === 3) {
+    items.push({ section: 'Minha Regiao' });
+    items.push({ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' });
+    items.push({ icon: Store, label: 'Minhas Unidades', path: '/users' });
+    items.push({ icon: Network, label: 'Rede', path: '/network' });
+    items.push({ section: 'Financeiro' });
+    items.push({ icon: DollarSign, label: 'Comissoes', path: '/commissions' });
+    items.push({ icon: Wallet, label: 'Carteira', path: '/wallet' });
+  }
+
+  // Cidade (4)
+  if (accessLevel === 4) {
+    items.push({ section: 'Minha Unidade' });
+    items.push({ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' });
+    items.push({ icon: Users, label: 'Indicadores', path: '/users' });
+    items.push({ icon: ShoppingBag, label: 'Vendas', path: '/orders' });
+    items.push({ icon: Link2, label: 'Link de Indicacao', path: '/referral' });
+    items.push({ section: 'Financeiro' });
+    items.push({ icon: DollarSign, label: 'Comissoes', path: '/commissions' });
+    items.push({ icon: Wallet, label: 'Carteira', path: '/wallet' });
+  }
+
+  // Indicador (5) / Unidade Indicadora (6)
+  if (accessLevel >= 5) {
     items.push({ section: 'Principal' });
     items.push({ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' });
-    items.push({ icon: MessageCircle, label: 'Chat', path: '/chat' });
-    items.push({ icon: Headphones, label: 'Suporte', path: '/support' });
-    items.push({ icon: ShoppingBag, label: 'Meus Pedidos', path: '/my-orders' });
-    items.push({ section: 'Indicação' });
-    items.push({ icon: Link2, label: 'Meu Link', path: '/referral-links' });
-    items.push({ icon: Target, label: 'Metas', path: '/goals' });
-    items.push({ icon: Wallet, label: 'Minhas Comissões', path: '/wallet' });
+    items.push({ icon: Link2, label: 'Meu Link', path: '/referral' });
+    items.push({ icon: ShoppingBag, label: 'Meus Pedidos', path: '/orders' });
+    items.push({ icon: Wallet, label: 'Carteira', path: '/wallet' });
   }
 
   return items;
@@ -93,133 +93,104 @@ export default function Sidebar({ isOpen, onClose }) {
     navigate('/');
   };
 
-  const userStats = [
-    { icon: TrendingUp, value: user?.points || 0, label: 'Pontos' },
-    { icon: Users, value: user?.network_size || 0, label: 'Rede' },
-    { icon: DollarSign, value: formatCurrency(user?.available_balance || 0), label: 'Saldo' },
-  ];
-
   return (
     <>
-      {/* Mobile Overlay */}
       {isOpen && (
-        <div 
-          className="fixed inset-0 bg-black/30 z-40 lg:hidden backdrop-blur-sm"
+        <div
+          className="fixed inset-0 bg-black/20 z-40 lg:hidden"
           onClick={onClose}
         />
       )}
 
-      {/* Sidebar - Light Theme */}
       <aside className={cn(
-        "fixed left-0 top-0 h-full w-sidebar bg-white z-50 flex flex-col border-r border-slate-200 transition-transform duration-300 ease-out",
+        "fixed left-0 top-0 h-full w-sidebar bg-white z-50 flex flex-col border-r border-border transition-transform duration-200",
         "lg:translate-x-0",
         isOpen ? "translate-x-0" : "-translate-x-full"
       )}>
-        {/* Profile Header */}
-        <div className="p-6 border-b border-slate-100">
-          <div className="flex flex-col items-center text-center">
-            {/* Avatar */}
-            <div className="relative mb-4">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-brand-main to-blue-400 overflow-hidden ring-4 ring-blue-50">
-                {user?.picture ? (
-                  <img 
-                    src={user.picture} 
-                    alt={user.name} 
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-white">
-                    {user?.name?.charAt(0)?.toUpperCase() || 'U'}
-                  </div>
-                )}
-              </div>
-              <span className="absolute bottom-1 right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white" />
-            </div>
-            
-            {/* Name & Role */}
-            <h3 className="font-heading font-bold text-lg text-slate-900 truncate max-w-full">
-              {user?.name || 'Usuário'}
-            </h3>
-            <p className="text-sm text-slate-500 mt-0.5">
-              {ACCESS_LEVELS[accessLevel]?.name || 'Usuário'}
-            </p>
-
-            {/* Quick Stats */}
-            <div className="flex items-center justify-center gap-4 mt-4 w-full">
-              {userStats.map((stat, idx) => (
-                <div key={idx} className="flex flex-col items-center">
-                  <stat.icon className="w-4 h-4 text-slate-400 mb-1" />
-                  <span className="text-sm font-bold text-slate-900">{stat.value}</span>
-                  <span className="text-xs text-slate-500">{stat.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* Logo */}
+        <div className="h-16 flex items-center px-5 border-b border-border">
+          <img src={LOGO_URL} alt="OxxPharma" className="h-8" />
+          <span className="ml-2 font-heading font-bold text-lg text-txt-primary tracking-tight">OxxPharma</span>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1" data-testid="sidebar-nav">
-          {menuItems.map((item, index) => {
+        {/* User Info */}
+        <div className="px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-md bg-brand-main flex items-center justify-center text-white font-heading font-bold text-sm">
+              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-txt-primary truncate">{user?.name || 'Usuario'}</p>
+              <p className="text-xs text-txt-secondary">{ACCESS_LEVELS[accessLevel]?.name || 'Usuario'}</p>
+            </div>
+          </div>
+          {user?.available_balance !== undefined && (
+            <div className="mt-3 px-3 py-2 bg-bg-secondary rounded-md">
+              <p className="text-xs text-txt-secondary">Saldo</p>
+              <p className="text-sm font-bold text-brand-main">{formatCurrency(user.available_balance)}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto py-3 px-3" data-testid="sidebar-nav">
+          {menuItems.map((item, idx) => {
             if (item.section) {
               return (
-                <div key={`section-${index}`} className="pt-4 pb-2 px-3 first:pt-0">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <div key={`s-${idx}`} className="pt-5 pb-1.5 px-2 first:pt-1">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-txt-secondary/60">
                     {item.section}
                   </span>
                 </div>
               );
             }
-
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
-
             return (
               <Link
                 key={item.path}
                 to={item.path}
                 onClick={onClose}
-                data-testid={`nav-${item.path.replace('/', '')}`}
+                data-testid={`nav-${item.path.replace(/\//g, '')}`}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
-                  isActive 
-                    ? "bg-brand-main text-white shadow-lg shadow-brand-main/25" 
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-150",
+                  isActive
+                    ? "bg-brand-main text-white"
+                    : "text-txt-secondary hover:bg-bg-secondary hover:text-txt-primary"
                 )}
               >
-                <Icon className="w-5 h-5 flex-shrink-0" strokeWidth={1.5} />
+                <Icon className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={1.8} />
                 <span className="truncate">{item.label}</span>
-                {isActive && (
-                  <ChevronRight className="w-4 h-4 ml-auto" />
-                )}
+                {isActive && <ChevronRight className="w-4 h-4 ml-auto opacity-60" />}
               </Link>
             );
           })}
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-100 space-y-2">
+        <div className="p-3 border-t border-border space-y-1">
           <Link
             to="/store"
             onClick={onClose}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-txt-secondary hover:bg-bg-secondary transition-all"
           >
-            <Store className="w-5 h-5" strokeWidth={1.5} />
-            <span>Ir para Loja</span>
+            <Store className="w-[18px] h-[18px]" strokeWidth={1.8} />
+            <span>Loja</span>
           </Link>
           <Link
             to="/profile"
             onClick={onClose}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-txt-secondary hover:bg-bg-secondary transition-all"
           >
-            <UserCircle className="w-5 h-5" strokeWidth={1.5} />
-            <span>Meu Perfil</span>
+            <UserCircle className="w-[18px] h-[18px]" strokeWidth={1.8} />
+            <span>Perfil</span>
           </Link>
           <button
             onClick={handleLogout}
             data-testid="logout-btn"
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-600 transition-all"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-accent-red hover:bg-red-50 transition-all"
           >
-            <LogOut className="w-5 h-5" strokeWidth={1.5} />
+            <LogOut className="w-[18px] h-[18px]" strokeWidth={1.8} />
             <span>Sair</span>
           </button>
         </div>
