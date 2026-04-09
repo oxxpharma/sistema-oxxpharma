@@ -170,6 +170,9 @@ class SettingsUpdate(BaseModel):
 class WithdrawalRequest(BaseModel):
     amount: float
 
+class UpgradeRequest(BaseModel):
+    investment_amount: float
+
 # ==================== LIFESPAN ====================
 
 async def seed_admin(db):
@@ -1161,6 +1164,7 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_level(1
 async def user_dashboard(request: Request, user: dict = Depends(get_current_user)):
     db = request.app.db
     uid = user["user_id"]
+    al = user.get("access_level", 99)
     month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0).isoformat()
 
     month_comms = await db.commissions.aggregate([
@@ -1171,14 +1175,447 @@ async def user_dashboard(request: Request, user: dict = Depends(get_current_user
     direct_count = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
     my_orders = await db.orders.count_documents({"user_id": uid})
 
-    return {
+    base = {
         "available_balance": user.get("available_balance", 0),
         "blocked_balance": user.get("blocked_balance", 0),
         "month_commissions": month_comms[0]["total"] if month_comms else 0,
         "direct_referrals": direct_count,
         "total_orders": my_orders,
         "referral_code": user.get("referral_code", ""),
+        "access_level": al,
     }
+
+    # Estadual (2): stats about their state
+    if al == 2:
+        state = user.get("state")
+        regionais = await db.users.count_documents({"access_level": 3, "state": state, "status": "active"})
+        cidades = await db.users.count_documents({"access_level": 4, "state": state, "status": "active"})
+        indicadores = await db.users.count_documents({"access_level": {"$gte": 5}, "state": state, "status": "active"})
+        state_revenue_agg = await db.orders.aggregate([
+            {"$lookup": {"from": "users", "localField": "user_id", "foreignField": "user_id", "as": "u"}},
+            {"$unwind": "$u"},
+            {"$match": {"u.state": state, "payment_status": "paid", "created_at": {"$gte": month_start}}},
+            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
+        ]).to_list(1)
+        base["regionais_count"] = regionais
+        base["cidades_count"] = cidades
+        base["indicadores_count"] = indicadores
+        base["state_revenue"] = state_revenue_agg[0]["total"] if state_revenue_agg else 0
+        base["state"] = state
+
+    # Regional (3): stats about their DDD region
+    elif al == 3:
+        ddd = user.get("ddd")
+        cidades = await db.users.count_documents({"access_level": 4, "ddd": ddd, "status": "active"})
+        indicadores = await db.users.count_documents({"access_level": {"$gte": 5}, "ddd": ddd, "status": "active"})
+        region_revenue_agg = await db.orders.aggregate([
+            {"$lookup": {"from": "users", "localField": "user_id", "foreignField": "user_id", "as": "u"}},
+            {"$unwind": "$u"},
+            {"$match": {"u.ddd": ddd, "payment_status": "paid", "created_at": {"$gte": month_start}}},
+            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
+        ]).to_list(1)
+        base["cidades_count"] = cidades
+        base["indicadores_count"] = indicadores
+        base["region_revenue"] = region_revenue_agg[0]["total"] if region_revenue_agg else 0
+        base["ddd"] = ddd
+
+    # Cidade (4): stats about their unit
+    elif al == 4:
+        indicadores = await db.users.count_documents({"sponsor_id": uid, "access_level": {"$gte": 5}, "status": "active"})
+        unit_orders = await db.orders.count_documents({"user_id": uid, "created_at": {"$gte": month_start}})
+        unit_revenue_agg = await db.orders.aggregate([
+            {"$match": {"user_id": uid, "payment_status": "paid", "created_at": {"$gte": month_start}}},
+            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
+        ]).to_list(1)
+        base["indicadores_count"] = indicadores
+        base["month_unit_orders"] = unit_orders
+        base["month_unit_revenue"] = unit_revenue_agg[0]["total"] if unit_revenue_agg else 0
+
+    # Indicador (5): referral stats
+    elif al == 5:
+        total_referrals = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
+        settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
+        min_refs = settings.get("indicador_min_referrals_upgrade", 20) if settings else 20
+        investment_needed = settings.get("unidade_indicadora_investment", 500) if settings else 500
+        base["total_referrals"] = total_referrals
+        base["min_referrals_upgrade"] = min_refs
+        base["investment_needed"] = investment_needed
+        base["can_upgrade"] = total_referrals >= min_refs
+
+    # Unidade Indicadora (6): commission stats
+    elif al == 6:
+        total_referrals = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
+        total_comms_agg = await db.commissions.aggregate([
+            {"$match": {"user_id": uid}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]).to_list(1)
+        base["total_referrals"] = total_referrals
+        base["total_commissions"] = total_comms_agg[0]["total"] if total_comms_agg else 0
+
+    return base
+
+# ==================== REPORTS ====================
+
+@app.get("/api/reports/sales")
+async def reports_sales(
+    request: Request,
+    period: str = "month",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    state: Optional[str] = None,
+    user: dict = Depends(require_level(1)),
+):
+    db = request.app.db
+    now = datetime.now(timezone.utc)
+
+    if start_date and end_date:
+        date_from = start_date
+        date_to = end_date
+    elif period == "week":
+        date_from = (now - timedelta(days=7)).isoformat()
+        date_to = now.isoformat()
+    elif period == "month":
+        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+    elif period == "quarter":
+        q_month = ((now.month - 1) // 3) * 3 + 1
+        date_from = now.replace(month=q_month, day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+    elif period == "year":
+        date_from = now.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+    else:
+        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+
+    match_q = {"created_at": {"$gte": date_from, "$lte": date_to}}
+
+    # Total sales
+    total_orders = await db.orders.count_documents(match_q)
+    paid_match = {**match_q, "payment_status": "paid"}
+    paid_orders = await db.orders.count_documents(paid_match)
+    revenue_agg = await db.orders.aggregate([
+        {"$match": paid_match},
+        {"$group": {"_id": None, "total": {"$sum": "$total"}, "avg": {"$avg": "$total"}}}
+    ]).to_list(1)
+    total_revenue = revenue_agg[0]["total"] if revenue_agg else 0
+    avg_ticket = revenue_agg[0]["avg"] if revenue_agg else 0
+
+    # Sales by day
+    daily_sales = await db.orders.aggregate([
+        {"$match": paid_match},
+        {"$addFields": {"date_str": {"$substr": ["$created_at", 0, 10]}}},
+        {"$group": {"_id": "$date_str", "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]).to_list(365)
+
+    # Top products
+    top_products = await db.orders.aggregate([
+        {"$match": paid_match},
+        {"$unwind": "$items"},
+        {"$group": {"_id": "$items.name", "total": {"$sum": "$items.total"}, "qty": {"$sum": "$items.quantity"}}},
+        {"$sort": {"total": -1}},
+        {"$limit": 10}
+    ]).to_list(10)
+
+    # Sales by status
+    by_status = await db.orders.aggregate([
+        {"$match": match_q},
+        {"$group": {"_id": "$order_status", "count": {"$sum": 1}, "total": {"$sum": "$total"}}},
+        {"$sort": {"count": -1}}
+    ]).to_list(20)
+
+    return {
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "total_orders": total_orders,
+        "paid_orders": paid_orders,
+        "total_revenue": total_revenue,
+        "avg_ticket": round(avg_ticket, 2),
+        "daily_sales": daily_sales,
+        "top_products": top_products,
+        "by_status": by_status,
+    }
+
+@app.get("/api/reports/commissions")
+async def reports_commissions(
+    request: Request,
+    period: str = "month",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: dict = Depends(require_level(1)),
+):
+    db = request.app.db
+    now = datetime.now(timezone.utc)
+
+    if start_date and end_date:
+        date_from = start_date
+        date_to = end_date
+    elif period == "month":
+        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+    elif period == "year":
+        date_from = now.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+    else:
+        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+        date_to = now.isoformat()
+
+    match_q = {"created_at": {"$gte": date_from, "$lte": date_to}}
+
+    # Total commissions
+    total_agg = await db.commissions.aggregate([
+        {"$match": match_q},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    total_commissions = total_agg[0]["total"] if total_agg else 0
+    total_count = total_agg[0]["count"] if total_agg else 0
+
+    # By generation
+    by_gen = await db.commissions.aggregate([
+        {"$match": match_q},
+        {"$group": {"_id": "$generation", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]).to_list(10)
+
+    gen_data = []
+    for g in by_gen:
+        gen_data.append({
+            "generation": g["_id"],
+            "label": "Nacional" if g["_id"] == 0 else f"{g['_id']}a Geracao",
+            "total": g["total"],
+            "count": g["count"],
+        })
+
+    # By level
+    by_level = await db.commissions.aggregate([
+        {"$match": match_q},
+        {"$lookup": {"from": "users", "localField": "user_id", "foreignField": "user_id", "as": "u"}},
+        {"$unwind": "$u"},
+        {"$group": {"_id": "$u.access_level", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]).to_list(10)
+
+    level_data = []
+    for l in by_level:
+        level_data.append({
+            "level": l["_id"],
+            "label": LEVEL_NAMES.get(l["_id"], str(l["_id"])),
+            "total": l["total"],
+            "count": l["count"],
+        })
+
+    # By status
+    by_status = await db.commissions.aggregate([
+        {"$match": match_q},
+        {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+    ]).to_list(10)
+
+    # Daily commissions
+    daily = await db.commissions.aggregate([
+        {"$match": match_q},
+        {"$addFields": {"date_str": {"$substr": ["$created_at", 0, 10]}}},
+        {"$group": {"_id": "$date_str", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]).to_list(365)
+
+    # Top earners
+    top_earners = await db.commissions.aggregate([
+        {"$match": match_q},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+        {"$limit": 10}
+    ]).to_list(10)
+
+    earners_list = []
+    for e in top_earners:
+        u = await db.users.find_one({"user_id": e["_id"]}, {"_id": 0, "name": 1, "access_level": 1, "state": 1})
+        if u:
+            earners_list.append({
+                "name": u["name"],
+                "level": LEVEL_NAMES.get(u.get("access_level"), ""),
+                "state": u.get("state", ""),
+                "total": e["total"],
+                "count": e["count"],
+            })
+
+    return {
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "total_commissions": total_commissions,
+        "total_count": total_count,
+        "by_generation": gen_data,
+        "by_level": level_data,
+        "by_status": by_status,
+        "daily": daily,
+        "top_earners": earners_list,
+    }
+
+@app.get("/api/reports/network")
+async def reports_network(request: Request, user: dict = Depends(require_level(1))):
+    db = request.app.db
+
+    by_level = []
+    for lvl in range(7):
+        count = await db.users.count_documents({"access_level": lvl, "status": "active"})
+        by_level.append({"level": lvl, "label": LEVEL_NAMES.get(lvl, str(lvl)), "count": count})
+
+    by_state = await db.users.aggregate([
+        {"$match": {"status": "active", "state": {"$ne": None}}},
+        {"$group": {"_id": "$state", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]).to_list(30)
+
+    # New users this month
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0).isoformat()
+    new_this_month = await db.users.count_documents({"created_at": {"$gte": month_start}, "status": "active"})
+
+    # Growth daily
+    daily_signups = await db.users.aggregate([
+        {"$match": {"created_at": {"$gte": month_start}}},
+        {"$addFields": {"date_str": {"$substr": ["$created_at", 0, 10]}}},
+        {"$group": {"_id": "$date_str", "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]).to_list(31)
+
+    return {
+        "by_level": by_level,
+        "by_state": by_state,
+        "new_this_month": new_this_month,
+        "daily_signups": daily_signups,
+    }
+
+# ==================== UPGRADE INDICADOR -> UNIDADE INDICADORA ====================
+
+@app.get("/api/upgrade/status")
+async def upgrade_status(request: Request, user: dict = Depends(get_current_user)):
+    """Check if indicador is eligible for upgrade"""
+    db = request.app.db
+    if user.get("access_level") != 5:
+        raise HTTPException(status_code=400, detail="Apenas indicadores podem solicitar upgrade")
+
+    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
+    min_refs = settings.get("indicador_min_referrals_upgrade", 20) if settings else 20
+    investment = settings.get("unidade_indicadora_investment", 500) if settings else 500
+
+    total_referrals = await db.users.count_documents({"sponsor_id": user["user_id"], "status": "active"})
+
+    # Check if there's a pending upgrade request
+    pending = await db.upgrade_requests.find_one(
+        {"user_id": user["user_id"], "status": {"$in": ["pending", "approved"]}},
+        {"_id": 0}
+    )
+
+    return {
+        "eligible": total_referrals >= min_refs,
+        "total_referrals": total_referrals,
+        "min_referrals": min_refs,
+        "investment_required": investment,
+        "progress_percent": min(100, round((total_referrals / max(1, min_refs)) * 100)),
+        "pending_request": pending,
+    }
+
+@app.post("/api/upgrade/request")
+async def request_upgrade(request: Request, data: UpgradeRequest, user: dict = Depends(get_current_user)):
+    """Request upgrade from Indicador to Unidade Indicadora"""
+    db = request.app.db
+    if user.get("access_level") != 5:
+        raise HTTPException(status_code=400, detail="Apenas indicadores podem solicitar upgrade")
+
+    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
+    min_refs = settings.get("indicador_min_referrals_upgrade", 20) if settings else 20
+    investment = settings.get("unidade_indicadora_investment", 500) if settings else 500
+
+    total_referrals = await db.users.count_documents({"sponsor_id": user["user_id"], "status": "active"})
+    if total_referrals < min_refs:
+        raise HTTPException(status_code=400, detail=f"Voce precisa de pelo menos {min_refs} indicacoes ({total_referrals} atualmente)")
+
+    if data.investment_amount < investment:
+        raise HTTPException(status_code=400, detail=f"Investimento minimo: R$ {investment}")
+
+    # Check existing pending
+    existing = await db.upgrade_requests.find_one({"user_id": user["user_id"], "status": "pending"})
+    if existing:
+        raise HTTPException(status_code=400, detail="Voce ja tem uma solicitacao pendente")
+
+    req = {
+        "request_id": generate_id("upg_"),
+        "user_id": user["user_id"],
+        "user_name": user.get("name"),
+        "user_email": user.get("email"),
+        "from_level": 5,
+        "to_level": 6,
+        "total_referrals": total_referrals,
+        "investment_amount": data.investment_amount,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.upgrade_requests.insert_one(req)
+    return await db.upgrade_requests.find_one({"request_id": req["request_id"]}, {"_id": 0})
+
+@app.get("/api/upgrade/requests")
+async def list_upgrade_requests(
+    request: Request,
+    status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    user: dict = Depends(require_level(1)),
+):
+    db = request.app.db
+    query = {}
+    if status:
+        query["status"] = status
+    total = await db.upgrade_requests.count_documents(query)
+    reqs = await db.upgrade_requests.find(query, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"requests": reqs, "total": total, "page": page}
+
+@app.put("/api/upgrade/requests/{request_id}")
+async def handle_upgrade_request(
+    request: Request, request_id: str,
+    action: str = Query(...),
+    user: dict = Depends(require_level(1)),
+):
+    """Approve or reject upgrade request"""
+    db = request.app.db
+    req = await db.upgrade_requests.find_one({"request_id": request_id}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Solicitacao nao encontrada")
+    if req.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Solicitacao ja foi processada")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    if action == "approve":
+        # Upgrade the user
+        await db.users.update_one(
+            {"user_id": req["user_id"]},
+            {"$set": {"access_level": 6, "upgraded_at": now}}
+        )
+        await db.upgrade_requests.update_one(
+            {"request_id": request_id},
+            {"$set": {"status": "approved", "processed_at": now, "processed_by": user["user_id"]}}
+        )
+        # Record investment as transaction
+        await db.transactions.insert_one({
+            "transaction_id": generate_id("tx_"),
+            "user_id": req["user_id"],
+            "type": "upgrade_investment",
+            "amount": -req["investment_amount"],
+            "description": f"Investimento para Unidade Indicadora - R$ {req['investment_amount']:.2f}",
+            "created_at": now,
+        })
+        return {"message": "Upgrade aprovado! Usuario promovido a Unidade Indicadora"}
+
+    elif action == "reject":
+        await db.upgrade_requests.update_one(
+            {"request_id": request_id},
+            {"$set": {"status": "rejected", "processed_at": now, "processed_by": user["user_id"]}}
+        )
+        return {"message": "Solicitacao rejeitada"}
+
+    raise HTTPException(status_code=400, detail="Acao invalida. Use 'approve' ou 'reject'")
 
 # ==================== STATES/DDD REFERENCE ====================
 

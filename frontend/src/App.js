@@ -20,6 +20,8 @@ import StorePage from './pages/StorePage';
 import ReferralPage from './pages/ReferralPage';
 import FranchisesPage from './pages/FranchisesPage';
 import ReportsPage from './pages/ReportsPage';
+import UpgradePage from './pages/UpgradePage';
+import UpgradeRequestsPage from './pages/UpgradeRequestsPage';
 
 function ProtectedRoute({ children, maxLevel = 99 }) {
   const { isAuthenticated, loading, accessLevel } = useAuth();
@@ -57,6 +59,7 @@ function AppRouter() {
       <Route path="/commissions" element={<ProtectedRoute><CommissionsPage /></ProtectedRoute>} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/referral" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
+      <Route path="/upgrade" element={<ProtectedRoute><UpgradePage /></ProtectedRoute>} />
       <Route path="/network" element={<ProtectedRoute maxLevel={4}><NetworkPage /></ProtectedRoute>} />
 
       {/* Admin + Nacional */}
@@ -65,6 +68,7 @@ function AppRouter() {
       <Route path="/withdrawals" element={<ProtectedRoute maxLevel={1}><WithdrawalsPage /></ProtectedRoute>} />
       <Route path="/franchises" element={<ProtectedRoute maxLevel={1}><FranchisesPage /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute maxLevel={1}><ReportsPage /></ProtectedRoute>} />
+      <Route path="/upgrade-requests" element={<ProtectedRoute maxLevel={1}><UpgradeRequestsPage /></ProtectedRoute>} />
 
       {/* Admin Only */}
       <Route path="/settings" element={<ProtectedRoute maxLevel={0}><SettingsPage /></ProtectedRoute>} />

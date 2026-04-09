@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, Package, Wallet, Settings,
   Network, LogOut, UserCircle, BarChart3, DollarSign,
   ChevronRight, Store, ShoppingBag, Link2, Building2,
-  MapPin, Globe2
+  MapPin, Globe2, ArrowUpCircle
 } from 'lucide-react';
 import { cn, formatCurrency } from '../../lib/utils';
 
@@ -28,6 +28,7 @@ const getMenuItems = (accessLevel) => {
     items.push({ icon: DollarSign, label: 'Comissoes', path: '/commissions' });
     items.push({ icon: Wallet, label: 'Saques', path: '/withdrawals' });
     items.push({ icon: BarChart3, label: 'Relatorios', path: '/reports' });
+    items.push({ icon: ArrowUpCircle, label: 'Upgrades', path: '/upgrade-requests' });
   }
 
   // Admin (0) only
@@ -77,6 +78,9 @@ const getMenuItems = (accessLevel) => {
     items.push({ icon: Link2, label: 'Meu Link', path: '/referral' });
     items.push({ icon: ShoppingBag, label: 'Meus Pedidos', path: '/orders' });
     items.push({ icon: Wallet, label: 'Carteira', path: '/wallet' });
+    if (accessLevel === 5) {
+      items.push({ icon: ArrowUpCircle, label: 'Upgrade', path: '/upgrade' });
+    }
   }
 
   return items;

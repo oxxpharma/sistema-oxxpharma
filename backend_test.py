@@ -409,6 +409,208 @@ class OxxPharmaAPITester:
             print("❌ Should have blocked unauthorized access")
             return False
 
+    # ==================== NEW FEATURES TESTING ====================
+    
+    def test_level_specific_login(self):
+        """Test login for different user levels"""
+        test_users = [
+            {"email": "estadual@test.com", "password": "test123", "level": "Estadual"},
+            {"email": "regional@test.com", "password": "test123", "level": "Regional"},
+            {"email": "cidade@test.com", "password": "test123", "level": "Cidade"},
+            {"email": "indicador@test.com", "password": "test123", "level": "Indicador"},
+        ]
+        
+        tokens = {}
+        for user in test_users:
+            success, response = self.run_test(
+                f"{user['level']} Login",
+                "POST",
+                "auth/login",
+                200,
+                data={"email": user["email"], "password": user["password"]},
+                description=f"Login with {user['level']} credentials"
+            )
+            if success and 'token' in response:
+                tokens[user['level'].lower()] = response['token']
+                print(f"   🎫 {user['level']} token acquired")
+        
+        return tokens
+
+    def test_level_specific_dashboards(self):
+        """Test level-specific dashboard data"""
+        tokens = self.test_level_specific_login()
+        
+        for level, token in tokens.items():
+            success, response = self.run_test(
+                f"{level.title()} Dashboard",
+                "GET",
+                "dashboard/user",
+                200,
+                headers={'Authorization': f'Bearer {token}'},
+                description=f"Get {level} dashboard with level-specific data"
+            )
+            
+            if success:
+                # Verify level-specific data is present
+                if level == 'estadual':
+                    if 'regionais_count' in response and 'state' in response:
+                        print(f"   ✅ Estadual dashboard has state-specific data")
+                    else:
+                        print(f"   ⚠️ Estadual dashboard missing state-specific fields")
+                elif level == 'regional':
+                    if 'cidades_count' in response and 'ddd' in response:
+                        print(f"   ✅ Regional dashboard has DDD-specific data")
+                    else:
+                        print(f"   ⚠️ Regional dashboard missing DDD-specific fields")
+                elif level == 'indicador':
+                    if 'can_upgrade' in response and 'min_referrals_upgrade' in response:
+                        print(f"   ✅ Indicador dashboard has upgrade data")
+                    else:
+                        print(f"   ⚠️ Indicador dashboard missing upgrade fields")
+
+    def test_reports_sales(self):
+        """Test sales reports with period filters"""
+        if not self.admin_token:
+            print("❌ Skipping sales reports - no admin token")
+            return False
+            
+        periods = ['week', 'month', 'quarter', 'year']
+        for period in periods:
+            success, response = self.run_test(
+                f"Sales Report ({period})",
+                "GET",
+                f"reports/sales?period={period}",
+                200,
+                headers={'Authorization': f'Bearer {self.admin_token}'},
+                description=f"Get sales report for {period} period"
+            )
+            
+            if success:
+                required_fields = ['total_orders', 'paid_orders', 'total_revenue', 'period']
+                missing_fields = [field for field in required_fields if field not in response]
+                if not missing_fields:
+                    print(f"   ✅ Sales report has all required fields")
+                else:
+                    print(f"   ⚠️ Sales report missing fields: {missing_fields}")
+
+    def test_reports_commissions(self):
+        """Test commissions reports with period filters"""
+        if not self.admin_token:
+            print("❌ Skipping commissions reports - no admin token")
+            return False
+            
+        periods = ['month', 'year']
+        for period in periods:
+            success, response = self.run_test(
+                f"Commissions Report ({period})",
+                "GET",
+                f"reports/commissions?period={period}",
+                200,
+                headers={'Authorization': f'Bearer {self.admin_token}'},
+                description=f"Get commissions report for {period} period"
+            )
+            
+            if success:
+                required_fields = ['total_commissions', 'by_generation', 'by_level']
+                missing_fields = [field for field in required_fields if field not in response]
+                if not missing_fields:
+                    print(f"   ✅ Commissions report has all required fields")
+                else:
+                    print(f"   ⚠️ Commissions report missing fields: {missing_fields}")
+
+    def test_reports_network(self):
+        """Test network reports"""
+        if not self.admin_token:
+            print("❌ Skipping network reports - no admin token")
+            return False
+            
+        success, response = self.run_test(
+            "Network Report",
+            "GET",
+            "reports/network",
+            200,
+            headers={'Authorization': f'Bearer {self.admin_token}'},
+            description="Get network statistics report"
+        )
+        
+        if success:
+            required_fields = ['by_level', 'by_state', 'new_this_month']
+            missing_fields = [field for field in required_fields if field not in response]
+            if not missing_fields:
+                print(f"   ✅ Network report has all required fields")
+            else:
+                print(f"   ⚠️ Network report missing fields: {missing_fields}")
+
+    def test_upgrade_status(self):
+        """Test upgrade status for indicador"""
+        tokens = self.test_level_specific_login()
+        indicador_token = tokens.get('indicador')
+        
+        if not indicador_token:
+            print("❌ Skipping upgrade status - no indicador token")
+            return False
+            
+        success, response = self.run_test(
+            "Upgrade Status",
+            "GET",
+            "upgrade/status",
+            200,
+            headers={'Authorization': f'Bearer {indicador_token}'},
+            description="Get upgrade eligibility status for indicador"
+        )
+        
+        if success:
+            required_fields = ['eligible', 'total_referrals', 'min_referrals', 'investment_required', 'progress_percent']
+            missing_fields = [field for field in required_fields if field not in response]
+            if not missing_fields:
+                print(f"   ✅ Upgrade status has all required fields")
+                print(f"   📊 Progress: {response.get('progress_percent', 0)}% ({response.get('total_referrals', 0)}/{response.get('min_referrals', 20)} referrals)")
+            else:
+                print(f"   ⚠️ Upgrade status missing fields: {missing_fields}")
+
+    def test_upgrade_requests_list(self):
+        """Test upgrade requests listing (admin only)"""
+        if not self.admin_token:
+            print("❌ Skipping upgrade requests - no admin token")
+            return False
+            
+        success, response = self.run_test(
+            "Upgrade Requests List",
+            "GET",
+            "upgrade/requests",
+            200,
+            headers={'Authorization': f'Bearer {self.admin_token}'},
+            description="List all upgrade requests (admin access)"
+        )
+        
+        if success:
+            required_fields = ['requests', 'total']
+            missing_fields = [field for field in required_fields if field not in response]
+            if not missing_fields:
+                print(f"   ✅ Upgrade requests list has correct structure")
+                print(f"   📊 Total requests: {response.get('total', 0)}")
+            else:
+                print(f"   ⚠️ Upgrade requests missing fields: {missing_fields}")
+
+    def test_new_features_comprehensive(self):
+        """Comprehensive test of all new features"""
+        print("\n🆕 TESTING NEW FEATURES")
+        
+        # Test level-specific dashboards
+        print("\n📊 Level-Specific Dashboards")
+        self.test_level_specific_dashboards()
+        
+        # Test reports with period filters
+        print("\n📈 Reports with Period Filters")
+        self.test_reports_sales()
+        self.test_reports_commissions()
+        self.test_reports_network()
+        
+        # Test upgrade flow
+        print("\n⬆️ Upgrade Flow")
+        self.test_upgrade_status()
+        self.test_upgrade_requests_list()
+
     def print_summary(self):
         """Print test results summary"""
         print("\n" + "="*60)
@@ -480,6 +682,10 @@ def main():
     # Security
     print("\n🔒 SECURITY")
     tester.test_unauthorized_access()
+    
+    # NEW FEATURES TESTING
+    print("\n🆕 NEW FEATURES (Iteration 2)")
+    tester.test_new_features_comprehensive()
     
     # Print final results
     success = tester.print_summary()
