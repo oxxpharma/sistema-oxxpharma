@@ -1,227 +1,87 @@
 {
-  "identity": {
-    "name": "E1",
-    "role": "Anti-AI Creative Designer",
-    "principles": [
-      "Fusion over Imitation: Mix disparate disciplines.",
-      "Emotion First: Every pixel must evoke trust and ambition.",
-      "Content is King: Data must be legible and actionable.",
-      "Zoom In: Focus on the details that matter (metrics, goals).",
-      "Negative Space: Use it to create breathing room.",
-      "Contrast: High contrast for readability and impact."
-    ]
+  "theme": "light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "design_context": "Dashboard & Admin Panel for Pharmaceutical MLM",
+  "emotional_tone": "Professional, Authoritative, Clear, Trustworthy",
+  "colors": {
+    "background_primary": "#FFFFFF",
+    "background_secondary": "#F9FAFB",
+    "text_primary": "#111827",
+    "text_secondary": "#4B5563",
+    "accent_primary": "#0047AB",
+    "accent_primary_hover": "#003380",
+    "accent_secondary": "#10B981",
+    "alert": "#DC2626",
+    "border": "#E5E7EB",
+    "surface": "#FFFFFF"
   },
-  "project": {
-    "name": "Vanguard MLM Redesign",
-    "type": "SaaS Dashboard",
-    "theme": "Light Mode (Primary) with Deep Blue Accents",
-    "target_audience": "Resellers, Admins, Team Leaders",
-    "emotion": "Professional, Trustworthy, Aspiring, Clean"
-  },
-  "design_system": {
-    "colors": {
-      "palette": {
-        "primary": {
-          "main": "#0f172a",
-          "light": "#334155",
-          "dark": "#020617",
-          "description": "Deep Navy/Slate for Sidebar and Headings. Commands authority."
-        },
-        "brand": {
-          "main": "#2563eb",
-          "light": "#60a5fa",
-          "dark": "#1e40af",
-          "subtle": "#eff6ff",
-          "description": "Vibrant Royal Blue for Actions, Links, and Progress. Represents trust and growth."
-        },
-        "success": {
-          "main": "#10b981",
-          "light": "#34d399",
-          "description": "Emerald Green for positive financial metrics and growth."
-        },
-        "warning": {
-          "main": "#f59e0b",
-          "light": "#fbbf24",
-          "description": "Amber/Gold for bonuses, rankings, and alerts."
-        },
-        "background": {
-          "main": "#f8fafc",
-          "card": "#ffffff",
-          "sidebar": "#0f172a",
-          "description": "Clean white/slate-50 background. Sidebar is dark for contrast."
-        },
-        "text": {
-          "primary": "#0f172a",
-          "secondary": "#64748b",
-          "on_dark": "#f8fafc",
-          "muted_on_dark": "#94a3b8"
-        }
-      },
-      "rules": [
-        "Use 'brand.main' for primary buttons and active states.",
-        "Use 'brand.subtle' for hover backgrounds on light surfaces.",
-        "Sidebar text must be 'text.on_dark' (white) or 'text.muted_on_dark' (grey-blue).",
-        "Never use pure black (#000000). Use 'primary.dark' (#020617)."
-      ]
-    },
-    "typography": {
-      "font_family": {
-        "heading": "Manrope, sans-serif",
-        "body": "Inter, sans-serif"
-      },
-      "scale": {
-        "h1": "text-4xl font-bold tracking-tight",
-        "h2": "text-3xl font-bold tracking-tight",
-        "h3": "text-2xl font-semibold",
-        "body_lg": "text-lg leading-relaxed",
-        "body_base": "text-base leading-normal",
-        "body_sm": "text-sm text-slate-500",
-        "caption": "text-xs font-medium uppercase tracking-wider text-slate-400"
-      },
-      "rules": [
-        "Headings use Manrope. Body uses Inter.",
-        "Stats numbers (e.g., $1,200) should be large (text-3xl or 4xl) and 'font-heading'.",
-        "Sidebar links should be 'text-sm font-medium'."
-      ]
-    },
-    "spacing": {
-      "grid": "gap-6",
-      "card_padding": "p-6",
-      "section_padding": "py-8",
-      "sidebar_width": "w-72"
-    },
-    "borders": {
-      "radius": {
-        "card": "rounded-xl",
-        "button": "rounded-lg",
-        "input": "rounded-lg"
-      },
-      "width": "border",
-      "color": "border-slate-200"
-    },
-    "shadows": {
-      "card": "shadow-sm hover:shadow-md transition-shadow duration-200",
-      "dropdown": "shadow-lg ring-1 ring-black ring-opacity-5",
-      "sidebar": "shadow-xl"
+  "typography": {
+    "heading_font": "Chivo",
+    "body_font": "IBM Plex Sans",
+    "scale": {
+      "h1": "text-4xl tracking-tight font-black",
+      "h2": "text-2xl tracking-tight font-bold",
+      "h3": "text-xl font-semibold",
+      "h4": "text-lg font-semibold",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm",
+      "overline": "text-xs tracking-[0.2em] uppercase"
     }
   },
-  "layout_strategies": {
-    "dashboard_grid": {
-      "mobile": "grid-cols-1",
-      "tablet": "grid-cols-2",
-      "desktop": "grid-cols-4",
-      "gap": "gap-6"
-    },
-    "sidebar": {
-      "position": "fixed left-0 top-0 h-full",
-      "width": "w-72",
-      "z_index": "z-50",
-      "style": "bg-slate-900 text-white flex flex-col",
-      "sections": [
-        {
-          "name": "Profile Header",
-          "style": "p-6 border-b border-slate-800 flex flex-col items-center text-center",
-          "elements": ["Avatar (w-20 h-20)", "Name (text-lg font-bold mt-3)", "Role (text-sm text-slate-400)", "Quick Stats Row"]
-        },
-        {
-          "name": "Navigation",
-          "style": "flex-1 overflow-y-auto py-6 px-4 space-y-1",
-          "item_style": "flex items-center px-4 py-3 rounded-lg hover:bg-slate-800 transition-colors text-sm font-medium"
-        },
-        {
-          "name": "Footer",
-          "style": "p-4 border-t border-slate-800",
-          "elements": ["Logout Button", "Settings Link"]
-        }
-      ]
-    },
-    "main_content": {
-      "margin": "ml-72",
-      "padding": "p-8",
-      "max_width": "max-w-7xl mx-auto"
-    }
+  "layout": {
+    "spacing_system": "Generous padding: p-6, p-8 for containers, tight gap-4 for bento grids.",
+    "dashboard_grid": "Bento 'Control Room' Grid: grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with tight gap-4 or gap-6. Widgets stretch h-full.",
+    "surfaces": "Grid Borders ('Technical' Look) or Flat Cards: 1px border-border, no shadow, bg-white. Hover states with -translate-y-1 and shadow-sm."
   },
   "components": {
-    "card": {
-      "base": "bg-white rounded-xl border border-slate-100 shadow-sm",
-      "header": "px-6 py-4 border-b border-slate-50 flex justify-between items-center",
-      "body": "p-6"
-    },
-    "stat_card": {
-      "style": "flex flex-col p-6 bg-white rounded-xl shadow-sm border border-slate-100 hover:border-blue-100 transition-colors",
-      "elements": ["Icon (p-3 rounded-lg bg-blue-50 text-blue-600 mb-4 w-fit)", "Label (text-sm text-slate-500)", "Value (text-2xl font-bold text-slate-900)", "Trend (text-xs font-medium text-emerald-600 flex items-center mt-1)"]
-    },
-    "button": {
-      "primary": "bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-5 rounded-lg shadow-sm hover:shadow transition-all active:scale-95",
-      "secondary": "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium py-2.5 px-5 rounded-lg transition-colors",
-      "ghost": "text-slate-600 hover:bg-slate-100 hover:text-slate-900 font-medium py-2 px-4 rounded-lg transition-colors"
-    },
-    "chart_container": {
-      "style": "w-full h-[300px] mt-4"
-    }
+    "buttons": "Shadcn Button, override to rounded-sm. High contrast text on primary buttons.",
+    "inputs": "Shadcn Input, rounded-sm, 1px border, focus:ring-2 focus:ring-accent_primary.",
+    "tables": "Shadcn Table, dense padding, clear column headers, left-aligned except for numbers/actions.",
+    "network_tree": "Custom node-link layout using HTML/Tailwind. Rectangular cards with 1px border, avatar, and text. Connecting lines using absolute positioning and border classes.",
+    "cards": "Cardless or flat rectangular cards with max 8px radius (rounded-md).",
+    "sidebar": "Fixed sidebar, solid bg-white or bg-gray-50, 1px right border, clear active states with accent_primary left border."
+  },
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "lists": "Staggered entrance animations",
+    "interactions": "Subtle -translate-y-1 on widget hover"
   },
   "assets": {
+    "icons": "lucide-react for standard actions, @phosphor-icons/react for dense dashboard metrics.",
     "images": {
-      "user_profile": {
-        "url": "https://images.pexels.com/photos/262391/pexels-photo-262391.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-        "alt": "User Profile"
+      "logo": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/11999c45dfa606ad3f30f54326fa63e71a49f9d047fe241b470a9da4e5771ede.png",
+        "description": "OxxPharma Brand Logo",
+        "category": "brand"
       },
-      "shop_products": [
-        {
-          "url": "https://images.pexels.com/photos/14433549/pexels-photo-14433549.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-          "alt": "Vitamin Gummys",
-          "category": "Health"
-        },
-        {
-          "url": "https://images.pexels.com/photos/14433537/pexels-photo-14433537.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-          "alt": "Supplement Jar",
-          "category": "Wellness"
-        }
+      "login_background": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/1c33a60805ea588c6e6624a66b649f8d1be0657c3e8746edf7c9738109c6668b.png",
+        "description": "Architectural corporate building interior, Swiss design style",
+        "category": "hero"
+      },
+      "product_placeholder": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/6815fa61cc87672743238a27b5dfa9219f796815878c776f3f29d10b600f2040.png",
+        "description": "White medicine bottle, pharmaceutical product",
+        "category": "product"
+      },
+      "avatars": [
+        "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NTc1MTk0OHww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1655249493799-9cee4fe983bb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NTc1MTk0OHww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NTc1MTk0OHww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1769636929388-99eff95d3bf1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NTc1MTk0OHww&ixlib=rb-4.1.0&q=85",
+        "https://images.pexels.com/photos/32721688/pexels-photo-32721688.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
       ]
-    },
-    "icons": {
-      "library": "lucide-react",
-      "style": "stroke-width={1.5} size={20}",
-      "mapping": {
-        "dashboard": "LayoutDashboard",
-        "network": "Users",
-        "orders": "ShoppingBag",
-        "wallet": "Wallet",
-        "reports": "BarChart3",
-        "settings": "Settings",
-        "shop": "Store",
-        "logout": "LogOut"
-      }
     }
   },
-  "instructions_to_main_agent": {
-    "setup": [
-      "Ensure 'lucide-react' is installed.",
-      "Update 'tailwind.config.js' with the new color palette (brand, sidebar, etc.).",
-      "Create a 'Sidebar' component in 'src/components/layout/Sidebar.jsx' following the fixed design.",
-      "Create a 'Layout' component that wraps pages with the Sidebar."
-    ],
-    "implementation_order": [
-      "1. Update Tailwind Config.",
-      "2. Create Layout & Sidebar components.",
-      "3. Create Dashboard Page with Stat Cards and Charts (use Recharts or mock charts).",
-      "4. Create Shop Page using the product images.",
-      "5. Ensure responsive design: Sidebar becomes a drawer/hamburger menu on mobile."
-    ],
-    "critical_rules": [
-      "Sidebar MUST be fixed on the left for desktop.",
-      "Profile picture MUST be in the sidebar top-left.",
-      "Use 'Manrope' for all headings.",
-      "Use 'Inter' for all body text.",
-      "Do not use gradients for backgrounds, keep it clean white/slate.",
-      "Add 'data-testid' to all interactive elements."
-    ]
-  },
-  "universal_guidelines": [
-    "Avoid 'AI Slop': No generic centered layouts. Use the Dashboard Grid.",
-    "Micro-animations: Add hover states to all sidebar links and cards.",
-    "Spacing: Use 'gap-6' or 'gap-8' for grids. Don't cram content.",
-    "Shadows: Use soft, diffuse shadows. No harsh black shadows.",
-    "Glassmorphism: Use it sparingly, maybe only for the mobile menu overlay."
+  "instructions_to_main_agent": [
+    "Strictly follow Archetype 4 (Swiss & High-Contrast) design rules. No gradients, just flat bold colors. Focus on layout, typography, and clear data hierarchy.",
+    "Use Chivo for all headings and IBM Plex Sans for body text. Enforce tracking-tight on large headings.",
+    "For the login page, use the 'login_background' image behind a glassmorphism or stark white solid panel.",
+    "The Network Tree must be a custom built component. Use rectangular nodes with 1px borders, avatar images from the 'avatars' list, and connect them with absolute lines or CSS borders.",
+    "For the Product Catalog, utilize the 'product_placeholder' image for missing product images.",
+    "Implement data-testid attributes on all interactive elements (buttons, inputs, menu items).",
+    "Dashboards should use 'Control Room' grid concepts with minimal empty space, fully utilizing horizontal real-estate.",
+    "Ensure contrast is APCA/WCAG compliant: Deep Charcoal text on Stark White or 10% Grey backgrounds.",
+    "All components must be compatible with Javascript (.js/.jsx) not Typescript (.tsx)."
   ]
 }
