@@ -112,7 +112,7 @@ export default function UsersPage() {
   const levelBadge = (lvl) => {
     const colors = {
       0: 'bg-red-100 text-red-700',
-      1: 'bg-blue-100 text-blue-700',
+      1: 'bg-orange-100 text-orange-700',
       2: 'bg-emerald-100 text-emerald-700',
       3: 'bg-violet-100 text-violet-700',
       4: 'bg-amber-100 text-amber-700',

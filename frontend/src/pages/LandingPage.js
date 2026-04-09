@@ -3,11 +3,11 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowRight, Globe2, MapPin, Building2, Store, Users, DollarSign, Shield } from 'lucide-react';
 
-const LOGO_URL = 'https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/11999c45dfa606ad3f30f54326fa63e71a49f9d047fe241b470a9da4e5771ede.png';
+const LOGO_URL = 'https://customer-assets.emergentagent.com/job_oxx-franchise-system/artifacts/5hmh2yiu_image.png';
 const BG_URL = 'https://images.unsplash.com/photo-1642055514517-7b52288890ec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MDV8MHwxfHNlYXJjaHwxfHxwaGFybWFjeSUyMHBoYXJtYWNldXRpY2FsJTIwcHJvZHVjdHMlMjBzaGVsdmVzfGVufDB8fHx8MTc3NTc1NDE1NHww&ixlib=rb-4.1.0&q=85';
 
 const levels = [
-  { icon: Globe2, name: 'Nacional', desc: 'Controle centralizado e investimentos da empresa', color: 'bg-blue-100 text-blue-700' },
+  { icon: Globe2, name: 'Nacional', desc: 'Controle centralizado e investimentos da empresa', color: 'bg-orange-100 text-orange-700' },
   { icon: MapPin, name: 'Estadual', desc: 'Profissionais da saude e farmacias que gerenciam estados', color: 'bg-emerald-100 text-emerald-700' },
   { icon: Building2, name: 'Regional', desc: 'Gestao de unidades por DDD e regiao', color: 'bg-violet-100 text-violet-700' },
   { icon: Store, name: 'Cidade', desc: 'Unidades com lojas fisicas que vendem produtos', color: 'bg-amber-100 text-amber-700' },

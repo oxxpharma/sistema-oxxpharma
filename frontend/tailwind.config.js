@@ -8,9 +8,9 @@ module.exports = {
     extend: {
       colors: {
         brand: {
-          main: '#0047AB',
-          hover: '#003380',
-          light: '#E8F0FE',
+          main: '#E8731A',
+          hover: '#C45F10',
+          light: '#FEF3E8',
         },
         accent: {
           green: '#10B981',
@@ -29,7 +29,7 @@ module.exports = {
         sidebar: {
           bg: '#FFFFFF',
           hover: '#F3F4F6',
-          active: '#0047AB',
+          active: '#E8731A',
         },
       },
       fontFamily: {

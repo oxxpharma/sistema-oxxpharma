@@ -18,7 +18,7 @@ function AdminDashboard({ data }) {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Users} label="Total Usuarios" value={data?.total_users || 0} color="blue" />
+        <StatCard icon={Users} label="Total Usuarios" value={data?.total_users || 0} color="orange" />
         <StatCard icon={ShoppingBag} label="Pedidos do Mes" value={data?.month_orders || 0} color="green" />
         <StatCard icon={DollarSign} label="Receita Mensal" value={formatCurrency(data?.month_revenue || 0)} color="amber" />
         <StatCard icon={Clock} label="Comissoes Pendentes" value={formatCurrency(data?.pending_commissions || 0)} color="red" />
@@ -32,7 +32,7 @@ function AdminDashboard({ data }) {
                 <XAxis dataKey="name" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: '#4B5563', fontSize: 11 }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ border: '1px solid #E5E7EB', borderRadius: '6px', fontSize: 12 }} />
-                <Bar dataKey="total" fill="#0047AB" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="total" fill="#E8731A" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -60,7 +60,7 @@ function AdminDashboard({ data }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard icon={Wallet} label="Saques Pendentes" value={data?.pending_withdrawals || 0} color="purple" />
         <StatCard icon={TrendingUp} label="Total Pedidos" value={data?.total_orders || 0} color="green" />
-        <StatCard icon={Globe2} label="Receita Total" value={formatCurrency(data?.month_revenue || 0)} color="blue" />
+        <StatCard icon={Globe2} label="Receita Total" value={formatCurrency(data?.month_revenue || 0)} color="orange" />
       </div>
     </>
   );
@@ -71,7 +71,7 @@ function EstadualDashboard({ data, user }) {
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Wallet} label="Saldo Disponivel" value={formatCurrency(data?.available_balance || 0)} color="green" />
-        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="blue" />
+        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="orange" />
         <StatCard icon={MapPin} label="Regionais" value={data?.regionais_count || 0} color="purple" />
         <StatCard icon={Store} label="Cidades/Unidades" value={data?.cidades_count || 0} color="amber" />
       </div>
@@ -108,7 +108,7 @@ function RegionalDashboard({ data, user }) {
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Wallet} label="Saldo Disponivel" value={formatCurrency(data?.available_balance || 0)} color="green" />
-        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="blue" />
+        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="orange" />
         <StatCard icon={Store} label="Unidades (Cidades)" value={data?.cidades_count || 0} color="amber" />
         <StatCard icon={Users} label="Indicadores" value={data?.indicadores_count || 0} color="purple" />
       </div>
@@ -137,7 +137,7 @@ function CidadeDashboard({ data, user }) {
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Wallet} label="Saldo Disponivel" value={formatCurrency(data?.available_balance || 0)} color="green" />
-        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="blue" />
+        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="orange" />
         <StatCard icon={Users} label="Indicadores" value={data?.indicadores_count || 0} color="purple" />
         <StatCard icon={ShoppingBag} label="Vendas do Mes" value={data?.month_unit_orders || 0} color="amber" />
       </div>
@@ -174,7 +174,7 @@ function IndicadorDashboard({ data, user }) {
         <StatCard icon={Wallet} label="Saldo Disponivel" value={formatCurrency(data?.available_balance || 0)} color="green" />
         <StatCard icon={Clock} label="Saldo Bloqueado" value={formatCurrency(data?.blocked_balance || 0)} color="amber" />
         <StatCard icon={Users} label="Total Indicacoes" value={data?.total_referrals || data?.direct_referrals || 0} color="purple" />
-        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="blue" />
+        <StatCard icon={DollarSign} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="orange" />
       </div>
 
       {/* Upgrade Progress */}
@@ -221,7 +221,7 @@ function UnidadeIndicadoraDashboard({ data, user }) {
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Wallet} label="Saldo Disponivel" value={formatCurrency(data?.available_balance || 0)} color="green" />
-        <StatCard icon={DollarSign} label="Total Comissoes" value={formatCurrency(data?.total_commissions || 0)} color="blue" />
+        <StatCard icon={DollarSign} label="Total Comissoes" value={formatCurrency(data?.total_commissions || 0)} color="orange" />
         <StatCard icon={Users} label="Indicacoes" value={data?.total_referrals || data?.direct_referrals || 0} color="purple" />
         <StatCard icon={TrendingUp} label="Comissoes do Mes" value={formatCurrency(data?.month_commissions || 0)} color="amber" />
       </div>

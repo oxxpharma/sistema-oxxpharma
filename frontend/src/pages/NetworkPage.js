@@ -96,7 +96,7 @@ export default function NetworkPage() {
       <div className="space-y-6 fade-in">
         {stats && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard icon={Users} label="Diretos" value={stats.direct} color="blue" />
+            <StatCard icon={Users} label="Diretos" value={stats.direct} color="orange" />
             <StatCard icon={NetworkIcon} label="Indiretos" value={stats.indirect} color="green" />
             <StatCard icon={Users} label="Total Rede" value={stats.total} color="purple" />
           </div>

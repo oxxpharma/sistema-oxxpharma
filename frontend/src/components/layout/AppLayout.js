@@ -5,7 +5,7 @@ import { Menu, ArrowLeft } from 'lucide-react';
 import { cn, formatCurrency } from '../../lib/utils';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-const LOGO_URL = 'https://static.prod-images.emergentagent.com/jobs/ac7e11bd-2d3b-4351-a0cb-75f5d21dc8a6/images/11999c45dfa606ad3f30f54326fa63e71a49f9d047fe241b470a9da4e5771ede.png';
+const LOGO_URL = 'https://customer-assets.emergentagent.com/job_oxx-franchise-system/artifacts/5hmh2yiu_image.png';
 
 export default function AppLayout({ children, title, subtitle, showBack = false }) {
   const { user } = useAuth();
@@ -66,9 +66,10 @@ export default function AppLayout({ children, title, subtitle, showBack = false 
   );
 }
 
-export function StatCard({ icon: Icon, label, value, trend, trendUp, color = 'blue', className }) {
+export function StatCard({ icon: Icon, label, value, trend, trendUp, color = 'orange', className }) {
   const colors = {
     blue: 'border-l-brand-main',
+    orange: 'border-l-brand-main',
     green: 'border-l-accent-green',
     amber: 'border-l-amber-500',
     red: 'border-l-accent-red',
@@ -76,6 +77,7 @@ export function StatCard({ icon: Icon, label, value, trend, trendUp, color = 'bl
   };
   const iconColors = {
     blue: 'text-brand-main',
+    orange: 'text-brand-main',
     green: 'text-accent-green',
     amber: 'text-amber-500',
     red: 'text-accent-red',

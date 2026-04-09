@@ -35,7 +35,7 @@ export default function WithdrawalsPage() {
   };
 
   const statusBadge = (s) => {
-    const colors = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', paid: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600' };
+    const colors = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-orange-100 text-orange-700', paid: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600' };
     return <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${colors[s] || 'bg-gray-100'}`}>{s}</span>;
   };
 
@@ -91,7 +91,7 @@ export default function WithdrawalsPage() {
                       )}
                       {w.status === 'approved' && (
                         <button onClick={() => updateStatus(w.withdrawal_id, 'paid')}
-                          className="px-2 py-1 text-xs font-semibold bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                          className="px-2 py-1 text-xs font-semibold bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
                           data-testid={`pay-wd-${w.withdrawal_id}`}>Marcar Pago</button>
                       )}
                     </td>

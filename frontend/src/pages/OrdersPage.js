@@ -37,7 +37,7 @@ export default function OrdersPage() {
   const statusBadge = (s) => {
     const colors = {
       pending: 'bg-amber-100 text-amber-700',
-      paid: 'bg-blue-100 text-blue-700',
+      paid: 'bg-orange-100 text-orange-700',
       shipped: 'bg-violet-100 text-violet-700',
       delivered: 'bg-green-100 text-green-700',
       cancelled: 'bg-red-100 text-red-600',

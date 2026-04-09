@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
-const COLORS = ['#0047AB', '#10B981', '#F59E0B', '#8B5CF6', '#DC2626', '#6366F1', '#EC4899'];
+const COLORS = ['#E8731A', '#10B981', '#F5A623', '#8B5CF6', '#DC2626', '#6366F1', '#EC4899'];
 
 function TabButton({ active, onClick, children }) {
   return (
@@ -70,7 +70,7 @@ function SalesReport({ token }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={ShoppingBag} label="Total Pedidos" value={data?.total_orders || 0} color="blue" />
+        <StatCard icon={ShoppingBag} label="Total Pedidos" value={data?.total_orders || 0} color="orange" />
         <StatCard icon={DollarSign} label="Pedidos Pagos" value={data?.paid_orders || 0} color="green" />
         <StatCard icon={TrendingUp} label="Receita Total" value={formatCurrency(data?.total_revenue || 0)} color="amber" />
         <StatCard icon={Package} label="Ticket Medio" value={formatCurrency(data?.avg_ticket || 0)} color="purple" />
@@ -87,7 +87,7 @@ function SalesReport({ token }) {
                 <YAxis tick={{ fill: '#4B5563', fontSize: 11 }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ border: '1px solid #E5E7EB', borderRadius: '6px', fontSize: 12 }}
                   formatter={(val) => formatCurrency(val)} />
-                <Bar dataKey="receita" fill="#0047AB" radius={[4, 4, 0, 0]} name="Receita" />
+                <Bar dataKey="receita" fill="#E8731A" radius={[4, 4, 0, 0]} name="Receita" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -169,7 +169,7 @@ function CommissionsReport({ token }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <StatCard icon={DollarSign} label="Total Comissoes" value={formatCurrency(data?.total_commissions || 0)} color="blue" />
+        <StatCard icon={DollarSign} label="Total Comissoes" value={formatCurrency(data?.total_commissions || 0)} color="orange" />
         <StatCard icon={TrendingUp} label="Total Ocorrencias" value={data?.total_count || 0} color="green" />
       </div>
 
@@ -324,7 +324,7 @@ function NetworkReport({ token }) {
                   <XAxis dataKey="date" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#4B5563', fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ border: '1px solid #E5E7EB', borderRadius: '6px', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="cadastros" stroke="#0047AB" strokeWidth={2} dot={{ r: 3 }} name="Cadastros" />
+                  <Line type="monotone" dataKey="cadastros" stroke="#E8731A" strokeWidth={2} dot={{ r: 3 }} name="Cadastros" />
                 </LineChart>
               </ResponsiveContainer>
             </div>

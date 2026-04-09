@@ -48,7 +48,7 @@ export default function CommissionsPage() {
       <div className="space-y-6 fade-in">
         {summary && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard icon={DollarSign} label="Este Mes" value={formatCurrency(summary.this_month)} color="blue" />
+            <StatCard icon={DollarSign} label="Este Mes" value={formatCurrency(summary.this_month)} color="orange" />
             <StatCard icon={TrendingUp} label="Disponivel" value={formatCurrency(summary.available_balance)} color="green" />
             <StatCard icon={Clock} label="Bloqueado" value={formatCurrency(summary.blocked_balance)} color="amber" />
           </div>
