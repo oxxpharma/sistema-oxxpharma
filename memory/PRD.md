@@ -1,90 +1,86 @@
-# OxxPharma - Sistema de Marketing Multinivel Farmaceutico
+# OxxPharma - Farmacia Digital + Programa de Afiliados
 
 ## Problem Statement
-Reestruturar completamente um sistema MLM existente (Vanguard) para OxxPharma, uma empresa farmaceutica com sistema de franquias em 4 niveis hierarquicos.
+Sistema de e-commerce farmaceutico com loja publica B2C e programa de afiliados embarcado.
+- Loja Virtual publica na rota `/` com carrinho, checkout e categorias
+- Backoffice Admin isolado em `/backoffice`
+- Sistema de afiliado: link `?ref=CODE` gera 8% de comissao sobre vendas
+- Pagamento: mock inicial, estrutura preparada para MercadoPago
 
 ## Architecture
-- **Backend**: FastAPI (Python) + MongoDB
-- **Frontend**: React + Tailwind CSS + Recharts
-- **Auth**: JWT com email/senha (bcrypt)
-- **Database**: MongoDB (oxxpharma)
+- **Backend**: FastAPI (Python) + MongoDB + Motor async
+- **Frontend**: React 18 + React Router v6 + TailwindCSS + Sonner toasts
+- **Auth**: JWT (Bearer token + cookie httponly)
+- **Database**: MongoDB (collections: users, products, categories, carts, orders, commissions)
 
 ## User Personas
-- **Admin**: Super-usuario com controle total do sistema
-- **Nacional**: Controle interno da empresa, recebe comissao para eventos/investimentos
-- **Estadual**: Profissionais da saude ou farmacias que gerenciam estados
-- **Regional**: Gestao por DDD/area de atuacao
-- **Cidade**: Unidades com lojas fisicas que vendem produtos
-- **Indicador**: Pessoas que compram e indicam novos clientes
-- **Unidade Indicadora**: Indicadores upgraded que investem e ganham comissoes
+- **Cliente final**: navega na loja, compra, pode virar afiliado compartilhando seu link
+- **Afiliado**: qualquer usuario cadastrado (link em `/indique-ganhe`), ganha 8% por venda feita via seu link
+- **Admin**: gerencia loja (produtos, categorias, pedidos, usuarios) via `/backoffice`
 
 ## Core Requirements
-1. Hierarquia de niveis com mecanica de franquias
-2. Comissoes ate 6a geracao (configuraveis)
-3. Catalogo completo de produtos (CRUD)
-4. Sistema de carteira/saldos
-5. Rede/Network tree visualization
-6. Indicadores e Unidades Indicadoras
-7. Venda cross-state (split 50/50)
-8. Painel admin com configuracoes
-9. Dashboards especificos por nivel
-10. Relatorios detalhados
-11. Fluxo de upgrade de Indicador para Unidade Indicadora
+1. Loja publica navegavel sem login (carrinho guest em localStorage)
+2. Checkout requer autenticacao
+3. Captura automatica de `?ref=CODE` da URL e persistencia em localStorage
+4. Cadastro com sponsor_code vincula afiliado permanentemente
+5. Comissao 8% gerada no checkout (pending) e virada para paid quando pedido marcado como pago
+6. CRUD admin com upload de imagens via base64 (preparado para S3 futuramente)
+7. Estrutura de pagamento compativel com MercadoPago (ativado ao setar MERCADO_PAGO_ACCESS_TOKEN)
 
 ## What's Been Implemented
 
-### Sessao 1 (2026-04-09)
-- [x] Backend completo com FastAPI (server.py)
-- [x] Auth JWT com login/register/logout
-- [x] CRUD de usuarios com filtros por nivel/estado/DDD
-- [x] CRUD de produtos completo
-- [x] Sistema de pedidos
-- [x] Comissoes ate 6a geracao
-- [x] Comissao Nacional automatica
-- [x] Carteira com saques
-- [x] Network tree
-- [x] Franquias (venda cross-state)
-- [x] Dashboard admin e usuario
-- [x] Configuracoes de comissoes
-- [x] Landing page
-- [x] Loja publica
-- [x] Referencia de estados e DDDs brasileiros
-- [x] Seed admin e nacional automatico
+### Sessao E-commerce MVP (2026-04-23)
+- [x] Backend reescrito para MVP E-commerce (server.py 850 linhas)
+- [x] Auth JWT com register/login/logout (email + cookie)
+- [x] Referral code automatico no register
+- [x] Sponsor code vinculando afiliado
+- [x] Categorias + Produtos (publicos + admin CRUD)
+- [x] Carrinho completo (guest via localStorage, server via API pos-login)
+- [x] Enderecos CRUD
+- [x] Checkout com frete fixo R$15,90
+- [x] Comissao 8% automatica (prioridade: user.sponsor_id > ref_code no body)
+- [x] Endpoints de afiliado: /referrals/validate, /users/me/referral, /users/me/commissions
+- [x] Pagamento mock + estrutura MercadoPago (/api/payments/create, /api/payments/mock/confirm, /api/payments/webhook/mercadopago)
+- [x] Admin: dashboard, produtos (com upload imagem base64), categorias, pedidos (mudar status), usuarios
+- [x] Frontend: StoreLayout publica em `/` com header/footer, BackofficeLayout com sidebar em `/backoffice`
+- [x] Paginas loja: StoreHome, ProductDetails, Cart, Checkout, OrderDetails, MyOrders, MyAddresses, MyAccount, MyReferral, SearchPage
+- [x] Paginas backoffice: Dashboard, Products, Categories, Orders, Users
+- [x] Paginas auth: Login, Register (captura sponsor_code)
+- [x] Captura URL `?ref=XXX` com RefContext + banner "Indicado por X"
+- [x] Guards de rota (Auth/Admin)
+- [x] Toaster (sonner) em portugues
+- [x] Design: paleta laranja OxxPharma, fonte Chivo + IBM Plex Sans
 
-### Sessao 2 (2026-04-09)
-- [x] Dashboards especificos por nivel:
-  - Admin: graficos de usuarios por nivel, top comissoes, receita
-  - Estadual: regionais, cidades, indicadores do estado, receita estadual
-  - Regional: unidades/cidades do DDD, indicadores, receita regional
-  - Cidade: indicadores ativos, vendas mensais, receita da unidade
-  - Indicador: progresso de upgrade (barra), indicacoes, investimento necessario
-  - Unidade Indicadora: total comissoes, indicacoes ativas, desempenho
-- [x] Relatorios detalhados com 3 tabs:
-  - Vendas: pedidos diarios, top produtos, status, filtro por periodo
-  - Comissoes: por geracao, por nivel, top comissionados, status
-  - Rede: usuarios por nivel, por estado, cadastros diarios
-- [x] Fluxo completo de upgrade Indicador -> Unidade Indicadora:
-  - Pagina de progresso com barra de indicacoes
-  - Formulario de investimento
-  - Solicitacao enviada ao admin
-  - Admin pode aprovar/rejeitar na pagina /upgrade-requests
-  - Transacao registrada no historico
+### Testes (iteration_11.json)
+- Backend: 38/38 testes PASS (100%)
+- Frontend: validado via UI (95%)
+- Fluxo E2E afiliado confirmado funcionando
 
-## Backlog (Prioritizado)
+## Backlog
+
 ### P1 - Importante
-- [ ] Upload de imagens para produtos
-- [ ] Dashboard com dados reais (seed de pedidos/comissoes para demo)
-- [ ] Filtros avancados nos relatorios (por estado, por nivel)
+- [ ] Integrar Mercado Pago real (aguardando credenciais do user)
+- [ ] Upload de imagem via file storage real (S3/GCS) em vez de base64
+- [ ] Webhook Mercado Pago processando confirmacao
 
 ### P2 - Desejavel
-- [ ] Notificacoes in-app
-- [ ] Exportar relatorios em CSV/PDF
-- [ ] Historico de alteracoes (audit log)
-- [ ] Gestao de estoque por unidade
-- [ ] Mapa de cobertura por estado/regiao
-- [ ] Sistema de metas e gamificacao
+- [ ] CEP autocomplete (ViaCEP)
+- [ ] Frete calculado (Correios API ou Melhor Envio)
+- [ ] Notificacoes por email (pedido criado/pago/enviado)
+- [ ] Pagina institucional /sobre, /politicas
+- [ ] Favicon + manifest.json
+- [ ] Modular server.py em routes/ (auth.py, products.py, cart.py, checkout.py, admin.py, payments.py)
+- [ ] Reativar MMN multi-nivel (Fase 2: estadual/regional/cidade) se desejado
 
-## Next Tasks
-1. Upload de imagens para produtos
-2. Seed de dados para demo (pedidos, comissoes)
-3. Filtros avancados nos relatorios
+### P3 - Nice to have
+- [ ] Avaliacoes de produtos
+- [ ] Lista de favoritos
+- [ ] Cupons de desconto
+- [ ] Programa de afiliados multi-nivel (ate N geracoes)
+- [ ] Pagamento parcial em saldo de comissoes
+- [ ] Dashboard de afiliado com metricas avancadas
+
+## Next Tasks (priorizado)
+1. Aguardar credenciais do MercadoPago para ativar pagamento real
+2. Upload real de imagens (quando S3/storage disponivel)
+3. Modularizar server.py antes dele ultrapassar 1000 linhas
