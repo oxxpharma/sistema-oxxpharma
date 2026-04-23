@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard } from 'lucide-react';
+import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { useReferral } from '../../contexts/RefContext';
@@ -83,6 +83,9 @@ export default function StoreHeader() {
                     <Link to="/indique-ganhe" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary text-brand-main font-semibold" onClick={() => setMenuOpen(false)} data-testid="referral-link">
                       <Share2 className="w-4 h-4" /> Indique e ganhe 8%
                     </Link>
+                    <Link to="/minha-rede" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="my-network-link">
+                      <Network className="w-4 h-4" /> Minha rede MMN
+                    </Link>
                     {isAdmin && (
                       <Link to="/backoffice" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary border-t border-border" onClick={() => setMenuOpen(false)} data-testid="backoffice-link">
                         <LayoutDashboard className="w-4 h-4" /> Painel Admin
@@ -140,6 +143,7 @@ export default function StoreHeader() {
                 <Link to="/minha-conta" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha conta</Link>
                 <Link to="/meus-pedidos" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Meus pedidos</Link>
                 <Link to="/indique-ganhe" className="block py-2 text-sm text-brand-main font-semibold" onClick={() => setMobileOpen(false)}>Indique e ganhe 8%</Link>
+                <Link to="/minha-rede" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha rede MMN</Link>
                 {isAdmin && <Link to="/backoffice" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Painel Admin</Link>}
                 <button onClick={async () => { await logout(); setMobileOpen(false); navigate('/'); }} className="block w-full text-left py-2 text-sm text-red-600">Sair</button>
               </div>

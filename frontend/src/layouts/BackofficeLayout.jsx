@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
-import { LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu, X, Network, Award, FileText, Settings } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [
@@ -8,7 +8,11 @@ const navItems = [
   { to: '/backoffice/produtos', icon: Package, label: 'Produtos', testId: 'nav-products' },
   { to: '/backoffice/categorias', icon: FolderTree, label: 'Categorias', testId: 'nav-categories' },
   { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders' },
+  { to: '/backoffice/redes', icon: Network, label: 'Redes MMN', testId: 'nav-networks' },
+  { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates' },
+  { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Relatório comissões', testId: 'nav-commissions-report' },
   { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users' },
+  { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings' },
 ];
 
 export default function BackofficeLayout() {

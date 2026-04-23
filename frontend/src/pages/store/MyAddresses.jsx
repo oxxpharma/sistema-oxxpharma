@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
-import { Input, Select } from '../../components/ui/Input';
+import AddressForm from '../../components/store/AddressForm';
 import { MapPin, Plus, Trash2, Edit, Check } from 'lucide-react';
 import { toast } from 'sonner';
-
-const STATES = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 
 const empty = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: false };
 
@@ -55,29 +53,8 @@ export default function MyAddresses() {
       {showForm && (
         <form onSubmit={submit} className="bg-white rounded-xl border border-border p-6 space-y-3 mb-6">
           <h2 className="font-bold text-lg">{editing ? 'Editar endereço' : 'Novo endereço'}</h2>
-          <div className="grid grid-cols-3 gap-3">
-            <Input label="CEP" required value={form.zip_code} onChange={e => setForm({ ...form, zip_code: e.target.value })} />
-            <Input label="Nome" className="col-span-2" value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <Input label="Rua" required className="col-span-2" value={form.street} onChange={e => setForm({ ...form, street: e.target.value })} />
-            <Input label="Número" required value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Complemento" value={form.complement || ''} onChange={e => setForm({ ...form, complement: e.target.value })} />
-            <Input label="Bairro" required value={form.neighborhood} onChange={e => setForm({ ...form, neighborhood: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <Input label="Cidade" required className="col-span-2" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />
-            <Select label="UF" value={form.state} onChange={e => setForm({ ...form, state: e.target.value })}>
-              {STATES.map(s => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.is_default} onChange={e => setForm({ ...form, is_default: e.target.checked })} />
-            Definir como endereço padrão
-          </label>
-          <div className="flex gap-2">
+          <AddressForm value={form} onChange={setForm} />
+          <div className="flex gap-2 pt-2">
             <Button type="submit">Salvar</Button>
             <Button type="button" variant="ghost" onClick={() => { setShowForm(false); setEditing(null); setForm(empty); }}>Cancelar</Button>
           </div>

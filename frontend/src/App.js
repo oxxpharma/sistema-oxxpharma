@@ -18,6 +18,7 @@ import OrderDetails from './pages/store/OrderDetails';
 import MyOrders from './pages/store/MyOrders';
 import MyAddresses from './pages/store/MyAddresses';
 import MyReferral from './pages/store/MyReferral';
+import MyNetwork from './pages/store/MyNetwork';
 import MyAccount from './pages/store/MyAccount';
 import SearchPage from './pages/store/SearchPage';
 
@@ -31,6 +32,10 @@ import AdminProducts from './pages/backoffice/AdminProducts';
 import AdminCategories from './pages/backoffice/AdminCategories';
 import AdminOrders from './pages/backoffice/AdminOrders';
 import AdminUsers from './pages/backoffice/AdminUsers';
+import AdminSettings from './pages/backoffice/AdminSettings';
+import AdminNetworks from './pages/backoffice/AdminNetworks';
+import AdminCandidates from './pages/backoffice/AdminCandidates';
+import AdminCommissionsReport from './pages/backoffice/AdminCommissionsReport';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -79,6 +84,10 @@ function AppRoutes() {
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
         <Route path="usuarios" element={<AdminUsers />} />
+        <Route path="redes" element={<AdminNetworks />} />
+        <Route path="candidatos" element={<AdminCandidates />} />
+        <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
+        <Route path="configuracoes" element={<AdminSettings />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

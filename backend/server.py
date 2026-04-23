@@ -36,8 +36,34 @@ def gen_id(prefix=""):
 def gen_referral_code() -> str:
     return uuid.uuid4().hex[:8].upper()
 
-# Comissao por afiliado sobre vendas via link de indicacao
+# Comissao por afiliado sobre vendas via link de indicacao (default - pode ser sobrescrito via settings)
 AFFILIATE_COMMISSION_RATE = 0.08
+
+# Tipos de rede MMN
+NETWORK_CUSTOMER = "customer"      # Cliente comum - so 8% afiliado, sem MMN
+NETWORK_1 = "network_1"            # Rede 1: importada do sistema externo
+NETWORK_2 = "network_2"            # Rede 2: Propagandista promovido organicamente
+
+DEFAULT_SETTINGS = {
+    "affiliate_commission_rate": 0.08,
+    # Percentuais por geracao em % (ex: 5.0 = 5%)
+    "network1_generations": [5.0, 3.0, 2.0, 1.0, 1.0, 0.5],
+    "network2_generations": [5.0, 3.0, 2.0, 1.0, 1.0, 0.5],
+    "propaganda_threshold_referrals": 5,       # minimo de indicacoes/mes para virar "em alta"
+    "propaganda_threshold_period_days": 30,     # janela de analise
+    "withdrawal_enabled": False,                # saques ativos/desativados
+    "withdrawal_min_amount": 50.0,              # valor minimo de saque
+    "withdrawal_release_days": 15,              # dias apos pagamento do pedido para liberar para saque
+}
+
+async def get_settings(db):
+    s = await db.settings.find_one({"_id": "global"})
+    if not s:
+        s = {"_id": "global", **DEFAULT_SETTINGS, "updated_at": now_iso()}
+        await db.settings.insert_one(s)
+    # Garantir campos novos (merge com defaults)
+    merged = {**DEFAULT_SETTINGS, **{k: v for k, v in s.items() if k != "_id"}}
+    return merged
 
 def hash_pw(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -158,6 +184,9 @@ async def seed_admin(db):
             "access_level": 0, "status": "active", "addresses": [],
             "referral_code": gen_referral_code(),
             "sponsor_id": None, "sponsor_code": None,
+            "network_type": NETWORK_CUSTOMER,
+            "network_sponsor_id": None,
+            "external_id": None,
             "created_at": now_iso(),
         })
         logger.info(f"Admin criado: {email}")
@@ -216,6 +245,10 @@ async def lifespan(app: FastAPI):
     await app.db.carts.create_index("user_id", unique=True)
     await app.db.commissions.create_index("commission_id", unique=True)
     await app.db.commissions.create_index("user_id")
+    await app.db.commissions.create_index([("user_id", 1), ("status", 1)])
+    await app.db.users.create_index("network_type")
+    await app.db.users.create_index("network_sponsor_id")
+    await app.db.users.create_index("external_id", sparse=True)
     await seed_admin(app.db)
     await seed_categories(app.db)
     await seed_products(app.db)
@@ -255,6 +288,9 @@ async def register(request: Request, response: Response, data: AuthRegister):
         "status": "active", "addresses": [],
         "referral_code": referral_code,
         "sponsor_id": sponsor_id, "sponsor_code": sponsor_code_norm,
+        "network_type": NETWORK_CUSTOMER,
+        "network_sponsor_id": None,
+        "external_id": None,
         "created_at": now_iso(),
     }
     await db.users.insert_one(user)
@@ -297,7 +333,7 @@ async def update_profile(request: Request, user: dict = Depends(get_current_user
     db = request.app.db
     body = await request.json()
     update = {}
-    for field in ["name", "phone", "cpf"]:
+    for field in ["name", "phone", "cpf", "pix_key", "pix_key_type"]:
         if field in body:
             update[field] = body[field]
     if update:
@@ -561,6 +597,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         raise HTTPException(status_code=400, detail="Nenhum produto valido")
     shipping = 15.90  # Frete fixo MVP
 
+    settings = await get_settings(db)
+    affiliate_rate = settings["affiliate_commission_rate"]
+
     # Identificar afiliado (prioridade: sponsor_id do usuario, senao ref_code do checkout)
     affiliate_id = None
     affiliate_code = None
@@ -576,7 +615,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             affiliate_id = aff["user_id"]
             affiliate_code = code
 
-    commission_amount = round(subtotal * AFFILIATE_COMMISSION_RATE, 2) if affiliate_id else 0
+    commission_amount = round(subtotal * affiliate_rate, 2) if affiliate_id else 0
 
     order = {
         "order_id": gen_id("ord_"), "user_id": user["user_id"],
@@ -593,20 +632,70 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     }
     await db.orders.insert_one(order)
 
-    # Registrar comissao pendente para o afiliado
+    # ============ COMISSOES ============
+    commissions_to_insert = []
+
+    # 1) Comissao de afiliado (8% configuravel) - pago a quem indicou via link
     if affiliate_id and commission_amount > 0:
-        await db.commissions.insert_one({
+        commissions_to_insert.append({
             "commission_id": gen_id("com_"),
             "user_id": affiliate_id,
             "order_id": order["order_id"],
             "customer_id": user["user_id"],
             "customer_name": user.get("name"),
+            "type": "affiliate",
+            "network_type": None,
+            "generation": 0,
             "amount": commission_amount,
-            "rate": AFFILIATE_COMMISSION_RATE,
+            "rate": affiliate_rate,
             "order_subtotal": round(subtotal, 2),
-            "status": "pending",  # pending -> paid quando pedido for marcado como pago
+            "status": "pending",
             "created_at": now_iso(),
         })
+
+    # 2) Comissoes de rede MMN (ate 6 geracoes)
+    # Regra: cadeia MMN so existe se o sponsor direto estiver em uma das redes (network_1 ou network_2).
+    # Se sponsor eh 'customer', a cadeia para ali (regra 2A).
+    sponsor = None
+    if user.get("sponsor_id"):
+        sponsor = await db.users.find_one({"user_id": user["sponsor_id"]}, {"_id": 0})
+    if sponsor and sponsor.get("network_type") in (NETWORK_1, NETWORK_2):
+        network_type = sponsor["network_type"]
+        gens_pct = settings.get(f"{'network1' if network_type == NETWORK_1 else 'network2'}_generations", [])
+        current = sponsor
+        generation = 1
+        while generation <= 6 and current:
+            pct = gens_pct[generation - 1] if generation <= len(gens_pct) else 0
+            if pct > 0:
+                amt = round(subtotal * pct / 100, 2)
+                if amt > 0:
+                    commissions_to_insert.append({
+                        "commission_id": gen_id("com_"),
+                        "user_id": current["user_id"],
+                        "order_id": order["order_id"],
+                        "customer_id": user["user_id"],
+                        "customer_name": user.get("name"),
+                        "type": "network_gen",
+                        "network_type": network_type,
+                        "generation": generation,
+                        "amount": amt,
+                        "rate": pct / 100,
+                        "order_subtotal": round(subtotal, 2),
+                        "status": "pending",
+                        "created_at": now_iso(),
+                    })
+            # Subir na rede: so sobe se proximo for da mesma rede (senao para)
+            next_id = current.get("network_sponsor_id")
+            if not next_id:
+                break
+            nxt = await db.users.find_one({"user_id": next_id}, {"_id": 0})
+            if not nxt or nxt.get("network_type") != network_type:
+                break
+            current = nxt
+            generation += 1
+
+    if commissions_to_insert:
+        await db.commissions.insert_many(commissions_to_insert)
 
     # Clear cart
     await db.carts.delete_one({"user_id": user["user_id"]})
@@ -844,6 +933,324 @@ async def mp_webhook(request: Request):
     body = await request.json()
     logger.info(f"MP webhook received: {body}")
     return {"received": True}
+
+# ==================== SETTINGS (ADMIN) ====================
+
+@app.get("/api/admin/settings")
+async def get_admin_settings(request: Request, user: dict = Depends(require_admin())):
+    return await get_settings(request.app.db)
+
+@app.put("/api/admin/settings")
+async def update_admin_settings(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    body = await request.json()
+    allowed_keys = {
+        "affiliate_commission_rate",
+        "network1_generations", "network2_generations",
+        "propaganda_threshold_referrals", "propaganda_threshold_period_days",
+        "withdrawal_enabled", "withdrawal_min_amount", "withdrawal_release_days",
+    }
+    update = {k: v for k, v in body.items() if k in allowed_keys}
+    # Sanitizar generations (garantir lista de 6 floats)
+    for key in ("network1_generations", "network2_generations"):
+        if key in update:
+            arr = update[key]
+            if not isinstance(arr, list):
+                raise HTTPException(status_code=400, detail=f"{key} deve ser uma lista")
+            arr = [float(x or 0) for x in arr[:6]]
+            while len(arr) < 6:
+                arr.append(0.0)
+            update[key] = arr
+    update["updated_at"] = now_iso()
+    await db.settings.update_one({"_id": "global"}, {"$set": update}, upsert=True)
+    return await get_settings(db)
+
+# ==================== MY NETWORK (USER) ====================
+
+@app.get("/api/users/me/network")
+async def my_network(request: Request, user: dict = Depends(get_current_user)):
+    """Retorna a rede MMN do usuario (ate 6 geracoes abaixo) com stats."""
+    db = request.app.db
+    settings = await get_settings(db)
+    network_type = user.get("network_type", NETWORK_CUSTOMER)
+    gens_pct = settings.get(f"{'network1' if network_type == NETWORK_1 else 'network2'}_generations", []) if network_type in (NETWORK_1, NETWORK_2) else []
+
+    generations = []
+    if network_type in (NETWORK_1, NETWORK_2):
+        current_ids = [user["user_id"]]
+        for gen in range(1, 7):
+            # Buscar todos abaixo deste nivel que pertencem a mesma rede
+            level_users = await db.users.find(
+                {"network_sponsor_id": {"$in": current_ids}, "network_type": network_type},
+                {"_id": 0, "password_hash": 0}
+            ).to_list(1000)
+            # Stats de comissao da geracao
+            level_user_ids = [u["user_id"] for u in level_users]
+            comm_agg = await db.commissions.aggregate([
+                {"$match": {"user_id": user["user_id"], "generation": gen, "network_type": network_type}},
+                {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+            ]).to_list(10)
+            stats = {"pending": 0, "paid": 0, "count": 0}
+            for s in comm_agg:
+                stats[s["_id"] or "pending"] = round(s["total"], 2)
+                stats["count"] += s["count"]
+            generations.append({
+                "generation": gen,
+                "rate_pct": gens_pct[gen - 1] if gen - 1 < len(gens_pct) else 0,
+                "members_count": len(level_users),
+                "pending": stats.get("pending", 0),
+                "paid": stats.get("paid", 0),
+                "total_commissions": stats.get("count", 0),
+            })
+            current_ids = level_user_ids
+            if not current_ids:
+                # Sem mais descendentes - preencher zeros ate 6
+                for g in range(gen + 1, 7):
+                    generations.append({
+                        "generation": g, "rate_pct": gens_pct[g - 1] if g - 1 < len(gens_pct) else 0,
+                        "members_count": 0, "pending": 0, "paid": 0, "total_commissions": 0,
+                    })
+                break
+
+    # Totais gerais do usuario (afiliado + MMN)
+    totals_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"]}},
+        {"$group": {"_id": "$status", "total": {"$sum": "$amount"}}}
+    ]).to_list(10)
+    totals = {"pending": 0, "paid": 0, "cancelled": 0}
+    for s in totals_agg:
+        totals[s["_id"] or "pending"] = round(s["total"], 2)
+
+    return {
+        "network_type": network_type,
+        "referral_code": user.get("referral_code"),
+        "generations": generations,
+        "totals": totals,
+        "commission_rate_affiliate": settings["affiliate_commission_rate"],
+    }
+
+# ==================== ADMIN: USERS BY NETWORK ====================
+
+@app.get("/api/admin/users-by-network")
+async def admin_users_by_network(request: Request, network_type: str, search: Optional[str] = None, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    if network_type not in (NETWORK_CUSTOMER, NETWORK_1, NETWORK_2):
+        raise HTTPException(status_code=400, detail="network_type invalido")
+    q = {"network_type": network_type}
+    if search:
+        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"email": {"$regex": search, "$options": "i"}}, {"external_id": search}]
+    total = await db.users.count_documents(q)
+    users = await db.users.find(q, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"users": users, "total": total, "page": page}
+
+@app.get("/api/admin/users/{user_id}/tree")
+async def admin_user_tree(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Retorna ate 6 geracoes abaixo do usuario, respeitando sua rede."""
+    db = request.app.db
+    root = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not root:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    network_type = root.get("network_type", NETWORK_CUSTOMER)
+    generations = []
+    current_ids = [user_id]
+    for gen in range(1, 7):
+        level = await db.users.find(
+            {"network_sponsor_id": {"$in": current_ids}, "network_type": network_type},
+            {"_id": 0, "password_hash": 0}
+        ).to_list(2000)
+        generations.append({"generation": gen, "users": level})
+        current_ids = [u["user_id"] for u in level]
+        if not current_ids:
+            break
+    return {"root": root, "generations": generations}
+
+# ==================== ADMIN: PROMOTE TO PROPAGANDISTA (NETWORK_2) ====================
+
+@app.post("/api/admin/users/{user_id}/promote-to-propagandista")
+async def promote_to_propagandista(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if target.get("network_type") != NETWORK_CUSTOMER:
+        raise HTTPException(status_code=400, detail="Somente clientes podem ser promovidos a Propagandista")
+    # network_sponsor_id = sponsor_id atual (se existir E for da rede ou for outro Propagandista)
+    network_sponsor_id = None
+    if target.get("sponsor_id"):
+        sp = await db.users.find_one({"user_id": target["sponsor_id"]}, {"_id": 0})
+        if sp and sp.get("network_type") == NETWORK_2:
+            network_sponsor_id = sp["user_id"]
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "network_type": NETWORK_2,
+            "network_sponsor_id": network_sponsor_id,
+            "promoted_at": now_iso(),
+        }},
+    )
+    return await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+
+@app.post("/api/admin/users/{user_id}/revoke-network")
+async def revoke_network(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Reverte usuario network_2 para customer (so permite em network_2)."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if target.get("network_type") != NETWORK_2:
+        raise HTTPException(status_code=400, detail="So eh possivel reverter Propagandistas (network_2)")
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"network_type": NETWORK_CUSTOMER, "network_sponsor_id": None, "revoked_at": now_iso()}},
+    )
+    return {"message": "Rede removida"}
+
+# ==================== ADMIN: CANDIDATES "EM ALTA" PARA PROPAGANDISTA ====================
+
+@app.get("/api/admin/propaganda-candidates")
+async def propaganda_candidates(request: Request, user: dict = Depends(require_admin())):
+    """Lista clientes (network_type=customer) com volume de indicacoes acima do threshold configurado."""
+    db = request.app.db
+    settings = await get_settings(db)
+    threshold = settings.get("propaganda_threshold_referrals", 5)
+    days = settings.get("propaganda_threshold_period_days", 30)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Contar indicados criados na janela por sponsor_id
+    pipeline = [
+        {"$match": {"created_at": {"$gte": since}, "sponsor_id": {"$ne": None}}},
+        {"$group": {"_id": "$sponsor_id", "count": {"$sum": 1}}},
+        {"$match": {"count": {"$gte": threshold}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 100},
+    ]
+    agg = await db.users.aggregate(pipeline).to_list(100)
+    candidate_ids = [a["_id"] for a in agg]
+    candidates = await db.users.find(
+        {"user_id": {"$in": candidate_ids}, "network_type": NETWORK_CUSTOMER},
+        {"_id": 0, "password_hash": 0}
+    ).to_list(100)
+    # Enriquecer com count
+    counts = {a["_id"]: a["count"] for a in agg}
+    for c in candidates:
+        c["referrals_in_period"] = counts.get(c["user_id"], 0)
+    candidates.sort(key=lambda x: x["referrals_in_period"], reverse=True)
+    return {"candidates": candidates, "threshold": threshold, "period_days": days}
+
+# ==================== ADMIN: IMPORT NETWORK 1 (EXCEL/CSV) ====================
+
+class Network1ImportRow(BaseModel):
+    external_id: str
+    name: str
+    email: EmailStr
+    leader_external_id: Optional[str] = None
+    phone: Optional[str] = None
+
+class Network1ImportPayload(BaseModel):
+    rows: List[Network1ImportRow]
+    default_password: Optional[str] = "oxx@pharma"
+
+@app.post("/api/admin/network1/import")
+async def import_network1(request: Request, data: Network1ImportPayload, user: dict = Depends(require_admin())):
+    """Importa/atualiza usuarios da Rede 1 a partir de uma lista (vinda de upload Excel/CSV).
+
+    Passo 1: upsert de todos os usuarios (sem network_sponsor_id ainda).
+    Passo 2: mapeia external_id -> user_id e define network_sponsor_id.
+    """
+    db = request.app.db
+    default_password = data.default_password or "oxx@pharma"
+    pw_hash = hash_pw(default_password)
+
+    # Passo 1: upsert usuarios
+    stats = {"created": 0, "updated": 0, "total": len(data.rows), "errors": []}
+    id_map = {}  # external_id -> user_id
+    for row in data.rows:
+        try:
+            existing = await db.users.find_one({"external_id": row.external_id}) or await db.users.find_one({"email": row.email.lower()})
+            if existing:
+                await db.users.update_one(
+                    {"user_id": existing["user_id"]},
+                    {"$set": {
+                        "external_id": row.external_id, "name": row.name,
+                        "phone": row.phone, "network_type": NETWORK_1,
+                    }},
+                )
+                id_map[row.external_id] = existing["user_id"]
+                stats["updated"] += 1
+            else:
+                uid = gen_id("user_")
+                rc = gen_referral_code()
+                while await db.users.find_one({"referral_code": rc}):
+                    rc = gen_referral_code()
+                await db.users.insert_one({
+                    "user_id": uid, "email": row.email.lower(),
+                    "password_hash": pw_hash, "name": row.name,
+                    "phone": row.phone, "role": "customer", "access_level": 99,
+                    "status": "active", "addresses": [],
+                    "referral_code": rc, "sponsor_id": None, "sponsor_code": None,
+                    "network_type": NETWORK_1,
+                    "network_sponsor_id": None,
+                    "external_id": row.external_id,
+                    "created_at": now_iso(),
+                })
+                id_map[row.external_id] = uid
+                stats["created"] += 1
+        except Exception as e:
+            stats["errors"].append({"external_id": row.external_id, "error": str(e)})
+
+    # Passo 2: resolver lideres
+    sponsors_set = 0
+    for row in data.rows:
+        if row.leader_external_id and row.external_id in id_map:
+            leader_uid = id_map.get(row.leader_external_id)
+            if not leader_uid:
+                # Tentar buscar no banco
+                leader_doc = await db.users.find_one({"external_id": row.leader_external_id}, {"_id": 0})
+                if leader_doc:
+                    leader_uid = leader_doc["user_id"]
+            if leader_uid:
+                await db.users.update_one(
+                    {"user_id": id_map[row.external_id]},
+                    {"$set": {"network_sponsor_id": leader_uid}},
+                )
+                sponsors_set += 1
+    stats["sponsors_mapped"] = sponsors_set
+    return stats
+
+# ==================== ADMIN: COMMISSIONS REPORT (BENEFIT CARD) ====================
+
+@app.get("/api/admin/commissions-report")
+async def admin_commissions_report(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    """Relatorio agregado por usuario para envio a empresa de cartao de beneficios."""
+    db = request.app.db
+    match = {"status": status}
+    if start:
+        match.setdefault("created_at", {})["$gte"] = start
+    if end:
+        match.setdefault("created_at", {})["$lte"] = end
+    pipeline = [
+        {"$match": match},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+    ]
+    agg = await db.commissions.aggregate(pipeline).to_list(10000)
+    # Enriquecer com dados do usuario
+    uids = [a["_id"] for a in agg]
+    users = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "password_hash": 0}).to_list(len(uids))
+    umap = {u["user_id"]: u for u in users}
+    rows = []
+    for a in agg:
+        u = umap.get(a["_id"], {})
+        rows.append({
+            "user_id": a["_id"],
+            "cpf": u.get("cpf"),
+            "name": u.get("name"),
+            "email": u.get("email"),
+            "pix_key": u.get("pix_key"),
+            "amount": round(a["total"], 2),
+            "commissions_count": a["count"],
+        })
+    return {"rows": rows, "status": status, "period": {"start": start, "end": end}}
 
 @app.get("/api/health")
 async def health():

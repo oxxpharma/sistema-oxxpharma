@@ -1,0 +1,41 @@
+{
+  "summary": "Fase 2A OxxPharma - 18/18 backend tests PASS (100%). Validated: Settings CRUD + sanitization (6 generations), register defaults to customer, promote/revoke propagandista (network_2), profile CPF/PIX update, Network1 CSV import (create+update+leader mapping via external_id), users-by-network (customer/network_1/network_2), user tree 6 gens, propaganda candidates structure, commissions report aggregated, MMN engine E2E (customer sponsor -> NO network commission, only 8% affiliate per Regra 2A; network_2 chain B (8%+gen1) + A (gen2 @3%) via network_sponsor_id). Frontend validated: admin login -> /backoffice, sidebar tem novos links (Redes MMN, Candidatos, Relatorio comissoes, Configuracoes), /backoffice/configuracoes renderiza forms completos com Rede1/Rede2 (6 inputs cada), saques, affiliate rate e botao Salvar. /backoffice/redes tem 3 tabs com tabela de usuarios (Rede 1 mostrou 7 users importados). /backoffice/relatorio-comissoes tem filtros status/periodo, tabela CPF/Nome/Email/Chave PIX/Total e botao Exportar CSV. /minha-rede para customer mostra 'Indique e ganhe 8%'. /minha-conta tem campos CPF e PIX. /meus-enderecos tem form Novo endereco com campos CEP/Rua/Bairro/Cidade/UF (ViaCEP lookup validado externamente).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/backoffice/relatorio-comissoes", "issues": ["Usa browser default date picker (input type=date) ao inves de shadcn Calendar component - per playbook guidelines, calendar picker customizado eh preferido"]},
+      {"screen": "Console global", "issues": ["React Router v6 future flag warnings (v7_startTransition, v7_relativeSplatPath) - cosmetico", "404s (favicon/manifest) persistem da iteracao anterior"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2a_mmn.py",
+    "/app/test_reports/pytest/pytest_phase2a.xml"
+  ],
+  "action_items": [
+    "[BAIXO] Trocar input type=date por componente Calendar (shadcn) em AdminCommissionsReport.jsx para consistencia de UX",
+    "[COSMETICO-herdado] Adicionar favicon.ico/manifest.json e habilitar React Router v7 future flags (iteration_11 backlog)"
+  ],
+  "critical_code_review_comments": [
+    "server.py cresceu para 1257 linhas - passou significativamente do limite de 700. URGENTE dividir em modulos: auth, products, cart, checkout (com motor MMN), admin_settings, admin_network, admin_reports, payments. Esta fase adicionou ~400 linhas em endpoints novos.",
+    "CORS persiste com allow_origins=['*'] + allow_credentials=True - invalido per spec navegadores; Manter de iteration_11 sem correcao.",
+    "commissions doc: type/network_type/generation nao estao indexados - relatorio e my_network usam agregacao por generation/network_type/status, recomenda-se criar indices compostos em db.commissions (user_id, generation, network_type) e (status, created_at) para escalabilidade.",
+    "promote-to-propagandista: network_sponsor_id so eh setado se sponsor atual for NETWORK_2. Se sponsor for network_1, network_sponsor_id fica null - comportamento correto per regra, mas vale documentar que clientes indicados por users de Rede 1 que virarem propagandistas comecam 'orfaos' na Rede 2.",
+    "Import Network 1: errors list em upsert swallow exception generica em stats['errors'] mas nao aborta - bom para tolerancia, mas emails duplicados entre rows do mesmo batch podem gerar estado parcial se TX falhar. Considerar validacao previa de duplicatas na request.",
+    "useCep.js: hook funcional e bem escrito, mas nao tem debounce - se blur dispara multiplas vezes (ex: user clica rapidamente), pode haver race. Considerar usar AbortController para cancelar requests em voo."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2a_mmn.py"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "95%"},
+  "test_credentials": "Admin: admin@oxxpharma.com / admin123 (funcionando). Customers de teste criados dinamicamente com prefixo test_p2a_ e test_ui_.",
+  "seed_data_creation": "Durante os testes foram criados ~15 usuarios adicionais (test_p2a_*, test_ui_*, n1_*, EXT_* da importacao de rede 1). Rede 1 agora tem ~7 usuarios visiveis no backoffice (Joao Silva EXT001, Maria Costa EXT002, Pedro Alves EXT003 + 4 da importacao de teste). Commissions criadas no teste MMN E2E ficaram no DB como pending.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_phase2a_mmn.py cobre 100% dos novos endpoints da Fase 2A e o motor MMN com Regra 2A validada. Pode ser executado como regressao com `pytest backend/tests/test_phase2a_mmn.py -v`. Para test_ecommerce.py (iteracao anterior) continuar funcionando. O unico gap de UI foi o teste automatizado do ViaCEP autocomplete no DOM (selector issue - o input de CEP usa placeholder '00000-000' nao contem 'cep'/'zip' em name/data-testid). Sugerido adicionar data-testid='address-zip-input' no AddressForm.jsx. ViaCEP API foi validada manualmente (curl) e o hook useCep.js esta implementado corretamente.",
+  "rca of the issue": "N/A - Todos os 18 testes backend passando. Motor MMN validado E2E: customer sponsor bloqueia cadeia (Regra 2A), network_2 propaga 6 gens corretamente com rates [5,3,2,1,1,0.5]%, affiliate 8% gerado para sponsor direto em ambos os cenarios."
+}

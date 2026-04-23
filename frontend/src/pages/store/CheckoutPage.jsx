@@ -5,11 +5,11 @@ import { useCart } from '../../contexts/CartContext';
 import { useReferral } from '../../contexts/RefContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
-import { Input, Select } from '../../components/ui/Input';
+import AddressForm from '../../components/store/AddressForm';
 import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const STATES = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+const emptyAddr = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true };
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
@@ -21,7 +21,7 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showNewAddr, setShowNewAddr] = useState(false);
-  const [newAddr, setNewAddr] = useState({ label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true });
+  const [newAddr, setNewAddr] = useState(emptyAddr);
 
   useEffect(() => {
     (async () => {
@@ -139,24 +139,7 @@ export default function CheckoutPage() {
 
             {showNewAddr && (
               <form onSubmit={addAddress} className="space-y-3" data-testid="new-addr-form">
-                <div className="grid grid-cols-3 gap-3">
-                  <Input label="CEP" required value={newAddr.zip_code} onChange={e => setNewAddr({ ...newAddr, zip_code: e.target.value })} placeholder="00000-000" />
-                  <Input label="Nome (ex: Casa)" value={newAddr.label} onChange={e => setNewAddr({ ...newAddr, label: e.target.value })} className="col-span-2" />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <Input label="Rua" required className="col-span-2" value={newAddr.street} onChange={e => setNewAddr({ ...newAddr, street: e.target.value })} />
-                  <Input label="Número" required value={newAddr.number} onChange={e => setNewAddr({ ...newAddr, number: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input label="Complemento" value={newAddr.complement} onChange={e => setNewAddr({ ...newAddr, complement: e.target.value })} />
-                  <Input label="Bairro" required value={newAddr.neighborhood} onChange={e => setNewAddr({ ...newAddr, neighborhood: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <Input label="Cidade" required className="col-span-2" value={newAddr.city} onChange={e => setNewAddr({ ...newAddr, city: e.target.value })} />
-                  <Select label="UF" value={newAddr.state} onChange={e => setNewAddr({ ...newAddr, state: e.target.value })}>
-                    {STATES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </Select>
-                </div>
+                <AddressForm value={newAddr} onChange={setNewAddr} showDefault={false} />
                 <div className="flex gap-2 pt-2">
                   <Button type="submit" data-testid="save-addr-btn">Salvar endereço</Button>
                   {addresses.length > 0 && (
