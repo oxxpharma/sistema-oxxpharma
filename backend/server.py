@@ -5,6 +5,7 @@ Backend API: Auth, Products, Categories, Cart, Checkout, Orders, Addresses, Admi
 
 import os
 import uuid
+import asyncio
 import bcrypt
 import logging
 from datetime import datetime, timezone, timedelta
@@ -14,11 +15,13 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from motor.motor_asyncio import AsyncIOMotorClient
 import jwt
+
+import email_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,6 +68,22 @@ DEFAULT_SETTINGS = {
     "company_email": "contato@oxxpharma.com",
     "invoice_prefix": "OXX",
     "invoice_counter": 0,                       # incrementado a cada emissao
+    # Email (Resend)
+    "email_enabled": False,
+    "resend_api_key": "",
+    "email_from": "OxxPharma <onboarding@resend.dev>",
+    "email_admin_recipients": "",               # lista de emails (virgula) que recebem alertas admin
+    # Gatilhos on/off (admin controla granularmente)
+    "email_trigger_order_created": True,
+    "email_trigger_order_paid": True,
+    "email_trigger_order_shipped": True,
+    "email_trigger_order_delivered": True,
+    "email_trigger_commission_earned": True,
+    "email_trigger_admin_new_candidate": True,
+    "email_trigger_admin_new_order": True,
+    "email_trigger_welcome": True,
+    # Webhook inbound Rede 1
+    "external_webhook_token": "",               # gerado no seed
 }
 
 async def get_settings(db):
@@ -75,6 +94,33 @@ async def get_settings(db):
     # Garantir campos novos (merge com defaults)
     merged = {**DEFAULT_SETTINGS, **{k: v for k, v in s.items() if k != "_id"}}
     return merged
+
+
+def get_app_url():
+    """URL base do frontend para construir links em emails."""
+    return os.environ.get("APP_URL") or os.environ.get("REACT_APP_BACKEND_URL") or "https://oxx-franchise-system.preview.emergentagent.com"
+
+
+def order_ctx(order: dict, user: dict):
+    oid = order.get("order_id", "")
+    app_url = get_app_url()
+    return {
+        "order": order,
+        "user": user,
+        "order_short_id": (oid[-8:].upper() if oid else ""),
+        "order_link": f"{app_url}/pedido/{oid}",
+        "referral_link": f"{app_url}/?ref={user.get('referral_code', '')}" if user.get('referral_code') else app_url,
+    }
+
+
+async def admin_recipients(db) -> List[str]:
+    settings = await get_settings(db)
+    raw = (settings.get("email_admin_recipients") or "").strip()
+    if not raw:
+        # Fallback: todos os usuarios com role=admin
+        admins = await db.users.find({"role": "admin"}, {"_id": 0, "email": 1}).to_list(20)
+        return [a.get("email") for a in admins if a.get("email")]
+    return [x.strip() for x in raw.split(",") if x.strip()]
 
 def hash_pw(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -215,6 +261,8 @@ async def seed_admin(db):
             update["password_hash"] = hash_pw(pw)
         if not existing.get("referral_code"):
             update["referral_code"] = gen_referral_code()
+        if existing.get("role") != "admin":
+            update["role"] = "admin"
         if update:
             await db.users.update_one({"email": email}, {"$set": update})
 
@@ -273,6 +321,21 @@ async def lifespan(app: FastAPI):
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
+    await app.db.email_templates.create_index("slug", unique=True)
+    await app.db.email_templates.create_index("template_id", unique=True)
+    await app.db.email_logs.create_index("log_id", unique=True)
+    await app.db.email_logs.create_index("created_at")
+    await app.db.webhook_logs.create_index("log_id", unique=True)
+    await app.db.webhook_logs.create_index("created_at")
+    await email_service.seed_default_templates(app.db)
+    # Garantir token de webhook
+    settings_doc = await app.db.settings.find_one({"_id": "global"}) or {}
+    if not settings_doc.get("external_webhook_token"):
+        await app.db.settings.update_one(
+            {"_id": "global"},
+            {"$set": {"external_webhook_token": gen_referral_code() + gen_referral_code()}},
+            upsert=True,
+        )
     await seed_admin(app.db)
     await seed_categories(app.db)
     await seed_products(app.db)
@@ -321,6 +384,31 @@ async def register(request: Request, response: Response, data: AuthRegister):
     token = create_token(user["user_id"], user["email"], "customer")
     set_cookie(response, token)
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    # Email de boas-vindas (async, nao bloqueia)
+    app_url = get_app_url()
+    asyncio.create_task(email_service.trigger(db, "welcome", u["email"], {
+        "user": u,
+        "referral_link": f"{app_url}/?ref={u.get('referral_code','')}",
+    }))
+    # Se tem sponsor customer, checa se virou candidato a Propagandista
+    if sponsor_id:
+        sponsor = await db.users.find_one({"user_id": sponsor_id}, {"_id": 0, "password_hash": 0})
+        if sponsor and sponsor.get("network_type") == NETWORK_CUSTOMER:
+            settings = await get_settings(db)
+            threshold = int(settings.get("propaganda_threshold_referrals") or 5)
+            period_days = int(settings.get("propaganda_threshold_period_days") or 30)
+            since = (datetime.now(timezone.utc) - timedelta(days=period_days)).isoformat()
+            count = await db.users.count_documents({"sponsor_id": sponsor_id, "created_at": {"$gte": since}})
+            # Notificar apenas no momento em que CRUZA o threshold (evita spam)
+            if count == threshold:
+                admins = await admin_recipients(db)
+                if admins:
+                    url = f"{app_url}/backoffice/candidatos"
+                    asyncio.create_task(email_service.trigger(db, "admin_new_candidate", admins, {
+                        "candidate": {**sponsor, "referrals_in_period": count},
+                        "period_days": period_days,
+                        "admin_link": url,
+                    }))
     return {"token": token, "user": u}
 
 @app.post("/api/auth/login")
@@ -723,7 +811,37 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
 
     # Clear cart
     await db.carts.delete_one({"user_id": user["user_id"]})
-    return await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
+    final_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
+
+    # === EMAILS (async, nao bloqueia a response) ===
+    ctx = order_ctx(final_order, user)
+    # Pedido criado -> cliente
+    asyncio.create_task(email_service.trigger(db, "order_created", user["email"], ctx))
+    # Novo pedido -> admins
+    admins = await admin_recipients(db)
+    if admins:
+        app_url = get_app_url()
+        asyncio.create_task(email_service.trigger(db, "admin_new_order", admins, {
+            **ctx, "items_count": len(items),
+            "admin_link": f"{app_url}/backoffice/pedidos",
+        }))
+    # Comissoes de afiliado -> cada beneficiario
+    for comm in commissions_to_insert:
+        if comm.get("type") != "affiliate":
+            continue
+        receiver = await db.users.find_one({"user_id": comm["user_id"]}, {"_id": 0, "password_hash": 0})
+        if not receiver or not receiver.get("email"):
+            continue
+        asyncio.create_task(email_service.trigger(db, "commission_earned", receiver["email"], {
+            **order_ctx(final_order, receiver),
+            "customer_name": user.get("name"),
+            "commission": {
+                "amount": f"{comm['amount']:.2f}",
+                "rate_pct": f"{comm.get('rate', 0) * 100:.1f}",
+            },
+        }))
+
+    return final_order
 
 @app.get("/api/orders")
 async def list_user_orders(request: Request, page: int = 1, limit: int = 10, user: dict = Depends(get_current_user)):
@@ -798,7 +916,16 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
             {"order_id": order_id, "status": {"$in": ["pending", "paid"]}},
             {"$set": {"status": "cancelled"}},
         )
-    return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    final = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    # Gatilhos de email
+    order_user = await db.users.find_one({"user_id": final.get("user_id")}, {"_id": 0, "password_hash": 0}) if final else None
+    if final and order_user and order_user.get("email"):
+        ctx = order_ctx(final, order_user)
+        slug_map = {"paid": "order_paid", "shipped": "order_shipped", "delivered": "order_delivered"}
+        slug = slug_map.get(status)
+        if slug:
+            asyncio.create_task(email_service.trigger(db, slug, order_user["email"], ctx))
+    return final
 
 # ==================== ADMIN USERS ====================
 
@@ -962,7 +1089,11 @@ async def mock_confirm_payment(request: Request, order_id: str, user: dict = Dep
         {"order_id": order_id, "status": "pending"},
         {"$set": {"status": "paid", "paid_at": now_iso()}},
     )
-    return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    final = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    order_user = await db.users.find_one({"user_id": final.get("user_id")}, {"_id": 0, "password_hash": 0}) if final else None
+    if final and order_user and order_user.get("email"):
+        asyncio.create_task(email_service.trigger(db, "order_paid", order_user["email"], order_ctx(final, order_user)))
+    return final
 
 @app.post("/api/payments/webhook/mercadopago")
 async def mp_webhook(request: Request):
@@ -989,6 +1120,11 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_a
         "company_name", "company_cnpj", "company_address", "company_city",
         "company_state", "company_zip", "company_phone", "company_email",
         "invoice_prefix",
+        "email_enabled", "resend_api_key", "email_from", "email_admin_recipients",
+        "email_trigger_order_created", "email_trigger_order_paid",
+        "email_trigger_order_shipped", "email_trigger_order_delivered",
+        "email_trigger_commission_earned", "email_trigger_admin_new_candidate",
+        "email_trigger_admin_new_order", "email_trigger_welcome",
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
@@ -1614,6 +1750,246 @@ async def admin_export_withdrawals(request: Request, status: str = "approved", u
         "created_at": w["created_at"],
     } for w in items]
     return {"rows": rows, "status": status, "count": len(rows)}
+
+# ==================== EMAIL TEMPLATES (ADMIN) ====================
+
+class EmailTemplateIn(BaseModel):
+    slug: str
+    name: str
+    subject: str
+    body_html: str
+    body_text: Optional[str] = ""
+    active: bool = True
+
+class EmailBroadcast(BaseModel):
+    subject: str
+    body_html: str
+    body_text: Optional[str] = ""
+    # target: "all" | "network_1" | "network_2" | "customer" | "admin" | "user_ids"
+    target: str = "all"
+    user_ids: Optional[List[str]] = None
+    emails: Optional[List[EmailStr]] = None  # envio direto para emails especificos
+
+class EmailTestIn(BaseModel):
+    to: EmailStr
+    subject: str = "Teste de envio - OxxPharma"
+    body_html: str = "<p>Este e um teste de envio via Resend.</p>"
+
+@app.get("/api/admin/email-templates")
+async def list_email_templates(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    items = await db.email_templates.find({}, {"_id": 0}).sort("slug", 1).to_list(200)
+    return {"templates": items}
+
+@app.post("/api/admin/email-templates")
+async def create_email_template(request: Request, data: EmailTemplateIn, user: dict = Depends(require_admin())):
+    db = request.app.db
+    if await db.email_templates.find_one({"slug": data.slug}):
+        raise HTTPException(status_code=400, detail="slug ja existe")
+    doc = {
+        "template_id": gen_id("tpl_"),
+        **data.model_dump(),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.email_templates.insert_one(doc)
+    return await db.email_templates.find_one({"template_id": doc["template_id"]}, {"_id": 0})
+
+@app.put("/api/admin/email-templates/{template_id}")
+async def update_email_template(request: Request, template_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    body = await request.json()
+    allowed = {"name", "subject", "body_html", "body_text", "active", "slug"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    update["updated_at"] = now_iso()
+    await db.email_templates.update_one({"template_id": template_id}, {"$set": update})
+    return await db.email_templates.find_one({"template_id": template_id}, {"_id": 0})
+
+@app.delete("/api/admin/email-templates/{template_id}")
+async def delete_email_template(request: Request, template_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    await db.email_templates.delete_one({"template_id": template_id})
+    return {"message": "Removido"}
+
+@app.post("/api/admin/email-templates/{template_id}/reset")
+async def reset_email_template(request: Request, template_id: str, user: dict = Depends(require_admin())):
+    """Restaura template padrao se for um gatilho default."""
+    db = request.app.db
+    doc = await db.email_templates.find_one({"template_id": template_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template nao encontrado")
+    default = next((t for t in email_service.DEFAULT_TEMPLATES if t["slug"] == doc["slug"]), None)
+    if not default:
+        raise HTTPException(status_code=400, detail="Este template nao possui versao padrao")
+    await db.email_templates.update_one(
+        {"template_id": template_id},
+        {"$set": {**default, "updated_at": now_iso()}},
+    )
+    return await db.email_templates.find_one({"template_id": template_id}, {"_id": 0})
+
+@app.post("/api/admin/email-test")
+async def send_test_email(request: Request, data: EmailTestIn, user: dict = Depends(require_admin())):
+    db = request.app.db
+    result = await email_service.send_email(db, data.to, data.subject, data.body_html, meta={"type": "test", "by": user["user_id"]})
+    return result
+
+@app.post("/api/admin/email-broadcast")
+async def email_broadcast(request: Request, data: EmailBroadcast, user: dict = Depends(require_admin())):
+    db = request.app.db
+    # Resolver destinatarios
+    emails: List[str] = []
+    if data.emails:
+        emails.extend([str(e) for e in data.emails])
+    if data.target == "user_ids" and data.user_ids:
+        users = await db.users.find({"user_id": {"$in": data.user_ids}}, {"_id": 0, "email": 1}).to_list(len(data.user_ids))
+        emails.extend([u.get("email") for u in users if u.get("email")])
+    elif data.target in ("customer", "network_1", "network_2"):
+        users = await db.users.find({"network_type": data.target}, {"_id": 0, "email": 1}).to_list(10000)
+        emails.extend([u.get("email") for u in users if u.get("email")])
+    elif data.target == "admin":
+        users = await db.users.find({"role": "admin"}, {"_id": 0, "email": 1}).to_list(100)
+        emails.extend([u.get("email") for u in users if u.get("email")])
+    elif data.target == "all":
+        users = await db.users.find({"status": "active"}, {"_id": 0, "email": 1}).to_list(50000)
+        emails.extend([u.get("email") for u in users if u.get("email")])
+    # Dedup
+    emails = list({e.lower() for e in emails if e})
+    if not emails:
+        raise HTTPException(status_code=400, detail="Nenhum destinatario encontrado")
+
+    # Dispara em lote (sequencial para nao saturar; Resend limita a ~10 req/s com key free)
+    sent = 0
+    failed = 0
+    for em in emails:
+        r = await email_service.send_email(db, em, data.subject, data.body_html, text=data.body_text, meta={"type": "broadcast", "target": data.target, "by": user["user_id"]})
+        if r.get("sent"):
+            sent += 1
+        else:
+            failed += 1
+    return {"sent": sent, "failed": failed, "total": len(emails)}
+
+@app.get("/api/admin/email-logs")
+async def list_email_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.email_logs.count_documents({})
+    logs = await db.email_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
+# ==================== EXTERNAL SYNC WEBHOOK (REDE 1) ====================
+
+class ExternalSyncUser(BaseModel):
+    external_id: str
+    name: str
+    email: EmailStr
+    leader_external_id: Optional[str] = None
+    phone: Optional[str] = None
+
+class ExternalSyncPayload(BaseModel):
+    action: str = "upsert"   # "upsert" | "delete"
+    users: List[ExternalSyncUser]
+    default_password: Optional[str] = "oxx@pharma"
+
+@app.post("/api/external/network1/sync")
+async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_webhook_token: Optional[str] = Header(None)):
+    """Webhook inbound para o sistema externo sincronizar usuarios da Rede 1.
+
+    Autenticacao: header X-Webhook-Token deve coincidir com settings.external_webhook_token.
+    Actions: 'upsert' cria/atualiza, 'delete' remove network (nao apaga user).
+    """
+    db = request.app.db
+    settings = await get_settings(db)
+    expected = (settings.get("external_webhook_token") or "").strip()
+    if not expected or not x_webhook_token or x_webhook_token != expected:
+        # Log tentativa
+        await db.webhook_logs.insert_one({
+            "log_id": gen_id("whk_"), "source": "network1_sync",
+            "authorized": False, "action": data.action,
+            "users_count": len(data.users), "created_at": now_iso(),
+        })
+        raise HTTPException(status_code=401, detail="Token invalido")
+
+    stats = {"created": 0, "updated": 0, "deleted": 0, "errors": []}
+    id_map = {}
+    if data.action == "upsert":
+        pw_hash = hash_pw(data.default_password or "oxx@pharma")
+        for row in data.users:
+            try:
+                existing = await db.users.find_one({"external_id": row.external_id}) or await db.users.find_one({"email": row.email.lower()})
+                if existing:
+                    await db.users.update_one(
+                        {"user_id": existing["user_id"]},
+                        {"$set": {
+                            "external_id": row.external_id, "name": row.name,
+                            "phone": row.phone, "network_type": NETWORK_1,
+                        }},
+                    )
+                    id_map[row.external_id] = existing["user_id"]
+                    stats["updated"] += 1
+                else:
+                    uid = gen_id("user_")
+                    rc = gen_referral_code()
+                    while await db.users.find_one({"referral_code": rc}):
+                        rc = gen_referral_code()
+                    await db.users.insert_one({
+                        "user_id": uid, "email": row.email.lower(),
+                        "password_hash": pw_hash, "name": row.name,
+                        "phone": row.phone, "role": "customer", "access_level": 99,
+                        "status": "active", "addresses": [],
+                        "referral_code": rc, "sponsor_id": None, "sponsor_code": None,
+                        "network_type": NETWORK_1,
+                        "network_sponsor_id": None,
+                        "external_id": row.external_id,
+                        "created_at": now_iso(),
+                    })
+                    id_map[row.external_id] = uid
+                    stats["created"] += 1
+            except Exception as e:
+                stats["errors"].append({"external_id": row.external_id, "error": str(e)})
+        # Resolver lideres
+        for row in data.users:
+            if row.leader_external_id and row.external_id in id_map:
+                leader_uid = id_map.get(row.leader_external_id)
+                if not leader_uid:
+                    leader_doc = await db.users.find_one({"external_id": row.leader_external_id}, {"_id": 0})
+                    if leader_doc:
+                        leader_uid = leader_doc["user_id"]
+                if leader_uid:
+                    await db.users.update_one(
+                        {"user_id": id_map[row.external_id]},
+                        {"$set": {"network_sponsor_id": leader_uid}},
+                    )
+    elif data.action == "delete":
+        for row in data.users:
+            existing = await db.users.find_one({"external_id": row.external_id})
+            if existing:
+                await db.users.update_one(
+                    {"user_id": existing["user_id"]},
+                    {"$set": {"network_type": NETWORK_CUSTOMER, "network_sponsor_id": None, "revoked_at": now_iso()}},
+                )
+                stats["deleted"] += 1
+    else:
+        raise HTTPException(status_code=400, detail=f"action '{data.action}' invalida")
+
+    await db.webhook_logs.insert_one({
+        "log_id": gen_id("whk_"), "source": "network1_sync",
+        "authorized": True, "action": data.action,
+        "users_count": len(data.users), "stats": stats, "created_at": now_iso(),
+    })
+    return stats
+
+@app.get("/api/admin/webhook-logs")
+async def list_webhook_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.webhook_logs.count_documents({})
+    logs = await db.webhook_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
+@app.post("/api/admin/webhook-token/regenerate")
+async def regenerate_webhook_token(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    token = gen_referral_code() + gen_referral_code()
+    await db.settings.update_one({"_id": "global"}, {"$set": {"external_webhook_token": token, "updated_at": now_iso()}})
+    return {"external_webhook_token": token}
 
 @app.get("/api/health")
 async def health():

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
-import { LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu, X, Network, Award, FileText, Settings, Wallet, Receipt } from 'lucide-react';
+import { LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu, X, Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [
@@ -12,6 +12,9 @@ const navItems = [
   { to: '/backoffice/redes', icon: Network, label: 'Redes MMN', testId: 'nav-networks' },
   { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates' },
   { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Relatório comissões', testId: 'nav-commissions-report' },
+  { to: '/backoffice/saques', icon: Wallet, label: 'Saques', testId: 'nav-withdrawals' },
+  { to: '/backoffice/emails', icon: Mail, label: 'Emails', testId: 'nav-emails' },
+  { to: '/backoffice/webhook', icon: Webhook, label: 'API Sync', testId: 'nav-webhook' },
   { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users' },
   { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings' },
 ];
