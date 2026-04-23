@@ -141,6 +141,25 @@ Sistema com 3 pilares:
 - [x] Admin pode emitir manualmente pedido pago sem nota
 - [x] 12/13 testes backend (1 skip) + 90% frontend validado
 
+### Sessao 5 (2026-04-23) - Fase 2E: Emails Resend + Webhook Inbound Rede 1
+- [x] Integracao Resend (SDK + fallback silencioso quando key ausente)
+- [x] Modulo email_service.py com render_template mustache {{var}}, send_email, send_template, trigger
+- [x] 8 templates default seedados (welcome, order_*, commission_earned, admin_new_*)
+- [x] Collection email_templates (CRUD admin + reset para padrao)
+- [x] Collection email_logs (toda tentativa logada, sucesso ou falha)
+- [x] Gatilhos automaticos: register (welcome), checkout (order_created + admin_new_order + commission_earned), paid/shipped/delivered, detect candidate ao atingir threshold
+- [x] Gatilhos on/off granular em settings (email_trigger_*)
+- [x] Endpoint broadcast com targets (all/customer/network_1/network_2/admin/user_ids/emails)
+- [x] POST /api/admin/email-test (envia email de teste avulso)
+- [x] Credenciais no painel admin: resend_api_key, email_from, email_admin_recipients, email_enabled
+- [x] Webhook INBOUND /api/external/network1/sync autenticado por X-Webhook-Token
+- [x] actions: upsert (cria/atualiza + mapeia lider) e delete (reverte network_1 para customer)
+- [x] Collection webhook_logs (toda chamada logada com stats)
+- [x] Token gerado automaticamente no startup, regeneravel pelo admin
+- [x] Pagina /backoffice/emails (4 tabs: Config, Modelos, Broadcast, Logs)
+- [x] Pagina /backoffice/webhook (URL/token + docs + exemplo curl + logs)
+- [x] 19/19 testes backend (100%) + 100% frontend validado
+
 ## Backlog
 
 ### P0 - Fase 2D (proxima sessao): MercadoPago real
