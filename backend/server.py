@@ -54,6 +54,17 @@ DEFAULT_SETTINGS = {
     "withdrawal_enabled": False,                # saques ativos/desativados
     "withdrawal_min_amount": 50.0,              # valor minimo de saque
     "withdrawal_release_days": 15,              # dias apos pagamento do pedido para liberar para saque
+    # Dados da empresa (para notas de faturamento)
+    "company_name": "OxxPharma Farmacia Ltda",
+    "company_cnpj": "",
+    "company_address": "",
+    "company_city": "",
+    "company_state": "",
+    "company_zip": "",
+    "company_phone": "",
+    "company_email": "contato@oxxpharma.com",
+    "invoice_prefix": "OXX",
+    "invoice_counter": 0,                       # incrementado a cada emissao
 }
 
 async def get_settings(db):
@@ -760,6 +771,11 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
     if status == "paid":
         update["payment_status"] = "paid"
         update["paid_at"] = now_iso()
+        # Auto-emitir nota de faturamento na 1a vez que pedido for marcado como pago
+        if not o.get("invoice_number"):
+            inv = await issue_invoice(db, o)
+            update["invoice_number"] = inv["number"]
+            update["invoice_issued_at"] = inv["issued_at"]
     elif status == "shipped":
         update["shipped_at"] = now_iso()
     elif status == "delivered":
@@ -933,6 +949,14 @@ async def mock_confirm_payment(request: Request, order_id: str, user: dict = Dep
         {"order_id": order_id},
         {"$set": {"payment_status": "paid", "order_status": "paid", "paid_at": now_iso()}},
     )
+    # Auto-emitir nota se ainda nao tiver
+    fresh = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if fresh and not fresh.get("invoice_number"):
+        inv = await issue_invoice(db, fresh)
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {"invoice_number": inv["number"], "invoice_issued_at": inv["issued_at"]}},
+        )
     await db.commissions.update_many(
         {"order_id": order_id, "status": "pending"},
         {"$set": {"status": "paid", "paid_at": now_iso()}},
@@ -961,6 +985,9 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_a
         "network1_generations", "network2_generations",
         "propaganda_threshold_referrals", "propaganda_threshold_period_days",
         "withdrawal_enabled", "withdrawal_min_amount", "withdrawal_release_days",
+        "company_name", "company_cnpj", "company_address", "company_city",
+        "company_state", "company_zip", "company_phone", "company_email",
+        "invoice_prefix",
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
@@ -1263,6 +1290,105 @@ async def admin_commissions_report(request: Request, status: str = "paid", start
             "commissions_count": a["count"],
         })
     return {"rows": rows, "status": status, "period": {"start": start, "end": end}}
+
+# ==================== INVOICES (FATURAMENTO INTERNO) ====================
+
+async def issue_invoice(db, order: dict):
+    """Incrementa contador de notas e retorna {number, issued_at}. Nao persiste no order aqui."""
+    settings = await get_settings(db)
+    prefix = settings.get("invoice_prefix") or "OXX"
+    # Atomico: incrementar contador
+    result = await db.settings.find_one_and_update(
+        {"_id": "global"},
+        {"$inc": {"invoice_counter": 1}},
+        return_document=True,
+        upsert=True,
+    )
+    counter = (result or {}).get("invoice_counter", 1)
+    number = f"{prefix}-{str(counter).zfill(6)}"
+    return {"number": number, "issued_at": now_iso(), "counter": counter}
+
+async def build_invoice_data(db, order: dict):
+    """Monta o objeto completo de nota (empresa + pedido) para exibicao/impressao."""
+    settings = await get_settings(db)
+    company = {
+        "name": settings.get("company_name"),
+        "cnpj": settings.get("company_cnpj"),
+        "address": settings.get("company_address"),
+        "city": settings.get("company_city"),
+        "state": settings.get("company_state"),
+        "zip": settings.get("company_zip"),
+        "phone": settings.get("company_phone"),
+        "email": settings.get("company_email"),
+    }
+    # Busca CPF do usuario se existir
+    buyer = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) or {}
+    return {
+        "invoice_number": order.get("invoice_number"),
+        "invoice_issued_at": order.get("invoice_issued_at"),
+        "order": order,
+        "company": company,
+        "buyer": {
+            "name": order.get("customer_name") or buyer.get("name"),
+            "email": order.get("customer_email") or buyer.get("email"),
+            "cpf": buyer.get("cpf"),
+            "phone": buyer.get("phone"),
+        },
+    }
+
+@app.get("/api/orders/{order_id}/invoice")
+async def get_invoice(request: Request, order_id: str, user: dict = Depends(get_current_user)):
+    """Usuario/admin consulta dados da nota do pedido."""
+    db = request.app.db
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    is_admin = user.get("role") == "admin" or user.get("access_level", 99) <= 1
+    if not is_admin and o.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    if not o.get("invoice_number"):
+        raise HTTPException(status_code=404, detail="Nota ainda nao emitida. Pedido precisa estar pago.")
+    return await build_invoice_data(db, o)
+
+@app.post("/api/admin/orders/{order_id}/issue-invoice")
+async def admin_issue_invoice(request: Request, order_id: str, user: dict = Depends(require_admin())):
+    """Admin emite manualmente (caso pedido ja esteja pago sem nota, ou precise re-emitir)."""
+    db = request.app.db
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    if o.get("order_status") not in ("paid", "shipped", "delivered"):
+        raise HTTPException(status_code=400, detail="Pedido precisa estar pago para emitir nota")
+    if o.get("invoice_number"):
+        raise HTTPException(status_code=400, detail=f"Nota ja emitida: {o['invoice_number']}")
+    inv = await issue_invoice(db, o)
+    await db.orders.update_one(
+        {"order_id": order_id},
+        {"$set": {"invoice_number": inv["number"], "invoice_issued_at": inv["issued_at"]}},
+    )
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    return await build_invoice_data(db, o)
+
+@app.get("/api/admin/invoices")
+async def admin_list_invoices(request: Request, search: Optional[str] = None, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    """Lista pedidos com nota emitida (faturamento interno)."""
+    db = request.app.db
+    q = {"invoice_number": {"$ne": None}}
+    if search:
+        q["$or"] = [
+            {"invoice_number": {"$regex": search, "$options": "i"}},
+            {"customer_name": {"$regex": search, "$options": "i"}},
+            {"customer_email": {"$regex": search, "$options": "i"}},
+        ]
+    total = await db.orders.count_documents(q)
+    orders = await db.orders.find(q, {"_id": 0}).sort("invoice_issued_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    # Agregado faturado
+    agg = await db.orders.aggregate([
+        {"$match": {"invoice_number": {"$ne": None}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total"}, "subtotal": {"$sum": "$subtotal"}}},
+    ]).to_list(1)
+    totals = {"total": round((agg[0]["total"] if agg else 0), 2), "subtotal": round((agg[0]["subtotal"] if agg else 0), 2), "count": total}
+    return {"invoices": orders, "total": total, "page": page, "totals": totals}
 
 # ==================== WITHDRAWALS (SAQUES) ====================
 

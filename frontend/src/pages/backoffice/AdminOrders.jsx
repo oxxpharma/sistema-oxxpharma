@@ -153,6 +153,32 @@ export default function AdminOrders() {
                 </div>
               )}
 
+              {selected.invoice_number ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-emerald-700 font-semibold">Nota emitida</div>
+                    <div className="font-mono font-bold">{selected.invoice_number}</div>
+                  </div>
+                  <a href={`/pedido/${selected.order_id}/nota`} target="_blank" rel="noreferrer" className="text-brand-main font-semibold text-sm hover:underline" data-testid="admin-view-invoice">
+                    Ver / Imprimir
+                  </a>
+                </div>
+              ) : (selected.order_status === 'paid' || selected.order_status === 'shipped' || selected.order_status === 'delivered') ? (
+                <Button size="sm" variant="outline" onClick={async () => {
+                  try {
+                    await api.post(`/api/admin/orders/${selected.order_id}/issue-invoice`);
+                    toast.success('Nota emitida');
+                    const q = new URLSearchParams();
+                    if (status) q.set('status', status);
+                    q.set('limit', '100');
+                    const d = await api.get(`/api/admin/orders?${q}`);
+                    setOrders(d.orders || []);
+                    const updated = (d.orders || []).find(x => x.order_id === selected.order_id);
+                    if (updated) setSelected(updated);
+                  } catch (err) { toast.error(err.message); }
+                }} data-testid="issue-invoice-btn">Emitir nota de faturamento</Button>
+              ) : null}
+
               <div className="space-y-1 text-sm pt-3 border-t border-border">
                 <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(selected.subtotal)}</span></div>
                 <div className="flex justify-between"><span>Frete</span><span>{formatCurrency(selected.shipping_cost)}</span></div>

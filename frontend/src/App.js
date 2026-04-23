@@ -15,6 +15,7 @@ import ProductDetails from './pages/store/ProductDetails';
 import CartPage from './pages/store/CartPage';
 import CheckoutPage from './pages/store/CheckoutPage';
 import OrderDetails from './pages/store/OrderDetails';
+import InvoicePage from './pages/store/InvoicePage';
 import MyOrders from './pages/store/MyOrders';
 import MyAddresses from './pages/store/MyAddresses';
 import MyReferral from './pages/store/MyReferral';
@@ -38,6 +39,7 @@ import AdminNetworks from './pages/backoffice/AdminNetworks';
 import AdminCandidates from './pages/backoffice/AdminCandidates';
 import AdminCommissionsReport from './pages/backoffice/AdminCommissionsReport';
 import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
+import AdminInvoices from './pages/backoffice/AdminInvoices';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -69,6 +71,7 @@ function AppRoutes() {
         <Route path="/carrinho" element={<CartPage />} />
         <Route path="/checkout" element={<Guard requireAuth><CheckoutPage /></Guard>} />
         <Route path="/pedido/:id" element={<Guard requireAuth><OrderDetails /></Guard>} />
+        <Route path="/pedido/:id/nota" element={<Guard requireAuth><InvoicePage /></Guard>} />
         <Route path="/meus-pedidos" element={<Guard requireAuth><MyOrders /></Guard>} />
         <Route path="/meus-enderecos" element={<Guard requireAuth><MyAddresses /></Guard>} />
         <Route path="/indique-ganhe" element={<Guard requireAuth><MyReferral /></Guard>} />
@@ -92,6 +95,7 @@ function AppRoutes() {
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
         <Route path="saques" element={<AdminWithdrawals />} />
+        <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="configuracoes" element={<AdminSettings />} />
       </Route>
 

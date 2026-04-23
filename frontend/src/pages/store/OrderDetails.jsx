@@ -66,6 +66,17 @@ export default function OrderDetails() {
         <div className="mt-3 flex justify-center">
           <Badge variant={status.variant}>{status.label}</Badge>
         </div>
+        {order.invoice_number && (
+          <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center justify-between gap-3" data-testid="invoice-banner">
+            <div className="text-left">
+              <div className="text-xs text-emerald-700 font-semibold uppercase tracking-wider">Nota de faturamento</div>
+              <div className="font-mono font-black text-lg text-emerald-900">{order.invoice_number}</div>
+            </div>
+            <Link to={`/pedido/${order.order_id}/nota`} target="_blank">
+              <Button variant="outline" size="sm" data-testid="view-invoice-btn">Ver nota</Button>
+            </Link>
+          </div>
+        )}
         {isPending && (
           <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 text-left">
             <p className="text-sm text-amber-800 mb-3">
