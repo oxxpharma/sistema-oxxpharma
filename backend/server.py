@@ -260,6 +260,7 @@ async def lifespan(app: FastAPI):
     await app.db.products.create_index("category")
     await app.db.orders.create_index("order_id", unique=True)
     await app.db.orders.create_index("user_id")
+    await app.db.orders.create_index("invoice_number", unique=True, sparse=True)
     await app.db.categories.create_index("category_id", unique=True)
     await app.db.carts.create_index("user_id", unique=True)
     await app.db.commissions.create_index("commission_id", unique=True)

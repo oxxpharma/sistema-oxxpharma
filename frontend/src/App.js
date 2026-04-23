@@ -71,7 +71,6 @@ function AppRoutes() {
         <Route path="/carrinho" element={<CartPage />} />
         <Route path="/checkout" element={<Guard requireAuth><CheckoutPage /></Guard>} />
         <Route path="/pedido/:id" element={<Guard requireAuth><OrderDetails /></Guard>} />
-        <Route path="/pedido/:id/nota" element={<Guard requireAuth><InvoicePage /></Guard>} />
         <Route path="/meus-pedidos" element={<Guard requireAuth><MyOrders /></Guard>} />
         <Route path="/meus-enderecos" element={<Guard requireAuth><MyAddresses /></Guard>} />
         <Route path="/indique-ganhe" element={<Guard requireAuth><MyReferral /></Guard>} />
@@ -79,6 +78,9 @@ function AppRoutes() {
         <Route path="/meus-saques" element={<Guard requireAuth><MyWithdrawals /></Guard>} />
         <Route path="/minha-conta" element={<Guard requireAuth><MyAccount /></Guard>} />
       </Route>
+
+      {/* Nota de faturamento: standalone (sem header/footer) para impressão limpa */}
+      <Route path="/pedido/:id/nota" element={<Guard requireAuth><InvoicePage /></Guard>} />
 
       {/* AUTH */}
       <Route path="/login" element={<LoginPage />} />

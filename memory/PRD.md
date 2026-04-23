@@ -126,17 +126,36 @@ Sistema com 3 pilares:
 - [x] Quarentena respeita withdrawal_release_days
 - [x] 17/18 testes backend (1 skip) + 95% frontend validado
 
+### Sessao 4 (2026-04-23) - Fase 2C: Faturamento Interno
+- [x] Dados da empresa configuraveis (company_name, cnpj, address, city, state, zip, phone, email, invoice_prefix)
+- [x] Contador atomico `invoice_counter` em settings
+- [x] Auto-emissao de nota quando pedido vira 'paid' (em mock/confirm e admin update status)
+- [x] Numero sequencial com prefixo (ex: OXX-000001)
+- [x] Indice unique sparse em orders.invoice_number (previne duplicatas)
+- [x] Endpoints: GET /api/orders/{id}/invoice (user/admin ACL), POST /api/admin/orders/{id}/issue-invoice (manual), GET /api/admin/invoices (lista + totais)
+- [x] Pagina /pedido/:id/nota - layout A4 imprimivel com window.print() e @media print CSS
+- [x] Rota standalone (sem header/footer) para impressao limpa
+- [x] Pagina /backoffice/faturamento - lista + busca + CSV export
+- [x] Secao "Dados da empresa" em /backoffice/configuracoes
+- [x] Banner verde em /pedido/:id e modal admin mostrando nota emitida + link "Ver/Imprimir"
+- [x] Admin pode emitir manualmente pedido pago sem nota
+- [x] 12/13 testes backend (1 skip) + 90% frontend validado
+
 ## Backlog
 
-### P0 - Fase 2C (proxima sessao): Faturamento interno
-- [ ] Nota de faturamento (numero, itens, totais, cliente, endereco)
-- [ ] Layout imprimível/PDF
-- [ ] Geracao no pedido pago
+### P0 - Fase 2D (proxima sessao): MercadoPago real
+- [ ] Aguardando MERCADO_PAGO_ACCESS_TOKEN do user
+- [ ] PIX/cartao/boleto via SDK Mercado Pago
+- [ ] Webhook `/api/payments/webhook/mercadopago` processando status
+- [ ] Remover botao "Simular pagamento" quando token ativo
 
-### P1 - Fase 2D: Integracao MercadoPago
-- [ ] Aguardando MERCADO_PAGO_ACCESS_TOKEN
-- [ ] PIX/cartao/boleto reais
-- [ ] Webhook handler
+### P1 - Notificacoes
+- [ ] Email transacional via Resend/SendGrid:
+  - Pedido criado, pago, enviado
+  - Comissao gerada
+  - Candidato a Propagandista (para admin)
+  - Saque aprovado/pago
+  - Cadastro via link de indicacao (para o afiliado)
 
 ### P2 - Melhorias
 - [ ] Upload de imagem para S3 (hoje base64)
