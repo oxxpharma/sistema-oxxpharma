@@ -1,6 +1,6 @@
 """
-OxxPharma - Sistema de Marketing Multinivel Farmaceutico
-Estrutura de Franquias: Nacional > Estadual > Regional (DDD) > Cidade
+OxxPharma - E-commerce MVP (Fase 1)
+Backend API: Auth, Products, Categories, Cart, Checkout, Orders, Addresses, Admin
 """
 
 import os
@@ -16,136 +16,95 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 from motor.motor_asyncio import AsyncIOMotorClient
 import jwt
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Config
 MONGO_URL = os.environ.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME")
 JWT_SECRET = os.environ.get("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 
-# Access Levels
-ACCESS_LEVELS = {
-    0: "admin",
-    1: "nacional",
-    2: "estadual",
-    3: "regional",
-    4: "cidade",
-    5: "indicador",
-    6: "unidade_indicadora",
-}
-
-LEVEL_NAMES = {
-    0: "Administrador",
-    1: "Nacional",
-    2: "Estadual",
-    3: "Regional",
-    4: "Cidade",
-    5: "Indicador",
-    6: "Unidade Indicadora",
-}
-
 # ==================== HELPERS ====================
 
-def generate_id(prefix=""):
+def gen_id(prefix=""):
     return f"{prefix}{uuid.uuid4().hex[:12]}"
 
-def generate_referral_code():
-    return uuid.uuid4().hex[:8].upper()
+def hash_pw(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def hash_password(password: str) -> str:
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
-
-def verify_password(plain: str, hashed: str) -> bool:
+def verify_pw(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
-def create_access_token(user_id: str, email: str) -> str:
-    payload = {
-        "sub": user_id,
-        "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
-        "type": "access"
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+def create_token(user_id: str, email: str, role: str = "customer") -> str:
+    return jwt.encode({
+        "sub": user_id, "email": email, "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(days=7), "type": "access"
+    }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 async def get_current_user(request: Request):
     token = request.cookies.get("access_token")
     if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise HTTPException(status_code=401, detail="Nao autenticado")
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        if payload.get("type") != "access":
-            raise HTTPException(status_code=401, detail="Invalid token type")
-        user_id = payload.get("sub")
-        user = await request.app.db.users.find_one({"user_id": user_id}, {"_id": 0})
+        user = await request.app.db.users.find_one({"user_id": payload["sub"]}, {"_id": 0})
         if not user:
-            raise HTTPException(status_code=401, detail="User not found")
+            raise HTTPException(status_code=401, detail="Usuario nao encontrado")
         return user
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Token invalido")
 
-def require_level(max_level: int):
+async def get_optional_user(request: Request):
+    try:
+        return await get_current_user(request)
+    except Exception:
+        return None
+
+def require_admin():
     async def dep(user: dict = Depends(get_current_user)):
-        if user.get("access_level", 99) > max_level:
+        if user.get("role") != "admin" and user.get("access_level", 99) > 1:
             raise HTTPException(status_code=403, detail="Acesso negado")
         return user
     return dep
 
-def set_auth_cookies(response: Response, token: str):
-    response.set_cookie(
-        key="access_token", value=token,
-        httponly=True, secure=False, samesite="lax",
-        max_age=7*24*60*60, path="/"
-    )
+def set_cookie(response: Response, token: str):
+    response.set_cookie(key="access_token", value=token, httponly=True, secure=False, samesite="lax", max_age=7*24*60*60, path="/")
 
 # ==================== MODELS ====================
 
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class UserRegister(BaseModel):
+class AuthRegister(BaseModel):
     email: EmailStr
     password: str
     name: str
     phone: Optional[str] = None
-    cpf: Optional[str] = None
-    access_level: int = 5
-    sponsor_code: Optional[str] = None
-    state: Optional[str] = None
-    ddd: Optional[str] = None
-    city: Optional[str] = None
 
-class UserUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    cpf: Optional[str] = None
-    password: Optional[str] = None
-    access_level: Optional[int] = None
-    status: Optional[str] = None
-    state: Optional[str] = None
-    ddd: Optional[str] = None
-    city: Optional[str] = None
-    address: Optional[dict] = None
-    bank_info: Optional[dict] = None
-    available_balance: Optional[float] = None
-    blocked_balance: Optional[float] = None
-    franchise_value: Optional[float] = None
-    annual_revenue: Optional[float] = None
+class AuthLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class AddressCreate(BaseModel):
+    label: Optional[str] = "Casa"
+    street: str
+    number: str
+    complement: Optional[str] = None
+    neighborhood: str
+    city: str
+    state: str
+    zip_code: str
+    is_default: bool = False
 
 class ProductCreate(BaseModel):
     name: str
@@ -153,204 +112,132 @@ class ProductCreate(BaseModel):
     price: float
     discount_price: Optional[float] = None
     category: str
+    subcategory: Optional[str] = None
     images: List[str] = []
     stock: int = 0
     active: bool = True
+    featured: bool = False
+    brand: Optional[str] = None
+    weight: Optional[float] = None
 
-class OrderCreate(BaseModel):
-    items: List[dict]
-    shipping_address: Optional[dict] = None
-    payment_method: str = "internal"
-    referral_code: Optional[str] = None
+class CategoryCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    parent: Optional[str] = None
+    order: int = 0
+    active: bool = True
 
-class SettingsUpdate(BaseModel):
-    key: str
-    value: str
+class CartItemAdd(BaseModel):
+    product_id: str
+    quantity: int = 1
 
-class WithdrawalRequest(BaseModel):
-    amount: float
-
-class UpgradeRequest(BaseModel):
-    investment_amount: float
+class CheckoutData(BaseModel):
+    address_id: str
+    payment_method: str = "pix"
+    notes: Optional[str] = None
 
 # ==================== LIFESPAN ====================
 
 async def seed_admin(db):
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@oxxpharma.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
-    existing = await db.users.find_one({"email": admin_email})
+    email = os.environ.get("ADMIN_EMAIL", "admin@oxxpharma.com")
+    pw = os.environ.get("ADMIN_PASSWORD", "admin123")
+    existing = await db.users.find_one({"email": email})
     if not existing:
-        admin_user = {
-            "user_id": generate_id("user_"),
-            "email": admin_email,
-            "password_hash": hash_password(admin_password),
-            "name": "Administrador OxxPharma",
-            "phone": None,
-            "cpf": None,
-            "access_level": 0,
-            "status": "active",
-            "referral_code": generate_referral_code(),
-            "sponsor_id": None,
-            "state": None,
-            "ddd": None,
-            "city": None,
-            "franchise_value": 0,
-            "annual_revenue": 0,
-            "available_balance": 0,
-            "blocked_balance": 0,
-            "address": None,
-            "bank_info": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.users.insert_one(admin_user)
-        logger.info(f"Admin criado: {admin_email}")
-    elif not verify_password(admin_password, existing.get("password_hash", "")):
-        await db.users.update_one(
-            {"email": admin_email},
-            {"$set": {"password_hash": hash_password(admin_password)}}
-        )
+        await db.users.insert_one({
+            "user_id": gen_id("user_"), "email": email, "password_hash": hash_pw(pw),
+            "name": "Administrador OxxPharma", "phone": None, "role": "admin",
+            "access_level": 0, "status": "active", "addresses": [],
+            "created_at": now_iso(),
+        })
+        logger.info(f"Admin criado: {email}")
+    elif not verify_pw(pw, existing.get("password_hash", "")):
+        await db.users.update_one({"email": email}, {"$set": {"password_hash": hash_pw(pw)}})
 
-    # Seed Nacional user
-    nacional = await db.users.find_one({"access_level": 1})
-    if not nacional:
-        nacional_user = {
-            "user_id": generate_id("user_"),
-            "email": "nacional@oxxpharma.com",
-            "password_hash": hash_password("nacional123"),
-            "name": "Conta Nacional OxxPharma",
-            "phone": None,
-            "cpf": None,
-            "access_level": 1,
-            "status": "active",
-            "referral_code": generate_referral_code(),
-            "sponsor_id": None,
-            "state": None,
-            "ddd": None,
-            "city": None,
-            "franchise_value": 0,
-            "annual_revenue": 0,
-            "available_balance": 0,
-            "blocked_balance": 0,
-            "address": None,
-            "bank_info": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.users.insert_one(nacional_user)
-        logger.info("Conta Nacional criada: nacional@oxxpharma.com")
+async def seed_categories(db):
+    count = await db.categories.count_documents({})
+    if count == 0:
+        cats = [
+            {"category_id": gen_id("cat_"), "name": "Medicamentos", "description": "Medicamentos em geral", "image_url": "", "parent": None, "order": 1, "active": True, "created_at": now_iso()},
+            {"category_id": gen_id("cat_"), "name": "Dermocosmeticos", "description": "Cuidados com a pele", "image_url": "", "parent": None, "order": 2, "active": True, "created_at": now_iso()},
+            {"category_id": gen_id("cat_"), "name": "Vitaminas e Suplementos", "description": "Vitaminas e suplementos alimentares", "image_url": "", "parent": None, "order": 3, "active": True, "created_at": now_iso()},
+            {"category_id": gen_id("cat_"), "name": "Higiene Pessoal", "description": "Produtos de higiene", "image_url": "", "parent": None, "order": 4, "active": True, "created_at": now_iso()},
+            {"category_id": gen_id("cat_"), "name": "Infantil", "description": "Produtos infantis", "image_url": "", "parent": None, "order": 5, "active": True, "created_at": now_iso()},
+            {"category_id": gen_id("cat_"), "name": "Bem-estar", "description": "Produtos para bem-estar", "image_url": "", "parent": None, "order": 6, "active": True, "created_at": now_iso()},
+        ]
+        await db.categories.insert_many(cats)
+        logger.info("Categorias padrao criadas")
 
-async def seed_settings(db):
-    existing = await db.settings.find_one({"settings_id": "global"})
-    if not existing:
-        settings = {
-            "settings_id": "global",
-            "commission_gen_1": 10,
-            "commission_gen_2": 7,
-            "commission_gen_3": 5,
-            "commission_gen_4": 3,
-            "commission_gen_5": 2,
-            "commission_gen_6": 1,
-            "nacional_commission": 2,
-            "min_withdrawal": 50,
-            "withdrawal_fee_percent": 5,
-            "commission_block_days": 7,
-            "cross_state_split": 50,
-            "indicador_min_referrals_upgrade": 20,
-            "unidade_indicadora_investment": 500,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.settings.insert_one(settings)
-        logger.info("Configuracoes padrao criadas")
+async def seed_products(db):
+    count = await db.products.count_documents({})
+    if count == 0:
+        prods = [
+            {"product_id": gen_id("prod_"), "name": "Vitamina C 1000mg", "description": "Vitamina C efervescente com 10 comprimidos. Reforco para imunidade.", "price": 29.90, "discount_price": 22.90, "category": "Vitaminas e Suplementos", "images": ["https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400"], "stock": 150, "active": True, "featured": True, "brand": "OxxVita", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Protetor Solar FPS 50", "description": "Protetor solar facial e corporal com alta protecao. Textura leve.", "price": 89.90, "discount_price": 69.90, "category": "Dermocosmeticos", "images": ["https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400"], "stock": 80, "active": True, "featured": True, "brand": "OxxDerm", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Omega 3 EPA DHA", "description": "Oleo de peixe concentrado com 60 capsulas. Saude cardiovascular.", "price": 59.90, "discount_price": 44.90, "category": "Vitaminas e Suplementos", "images": ["https://images.unsplash.com/photo-1550572017-edd951aa8f72?w=400"], "stock": 200, "active": True, "featured": True, "brand": "OxxVita", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Shampoo Anticaspa 200ml", "description": "Shampoo anticaspa de uso diario. Controle eficaz.", "price": 34.90, "discount_price": None, "category": "Higiene Pessoal", "images": ["https://images.unsplash.com/photo-1631729371254-42c2892f0e6e?w=400"], "stock": 120, "active": True, "featured": False, "brand": "OxxCare", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Creme Hidratante Corporal", "description": "Hidratante corporal com vitamina E. Pele macia e sedosa.", "price": 45.90, "discount_price": 35.90, "category": "Dermocosmeticos", "images": ["https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400"], "stock": 90, "active": True, "featured": True, "brand": "OxxDerm", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Multivitaminico A-Z", "description": "Complexo multivitaminico completo com 30 comprimidos.", "price": 39.90, "discount_price": 29.90, "category": "Vitaminas e Suplementos", "images": ["https://images.unsplash.com/photo-1559757175-7cb057fba93c?w=400"], "stock": 250, "active": True, "featured": False, "brand": "OxxVita", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Fralda Infantil P c/40", "description": "Fraldas descartaveis tamanho P com 40 unidades.", "price": 49.90, "discount_price": 39.90, "category": "Infantil", "images": ["https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?w=400"], "stock": 60, "active": True, "featured": False, "brand": "OxxBaby", "created_at": now_iso()},
+            {"product_id": gen_id("prod_"), "name": "Colageno Hidrolisado", "description": "Colageno em po com 300g. Pele, cabelos e unhas.", "price": 79.90, "discount_price": 59.90, "category": "Bem-estar", "images": ["https://images.unsplash.com/photo-1556228724-4e756cee32a3?w=400"], "stock": 100, "active": True, "featured": True, "brand": "OxxVita", "created_at": now_iso()},
+        ]
+        await db.products.insert_many(prods)
+        logger.info("Produtos demo criados")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.mongodb_client = AsyncIOMotorClient(MONGO_URL)
     app.db = app.mongodb_client[DB_NAME]
     logger.info("Conectado ao MongoDB")
-
     await app.db.users.create_index("email", unique=True)
     await app.db.users.create_index("user_id", unique=True)
-    await app.db.users.create_index("referral_code", unique=True)
-    await app.db.users.create_index("access_level")
     await app.db.products.create_index("product_id", unique=True)
+    await app.db.products.create_index("category")
     await app.db.orders.create_index("order_id", unique=True)
-    await app.db.commissions.create_index("commission_id", unique=True)
-
+    await app.db.orders.create_index("user_id")
+    await app.db.categories.create_index("category_id", unique=True)
+    await app.db.carts.create_index("user_id", unique=True)
     await seed_admin(app.db)
-    await seed_settings(app.db)
-
+    await seed_categories(app.db)
+    await seed_products(app.db)
     yield
-
     app.mongodb_client.close()
-    logger.info("Desconectado do MongoDB")
 
-app = FastAPI(title="OxxPharma MLM API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="OxxPharma E-commerce API", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # ==================== AUTH ====================
 
 @app.post("/api/auth/register")
-async def register(request: Request, response: Response, data: UserRegister):
+async def register(request: Request, response: Response, data: AuthRegister):
     db = request.app.db
-    existing = await db.users.find_one({"email": data.email.lower()})
-    if existing:
+    if await db.users.find_one({"email": data.email.lower()}):
         raise HTTPException(status_code=400, detail="Email ja cadastrado")
-
-    sponsor_id = None
-    if data.sponsor_code:
-        sponsor = await db.users.find_one({"referral_code": data.sponsor_code}, {"_id": 0})
-        if not sponsor:
-            raise HTTPException(status_code=400, detail="Codigo de indicacao invalido")
-        sponsor_id = sponsor["user_id"]
-
     user = {
-        "user_id": generate_id("user_"),
-        "email": data.email.lower(),
-        "password_hash": hash_password(data.password),
-        "name": data.name,
-        "phone": data.phone,
-        "cpf": data.cpf,
-        "access_level": data.access_level,
-        "status": "active",
-        "referral_code": generate_referral_code(),
-        "sponsor_id": sponsor_id,
-        "state": data.state,
-        "ddd": data.ddd,
-        "city": data.city,
-        "franchise_value": 0,
-        "annual_revenue": 0,
-        "available_balance": 0,
-        "blocked_balance": 0,
-        "address": None,
-        "bank_info": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "user_id": gen_id("user_"), "email": data.email.lower(),
+        "password_hash": hash_pw(data.password), "name": data.name,
+        "phone": data.phone, "role": "customer", "access_level": 99,
+        "status": "active", "addresses": [], "created_at": now_iso(),
     }
     await db.users.insert_one(user)
-
-    token = create_access_token(user["user_id"], user["email"])
-    set_auth_cookies(response, token)
-
-    user_resp = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
-    return {"token": token, "user": user_resp}
+    token = create_token(user["user_id"], user["email"], "customer")
+    set_cookie(response, token)
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {"token": token, "user": u}
 
 @app.post("/api/auth/login")
-async def login(request: Request, response: Response, data: UserLogin):
+async def login(request: Request, response: Response, data: AuthLogin):
     db = request.app.db
     user = await db.users.find_one({"email": data.email.lower()}, {"_id": 0})
-    if not user or not verify_password(data.password, user.get("password_hash", "")):
+    if not user or not verify_pw(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Credenciais invalidas")
     if user.get("status") == "cancelled":
-        raise HTTPException(status_code=401, detail="Conta cancelada")
-
-    token = create_access_token(user["user_id"], user["email"])
-    set_auth_cookies(response, token)
-
+        raise HTTPException(status_code=401, detail="Conta desativada")
+    role = user.get("role", "customer")
+    if user.get("access_level", 99) <= 1:
+        role = "admin"
+    token = create_token(user["user_id"], user["email"], role)
+    set_cookie(response, token)
     user.pop("password_hash", None)
     return {"token": token, "user": user}
 
@@ -365,204 +252,122 @@ async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
     return {"message": "Deslogado"}
 
-# ==================== USERS ====================
+# ==================== USER PROFILE & ADDRESSES ====================
 
-@app.get("/api/users")
-async def list_users(
-    request: Request,
-    access_level: Optional[int] = None,
-    status: Optional[str] = None,
-    state: Optional[str] = None,
-    ddd: Optional[str] = None,
-    city: Optional[str] = None,
-    search: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
-    user: dict = Depends(require_level(4))
-):
+@app.put("/api/users/me")
+async def update_profile(request: Request, user: dict = Depends(get_current_user)):
     db = request.app.db
-    query = {}
-    if access_level is not None:
-        query["access_level"] = access_level
-    if status:
-        query["status"] = status
-    if state:
-        query["state"] = state
-    if ddd:
-        query["ddd"] = ddd
-    if city:
-        query["city"] = city
-    if search:
-        query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}},
-        ]
+    body = await request.json()
+    update = {}
+    for field in ["name", "phone", "cpf"]:
+        if field in body:
+            update[field] = body[field]
+    if update:
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return u
 
-    # Level-based filtering
-    ul = user.get("access_level", 99)
-    if ul == 2:  # Estadual sees regional+cidade in their state
-        query["state"] = user.get("state")
-        if "access_level" not in query:
-            query["access_level"] = {"$gte": 3}
-    elif ul == 3:  # Regional sees cidade in their DDD
-        query["ddd"] = user.get("ddd")
-        if "access_level" not in query:
-            query["access_level"] = {"$gte": 4}
-    elif ul == 4:  # Cidade sees indicadores
-        query["sponsor_id"] = user["user_id"]
+@app.get("/api/users/me/addresses")
+async def list_addresses(user: dict = Depends(get_current_user)):
+    return {"addresses": user.get("addresses", [])}
 
-    total = await db.users.count_documents(query)
-    users = await db.users.find(query, {"_id": 0, "password_hash": 0}).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"users": users, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
-
-@app.get("/api/users/{user_id}")
-async def get_user(request: Request, user_id: str, user: dict = Depends(get_current_user)):
+@app.post("/api/users/me/addresses")
+async def add_address(request: Request, data: AddressCreate, user: dict = Depends(get_current_user)):
     db = request.app.db
-    target = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
-    if not target:
-        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
-    return target
+    addr = data.model_dump()
+    addr["address_id"] = gen_id("addr_")
+    addrs = user.get("addresses", [])
+    if data.is_default:
+        for a in addrs:
+            a["is_default"] = False
+    addrs.append(addr)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"addresses": addrs}})
+    return {"addresses": addrs}
 
-@app.put("/api/users/{user_id}")
-async def update_user(request: Request, user_id: str, data: UserUpdate, current_user: dict = Depends(get_current_user)):
+@app.put("/api/users/me/addresses/{address_id}")
+async def update_address(request: Request, address_id: str, data: AddressCreate, user: dict = Depends(get_current_user)):
     db = request.app.db
-    is_admin = current_user.get("access_level", 99) <= 1
-    is_self = current_user["user_id"] == user_id
-    if not is_admin and not is_self:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+    addrs = user.get("addresses", [])
+    found = False
+    for i, a in enumerate(addrs):
+        if a.get("address_id") == address_id:
+            new_addr = data.model_dump()
+            new_addr["address_id"] = address_id
+            if data.is_default:
+                for x in addrs:
+                    x["is_default"] = False
+            addrs[i] = new_addr
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Endereco nao encontrado")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"addresses": addrs}})
+    return {"addresses": addrs}
 
-    target = await db.users.find_one({"user_id": user_id})
-    if not target:
-        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
-
-    update_data = {}
-    # Self-editable fields
-    if data.name is not None:
-        update_data["name"] = data.name
-    if data.phone is not None:
-        update_data["phone"] = data.phone
-    if data.cpf is not None:
-        update_data["cpf"] = data.cpf
-    if data.address is not None:
-        update_data["address"] = data.address
-    if data.bank_info is not None:
-        update_data["bank_info"] = data.bank_info
-
-    # Admin-only fields
-    if is_admin:
-        if data.email is not None:
-            ex = await db.users.find_one({"email": data.email.lower(), "user_id": {"$ne": user_id}})
-            if ex:
-                raise HTTPException(status_code=400, detail="Email ja em uso")
-            update_data["email"] = data.email.lower()
-        if data.password:
-            update_data["password_hash"] = hash_password(data.password)
-        if data.access_level is not None:
-            update_data["access_level"] = data.access_level
-        if data.status is not None:
-            update_data["status"] = data.status
-        if data.state is not None:
-            update_data["state"] = data.state
-        if data.ddd is not None:
-            update_data["ddd"] = data.ddd
-        if data.city is not None:
-            update_data["city"] = data.city
-        if data.available_balance is not None:
-            update_data["available_balance"] = data.available_balance
-        if data.blocked_balance is not None:
-            update_data["blocked_balance"] = data.blocked_balance
-        if data.franchise_value is not None:
-            update_data["franchise_value"] = data.franchise_value
-        if data.annual_revenue is not None:
-            update_data["annual_revenue"] = data.annual_revenue
-
-    if not update_data:
-        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
-
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.users.update_one({"user_id": user_id}, {"$set": update_data})
-
-    updated = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
-    return updated
-
-@app.delete("/api/users/{user_id}")
-async def delete_user(request: Request, user_id: str, user: dict = Depends(require_level(0))):
+@app.delete("/api/users/me/addresses/{address_id}")
+async def delete_address(request: Request, address_id: str, user: dict = Depends(get_current_user)):
     db = request.app.db
-    if user_id == user["user_id"]:
-        raise HTTPException(status_code=400, detail="Nao pode excluir sua propria conta")
-    target = await db.users.find_one({"user_id": user_id})
-    if not target:
-        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
-    await db.users.update_one({"user_id": user_id}, {"$set": {"status": "cancelled"}})
-    return {"message": "Usuario desativado"}
+    addrs = [a for a in user.get("addresses", []) if a.get("address_id") != address_id]
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"addresses": addrs}})
+    return {"addresses": addrs}
 
-@app.post("/api/users/create")
-async def create_user_admin(request: Request, response: Response, data: UserRegister, user: dict = Depends(require_level(2))):
-    """Admin/Estadual can create users at lower levels"""
+# ==================== CATEGORIES ====================
+
+@app.get("/api/categories")
+async def list_categories(request: Request):
     db = request.app.db
-    existing = await db.users.find_one({"email": data.email.lower()})
-    if existing:
-        raise HTTPException(status_code=400, detail="Email ja cadastrado")
+    cats = await db.categories.find({"active": True}, {"_id": 0}).sort("order", 1).to_list(100)
+    return {"categories": cats}
 
-    # Estadual can only create regional/cidade
-    ul = user.get("access_level", 99)
-    if ul == 2 and data.access_level < 3:
-        raise HTTPException(status_code=403, detail="Voce so pode criar Regional ou Cidade")
+@app.post("/api/admin/categories")
+async def create_category(request: Request, data: CategoryCreate, user: dict = Depends(require_admin())):
+    db = request.app.db
+    cat = {"category_id": gen_id("cat_"), **data.model_dump(), "created_at": now_iso()}
+    await db.categories.insert_one(cat)
+    return await db.categories.find_one({"category_id": cat["category_id"]}, {"_id": 0})
 
-    sponsor_id = user["user_id"] if data.access_level > user.get("access_level", 0) else None
+@app.put("/api/admin/categories/{category_id}")
+async def update_category(request: Request, category_id: str, data: CategoryCreate, user: dict = Depends(require_admin())):
+    db = request.app.db
+    update = data.model_dump()
+    update["updated_at"] = now_iso()
+    r = await db.categories.update_one({"category_id": category_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Categoria nao encontrada")
+    return await db.categories.find_one({"category_id": category_id}, {"_id": 0})
 
-    new_user = {
-        "user_id": generate_id("user_"),
-        "email": data.email.lower(),
-        "password_hash": hash_password(data.password),
-        "name": data.name,
-        "phone": data.phone,
-        "cpf": data.cpf,
-        "access_level": data.access_level,
-        "status": "active",
-        "referral_code": generate_referral_code(),
-        "sponsor_id": sponsor_id,
-        "state": data.state or user.get("state"),
-        "ddd": data.ddd,
-        "city": data.city,
-        "franchise_value": 0,
-        "annual_revenue": 0,
-        "available_balance": 0,
-        "blocked_balance": 0,
-        "address": None,
-        "bank_info": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.users.insert_one(new_user)
+@app.delete("/api/admin/categories/{category_id}")
+async def delete_category(request: Request, category_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    r = await db.categories.delete_one({"category_id": category_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Categoria nao encontrada")
+    return {"message": "Categoria removida"}
 
-    user_resp = await db.users.find_one({"user_id": new_user["user_id"]}, {"_id": 0, "password_hash": 0})
-    return user_resp
-
-# ==================== PRODUCTS ====================
+# ==================== PRODUCTS (PUBLIC) ====================
 
 @app.get("/api/products")
-async def list_products(
-    request: Request,
-    category: Optional[str] = None,
-    search: Optional[str] = None,
-    active: Optional[bool] = True,
-    page: int = 1,
-    limit: int = 20,
-):
+async def list_products(request: Request, category: Optional[str] = None, search: Optional[str] = None, featured: Optional[bool] = None, page: int = 1, limit: int = 20):
     db = request.app.db
-    query = {}
-    if active is not None:
-        query["active"] = active
+    q = {"active": True}
     if category:
-        query["category"] = category
+        q["category"] = {"$regex": f"^{category}$", "$options": "i"}
+    if featured:
+        q["featured"] = True
     if search:
-        query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}},
-        ]
-    total = await db.products.count_documents(query)
-    products = await db.products.find(query, {"_id": 0}).skip((page-1)*limit).limit(limit).to_list(limit)
+        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}, {"brand": {"$regex": search, "$options": "i"}}]
+    total = await db.products.count_documents(q)
+    products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+@app.get("/api/products/featured")
+async def featured_products(request: Request, limit: int = 8):
+    db = request.app.db
+    prods = await db.products.find({"active": True, "featured": True}, {"_id": 0}).limit(limit).to_list(limit)
+    if len(prods) < limit:
+        more = await db.products.find({"active": True, "featured": {"$ne": True}}, {"_id": 0}).limit(limit - len(prods)).to_list(limit - len(prods))
+        prods.extend(more)
+    return {"products": prods}
 
 @app.get("/api/products/{product_id}")
 async def get_product(request: Request, product_id: str):
@@ -570,1111 +375,276 @@ async def get_product(request: Request, product_id: str):
     p = await db.products.find_one({"product_id": product_id}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
-    return p
+    related = await db.products.find({"category": p.get("category"), "product_id": {"$ne": product_id}, "active": True}, {"_id": 0}).limit(4).to_list(4)
+    return {"product": p, "related": related}
 
-@app.post("/api/products")
-async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_level(1))):
-    db = request.app.db
-    product = {
-        "product_id": generate_id("prod_"),
-        **data.model_dump(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "created_by": user["user_id"],
-    }
-    await db.products.insert_one(product)
-    return await db.products.find_one({"product_id": product["product_id"]}, {"_id": 0})
+# ==================== PRODUCTS (ADMIN) ====================
 
-@app.put("/api/products/{product_id}")
-async def update_product(request: Request, product_id: str, data: ProductCreate, user: dict = Depends(require_level(1))):
+@app.get("/api/admin/products")
+async def admin_list_products(request: Request, category: Optional[str] = None, search: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
-    existing = await db.products.find_one({"product_id": product_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Produto nao encontrado")
+    q = {}
+    if category:
+        q["category"] = category
+    if search:
+        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}]
+    total = await db.products.count_documents(q)
+    products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+@app.post("/api/admin/products")
+async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_admin())):
+    db = request.app.db
+    prod = {"product_id": gen_id("prod_"), **data.model_dump(), "created_at": now_iso()}
+    await db.products.insert_one(prod)
+    return await db.products.find_one({"product_id": prod["product_id"]}, {"_id": 0})
+
+@app.put("/api/admin/products/{product_id}")
+async def update_product(request: Request, product_id: str, data: ProductCreate, user: dict = Depends(require_admin())):
+    db = request.app.db
     update = data.model_dump()
-    update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.products.update_one({"product_id": product_id}, {"$set": update})
+    update["updated_at"] = now_iso()
+    r = await db.products.update_one({"product_id": product_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Produto nao encontrado")
     return await db.products.find_one({"product_id": product_id}, {"_id": 0})
 
-@app.delete("/api/products/{product_id}")
-async def delete_product(request: Request, product_id: str, user: dict = Depends(require_level(1))):
+@app.delete("/api/admin/products/{product_id}")
+async def delete_product(request: Request, product_id: str, user: dict = Depends(require_admin())):
     db = request.app.db
-    result = await db.products.delete_one({"product_id": product_id})
-    if result.deleted_count == 0:
+    r = await db.products.delete_one({"product_id": product_id})
+    if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
-    return {"message": "Produto excluido"}
+    return {"message": "Produto removido"}
 
-@app.get("/api/categories")
-async def list_categories(request: Request):
+# ==================== CART ====================
+
+@app.get("/api/cart")
+async def get_cart(request: Request, user: dict = Depends(get_current_user)):
     db = request.app.db
-    cats = await db.products.distinct("category")
-    return {"categories": cats}
-
-# ==================== ORDERS ====================
-
-@app.post("/api/orders")
-async def create_order(request: Request, data: OrderCreate, user: dict = Depends(get_current_user)):
-    db = request.app.db
-    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-
+    cart = await db.carts.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not cart:
+        return {"items": [], "subtotal": 0, "count": 0}
+    items = cart.get("items", [])
     subtotal = 0
-    order_items = []
-    for item in data.items:
-        product = await db.products.find_one({"product_id": item["product_id"]}, {"_id": 0})
-        if not product:
-            raise HTTPException(status_code=400, detail=f"Produto {item['product_id']} nao encontrado")
-        price = product.get("discount_price") or product["price"]
-        item_total = price * item["quantity"]
-        subtotal += item_total
-        order_items.append({
-            "product_id": product["product_id"],
-            "name": product["name"],
-            "price": price,
-            "quantity": item["quantity"],
-            "total": item_total,
-        })
+    enriched = []
+    for item in items:
+        prod = await db.products.find_one({"product_id": item["product_id"]}, {"_id": 0})
+        if prod:
+            price = prod.get("discount_price") or prod["price"]
+            total = price * item["quantity"]
+            subtotal += total
+            enriched.append({**item, "name": prod["name"], "price": price, "original_price": prod["price"], "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0)})
+    return {"items": enriched, "subtotal": round(subtotal, 2), "count": len(enriched)}
 
-    referrer_id = None
-    if data.referral_code:
-        referrer = await db.users.find_one({"referral_code": data.referral_code}, {"_id": 0})
-        if referrer:
-            referrer_id = referrer["user_id"]
+@app.post("/api/cart/items")
+async def add_to_cart(request: Request, data: CartItemAdd, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    prod = await db.products.find_one({"product_id": data.product_id, "active": True}, {"_id": 0})
+    if not prod:
+        raise HTTPException(status_code=404, detail="Produto nao encontrado")
+    if prod.get("stock", 0) < data.quantity:
+        raise HTTPException(status_code=400, detail="Estoque insuficiente")
+    cart = await db.carts.find_one({"user_id": user["user_id"]})
+    if not cart:
+        await db.carts.insert_one({"user_id": user["user_id"], "items": [{"product_id": data.product_id, "quantity": data.quantity}], "updated_at": now_iso()})
+    else:
+        items = cart.get("items", [])
+        found = False
+        for i in items:
+            if i["product_id"] == data.product_id:
+                i["quantity"] += data.quantity
+                found = True
+                break
+        if not found:
+            items.append({"product_id": data.product_id, "quantity": data.quantity})
+        await db.carts.update_one({"user_id": user["user_id"]}, {"$set": {"items": items, "updated_at": now_iso()}})
+    return await get_cart(request, user)
 
+@app.put("/api/cart/items/{product_id}")
+async def update_cart_item(request: Request, product_id: str, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    body = await request.json()
+    qty = body.get("quantity", 1)
+    if qty <= 0:
+        return await remove_from_cart(request, product_id, user)
+    prod = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    if prod and qty > prod.get("stock", 0):
+        raise HTTPException(status_code=400, detail="Estoque insuficiente")
+    cart = await db.carts.find_one({"user_id": user["user_id"]})
+    if cart:
+        items = cart.get("items", [])
+        for i in items:
+            if i["product_id"] == product_id:
+                i["quantity"] = qty
+                break
+        await db.carts.update_one({"user_id": user["user_id"]}, {"$set": {"items": items, "updated_at": now_iso()}})
+    return await get_cart(request, user)
+
+@app.delete("/api/cart/items/{product_id}")
+async def remove_from_cart(request: Request, product_id: str, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    cart = await db.carts.find_one({"user_id": user["user_id"]})
+    if cart:
+        items = [i for i in cart.get("items", []) if i["product_id"] != product_id]
+        await db.carts.update_one({"user_id": user["user_id"]}, {"$set": {"items": items, "updated_at": now_iso()}})
+    return await get_cart(request, user)
+
+# ==================== CHECKOUT & ORDERS ====================
+
+@app.post("/api/checkout")
+async def checkout(request: Request, data: CheckoutData, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    # Get cart
+    cart = await db.carts.find_one({"user_id": user["user_id"]})
+    if not cart or not cart.get("items"):
+        raise HTTPException(status_code=400, detail="Carrinho vazio")
+    # Get address
+    addrs = user.get("addresses", [])
+    addr = next((a for a in addrs if a.get("address_id") == data.address_id), None)
+    if not addr:
+        raise HTTPException(status_code=400, detail="Endereco nao encontrado")
+    # Build order items
+    items = []
+    subtotal = 0
+    for ci in cart["items"]:
+        prod = await db.products.find_one({"product_id": ci["product_id"], "active": True}, {"_id": 0})
+        if not prod:
+            continue
+        if prod.get("stock", 0) < ci["quantity"]:
+            raise HTTPException(status_code=400, detail=f"Estoque insuficiente: {prod['name']}")
+        price = prod.get("discount_price") or prod["price"]
+        total = round(price * ci["quantity"], 2)
+        subtotal += total
+        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0]})
+        # Decrement stock
+        await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
+    if not items:
+        raise HTTPException(status_code=400, detail="Nenhum produto valido")
+    shipping = 15.90  # Frete fixo MVP
     order = {
-        "order_id": generate_id("ord_"),
-        "user_id": user["user_id"],
-        "items": order_items,
-        "subtotal": subtotal,
-        "total": subtotal,
-        "shipping_address": data.shipping_address,
-        "payment_method": data.payment_method,
-        "payment_status": "pending",
-        "order_status": "pending",
-        "referrer_id": referrer_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "order_id": gen_id("ord_"), "user_id": user["user_id"],
+        "customer_name": user.get("name"), "customer_email": user.get("email"),
+        "items": items, "subtotal": round(subtotal, 2),
+        "shipping_cost": shipping, "total": round(subtotal + shipping, 2),
+        "shipping_address": addr, "payment_method": data.payment_method,
+        "payment_status": "pending", "order_status": "pending",
+        "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+    # Clear cart
+    await db.carts.delete_one({"user_id": user["user_id"]})
     return await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
 
 @app.get("/api/orders")
-async def list_orders(
-    request: Request,
-    status: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
-    user: dict = Depends(get_current_user),
-):
+async def list_user_orders(request: Request, page: int = 1, limit: int = 10, user: dict = Depends(get_current_user)):
     db = request.app.db
-    query = {}
-    if user.get("access_level") > 1:
-        query["user_id"] = user["user_id"]
-    if status:
-        query["order_status"] = status
+    q = {"user_id": user["user_id"]}
+    total = await db.orders.count_documents(q)
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"orders": orders, "total": total, "page": page}
 
-    total = await db.orders.count_documents(query)
-    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+@app.get("/api/orders/{order_id}")
+async def get_order(request: Request, order_id: str, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    is_admin = user.get("role") == "admin" or user.get("access_level", 99) <= 1
+    if not is_admin and o.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    return o
+
+# ==================== ADMIN ORDERS ====================
+
+@app.get("/api/admin/orders")
+async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+    db = request.app.db
+    q = {}
+    if status:
+        q["order_status"] = status
+    if search:
+        q["$or"] = [{"order_id": {"$regex": search, "$options": "i"}}, {"customer_name": {"$regex": search, "$options": "i"}}, {"customer_email": {"$regex": search, "$options": "i"}}]
+    total = await db.orders.count_documents(q)
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"orders": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
-@app.put("/api/orders/{order_id}/status")
-async def update_order_status(
-    request: Request, order_id: str,
-    status: str = Query(...),
-    user: dict = Depends(require_level(1)),
-):
-    db = request.app.db
-    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
-    if not order:
-        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
-
-    update_data = {"order_status": status}
-    now = datetime.now(timezone.utc).isoformat()
-
-    if status == "paid":
-        update_data["paid_at"] = now
-        update_data["payment_status"] = "paid"
-        await process_commissions(db, order, settings)
-    elif status == "shipped":
-        update_data["shipped_at"] = now
-    elif status == "delivered":
-        update_data["delivered_at"] = now
-    elif status == "cancelled":
-        update_data["cancelled_at"] = now
-
-    await db.orders.update_one({"order_id": order_id}, {"$set": update_data})
-    return {"message": "Status do pedido atualizado"}
-
-# ==================== COMMISSIONS (6 GENERATIONS) ====================
-
-async def process_commissions(db, order, settings):
-    """Process MLM commissions up to 6th generation"""
-    commission_base = order.get("subtotal", 0)
-    referrer_id = order.get("referrer_id")
-    if not referrer_id or commission_base <= 0:
-        return
-
-    block_days = settings.get("commission_block_days", 7)
-    release_at = (datetime.now(timezone.utc) + timedelta(days=block_days)).isoformat()
-    now = datetime.now(timezone.utc).isoformat()
-
-    # Nacional always gets a cut
-    nacional_rate = settings.get("nacional_commission", 2) / 100
-    nacional_user = await db.users.find_one({"access_level": 1}, {"_id": 0})
-    if nacional_user:
-        nac_amount = commission_base * nacional_rate
-        await db.commissions.insert_one({
-            "commission_id": generate_id("comm_"),
-            "order_id": order["order_id"],
-            "user_id": nacional_user["user_id"],
-            "generation": 0,
-            "rate": nacional_rate * 100,
-            "base_amount": commission_base,
-            "amount": round(nac_amount, 2),
-            "status": "blocked",
-            "release_at": release_at,
-            "created_at": now,
-        })
-        await db.users.update_one(
-            {"user_id": nacional_user["user_id"]},
-            {"$inc": {"blocked_balance": round(nac_amount, 2)}}
-        )
-
-    # Walk upline for 6 generations
-    gen_rates = [
-        settings.get("commission_gen_1", 10) / 100,
-        settings.get("commission_gen_2", 7) / 100,
-        settings.get("commission_gen_3", 5) / 100,
-        settings.get("commission_gen_4", 3) / 100,
-        settings.get("commission_gen_5", 2) / 100,
-        settings.get("commission_gen_6", 1) / 100,
-    ]
-
-    current_id = referrer_id
-    for gen in range(6):
-        if not current_id:
-            break
-        current = await db.users.find_one({"user_id": current_id}, {"_id": 0})
-        if not current or current.get("status") != "active":
-            current_id = current.get("sponsor_id") if current else None
-            continue
-
-        rate = gen_rates[gen]
-        amount = round(commission_base * rate, 2)
-
-        await db.commissions.insert_one({
-            "commission_id": generate_id("comm_"),
-            "order_id": order["order_id"],
-            "user_id": current_id,
-            "generation": gen + 1,
-            "rate": rate * 100,
-            "base_amount": commission_base,
-            "amount": amount,
-            "status": "blocked",
-            "release_at": release_at,
-            "created_at": now,
-        })
-        await db.users.update_one(
-            {"user_id": current_id},
-            {"$inc": {"blocked_balance": amount}}
-        )
-
-        current_id = current.get("sponsor_id")
-
-@app.get("/api/commissions")
-async def list_commissions(
-    request: Request,
-    status: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
-    user: dict = Depends(get_current_user),
-):
-    db = request.app.db
-    query = {"user_id": user["user_id"]}
-    if user.get("access_level") <= 1:
-        query = {}
-    if status:
-        query["status"] = status
-
-    total = await db.commissions.count_documents(query)
-    comms = await db.commissions.find(query, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"commissions": comms, "total": total, "page": page}
-
-@app.get("/api/commissions/summary")
-async def commission_summary(request: Request, user: dict = Depends(get_current_user)):
-    db = request.app.db
-    uid = user["user_id"]
-
-    pipeline = [
-        {"$match": {"user_id": uid}},
-        {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
-    ]
-    by_status = {}
-    async for doc in db.commissions.aggregate(pipeline):
-        by_status[doc["_id"]] = {"total": doc["total"], "count": doc["count"]}
-
-    pipeline2 = [
-        {"$match": {"user_id": uid}},
-        {"$group": {"_id": "$generation", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
-    ]
-    by_gen = {}
-    async for doc in db.commissions.aggregate(pipeline2):
-        by_gen[str(doc["_id"])] = {"total": doc["total"], "count": doc["count"]}
-
-    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0).isoformat()
-    this_month_agg = await db.commissions.aggregate([
-        {"$match": {"user_id": uid, "created_at": {"$gte": month_start}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
-    ]).to_list(1)
-
-    return {
-        "by_status": by_status,
-        "by_generation": by_gen,
-        "this_month": this_month_agg[0]["total"] if this_month_agg else 0,
-        "available_balance": user.get("available_balance", 0),
-        "blocked_balance": user.get("blocked_balance", 0),
-    }
-
-@app.post("/api/commissions/release")
-async def release_blocked_commissions(request: Request, user: dict = Depends(require_level(0))):
-    """Manually release blocked commissions past their release date"""
-    db = request.app.db
-    now = datetime.now(timezone.utc).isoformat()
-    blocked = await db.commissions.find({"status": "blocked", "release_at": {"$lte": now}}, {"_id": 0}).to_list(10000)
-    count = 0
-    for c in blocked:
-        await db.commissions.update_one(
-            {"commission_id": c["commission_id"]},
-            {"$set": {"status": "available", "released_at": now}}
-        )
-        await db.users.update_one(
-            {"user_id": c["user_id"]},
-            {"$inc": {"blocked_balance": -c["amount"], "available_balance": c["amount"]}}
-        )
-        count += 1
-    return {"message": f"{count} comissoes liberadas"}
-
-# ==================== NETWORK ====================
-
-@app.get("/api/network/tree")
-async def get_network_tree(request: Request, user: dict = Depends(get_current_user)):
-    db = request.app.db
-
-    async def build_tree(uid, depth=0, max_depth=4):
-        if depth >= max_depth:
-            return []
-        children = await db.users.find(
-            {"sponsor_id": uid, "status": {"$ne": "cancelled"}},
-            {"_id": 0, "password_hash": 0}
-        ).to_list(100)
-        for child in children:
-            child["children"] = await build_tree(child["user_id"], depth + 1, max_depth)
-        return children
-
-    if user.get("access_level") <= 1:
-        # Admin/Nacional: show from estadual down
-        roots = await db.users.find(
-            {"access_level": 2, "status": {"$ne": "cancelled"}},
-            {"_id": 0, "password_hash": 0}
-        ).to_list(100)
-        for root in roots:
-            root["children"] = await build_tree(root["user_id"])
-        return {"tree": roots}
-
-    user_data = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
-    user_data["children"] = await build_tree(user["user_id"])
-    return {"tree": [user_data]}
-
-@app.get("/api/network/stats")
-async def get_network_stats(request: Request, user: dict = Depends(get_current_user)):
-    db = request.app.db
-    uid = user["user_id"]
-
-    direct = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
-    l1_ids = [u["user_id"] for u in await db.users.find({"sponsor_id": uid}, {"user_id": 1}).to_list(200)]
-    indirect = 0
-    if l1_ids:
-        indirect = await db.users.count_documents({"sponsor_id": {"$in": l1_ids}, "status": "active"})
-
-    by_level = {}
-    for lvl in range(2, 7):
-        q = {"access_level": lvl, "status": "active"}
-        if user.get("access_level") == 2:
-            q["state"] = user.get("state")
-        elif user.get("access_level") == 3:
-            q["ddd"] = user.get("ddd")
-        elif user.get("access_level") >= 4:
-            q["sponsor_id"] = uid
-        by_level[LEVEL_NAMES.get(lvl, str(lvl))] = await db.users.count_documents(q)
-
-    return {
-        "direct": direct,
-        "indirect": indirect,
-        "total": direct + indirect,
-        "by_level": by_level,
-    }
-
-# ==================== FRANCHISES ====================
-
-@app.get("/api/franchises")
-async def list_franchises(request: Request, user: dict = Depends(require_level(1))):
-    """List franchise slots"""
-    db = request.app.db
-    pipeline = [
-        {"$match": {"access_level": {"$in": [2, 3, 4]}, "status": "active"}},
-        {"$group": {
-            "_id": {"level": "$access_level", "state": "$state"},
-            "count": {"$sum": 1},
-            "total_revenue": {"$sum": "$annual_revenue"},
-            "total_franchise_value": {"$sum": "$franchise_value"},
-        }},
-        {"$sort": {"_id.level": 1}}
-    ]
-    result = await db.users.aggregate(pipeline).to_list(1000)
-    franchises = []
-    for r in result:
-        franchises.append({
-            "level": r["_id"]["level"],
-            "level_name": LEVEL_NAMES.get(r["_id"]["level"], ""),
-            "state": r["_id"].get("state", ""),
-            "count": r["count"],
-            "total_revenue": r["total_revenue"],
-            "total_franchise_value": r["total_franchise_value"],
-        })
-    return {"franchises": franchises}
-
-@app.post("/api/franchises/sell")
-async def sell_franchise(request: Request, user: dict = Depends(require_level(2))):
-    """Record a franchise sale (cross-state referral)"""
+@app.put("/api/admin/orders/{order_id}/status")
+async def admin_update_order_status(request: Request, order_id: str, user: dict = Depends(require_admin())):
     db = request.app.db
     body = await request.json()
-    buyer_id = body.get("buyer_id")
-    franchise_value = body.get("franchise_value", 0)
-    referred_by = body.get("referred_by")
+    status = body.get("status")
+    if not status:
+        raise HTTPException(status_code=400, detail="Status obrigatorio")
+    o = await db.orders.find_one({"order_id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    update = {"order_status": status, "updated_at": now_iso()}
+    if status == "paid":
+        update["payment_status"] = "paid"
+        update["paid_at"] = now_iso()
+    elif status == "shipped":
+        update["shipped_at"] = now_iso()
+    elif status == "delivered":
+        update["delivered_at"] = now_iso()
+    elif status == "cancelled":
+        update["cancelled_at"] = now_iso()
+        # Restore stock
+        for item in o.get("items", []):
+            await db.products.update_one({"product_id": item["product_id"]}, {"$inc": {"stock": item["quantity"]}})
+    await db.orders.update_one({"order_id": order_id}, {"$set": update})
+    return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
 
-    buyer = await db.users.find_one({"user_id": buyer_id}, {"_id": 0})
-    if not buyer:
-        raise HTTPException(status_code=404, detail="Comprador nao encontrado")
+# ==================== ADMIN USERS ====================
 
-    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    split = settings.get("cross_state_split", 50) / 100
-
-    await db.users.update_one(
-        {"user_id": buyer_id},
-        {"$set": {"franchise_value": franchise_value}}
-    )
-
-    sale = {
-        "sale_id": generate_id("fsale_"),
-        "buyer_id": buyer_id,
-        "franchise_value": franchise_value,
-        "seller_id": user["user_id"],
-        "referred_by": referred_by,
-        "seller_share": round(franchise_value * split, 2) if referred_by else franchise_value,
-        "referrer_share": round(franchise_value * (1 - split), 2) if referred_by else 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.franchise_sales.insert_one(sale)
-
-    # Credit seller
-    await db.users.update_one(
-        {"user_id": user["user_id"]},
-        {"$inc": {"available_balance": sale["seller_share"]}}
-    )
-    if referred_by:
-        await db.users.update_one(
-            {"user_id": referred_by},
-            {"$inc": {"available_balance": sale["referrer_share"]}}
-        )
-
-    return {"message": "Franquia vendida", "sale": {k: v for k, v in sale.items() if k != "_id"}}
-
-# ==================== WALLET ====================
-
-@app.get("/api/wallet")
-async def get_wallet(request: Request, user: dict = Depends(get_current_user)):
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request, search: Optional[str] = None, role: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
-    txs = await db.transactions.find(
-        {"user_id": user["user_id"]}, {"_id": 0}
-    ).sort("created_at", -1).limit(20).to_list(20)
-    return {
-        "available_balance": user.get("available_balance", 0),
-        "blocked_balance": user.get("blocked_balance", 0),
-        "transactions": txs,
-    }
+    q = {}
+    if role:
+        q["role"] = role
+    if search:
+        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"email": {"$regex": search, "$options": "i"}}]
+    total = await db.users.count_documents(q)
+    users = await db.users.find(q, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"users": users, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
-@app.post("/api/wallet/withdraw")
-async def request_withdrawal(request: Request, data: WithdrawalRequest, user: dict = Depends(get_current_user)):
+@app.get("/api/admin/users/{user_id}")
+async def admin_get_user(request: Request, user_id: str, user: dict = Depends(require_admin())):
     db = request.app.db
-    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    min_amount = settings.get("min_withdrawal", 50)
-    fee_pct = settings.get("withdrawal_fee_percent", 5)
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    order_count = await db.orders.count_documents({"user_id": user_id})
+    u["total_orders"] = order_count
+    return u
 
-    if data.amount < min_amount:
-        raise HTTPException(status_code=400, detail=f"Saque minimo: R$ {min_amount}")
-    if data.amount > user.get("available_balance", 0):
-        raise HTTPException(status_code=400, detail="Saldo insuficiente")
+# ==================== ADMIN DASHBOARD ====================
 
-    fee = round(data.amount * fee_pct / 100, 2)
-    net = round(data.amount - fee, 2)
-
-    wd = {
-        "withdrawal_id": generate_id("wd_"),
-        "user_id": user["user_id"],
-        "amount": data.amount,
-        "fee": fee,
-        "net_amount": net,
-        "status": "pending",
-        "bank_info": user.get("bank_info"),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.withdrawals.insert_one(wd)
-    await db.users.update_one(
-        {"user_id": user["user_id"]},
-        {"$inc": {"available_balance": -data.amount}}
-    )
-    await db.transactions.insert_one({
-        "transaction_id": generate_id("tx_"),
-        "user_id": user["user_id"],
-        "type": "withdrawal",
-        "amount": -data.amount,
-        "description": f"Saque solicitado - R$ {data.amount:.2f}",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    return await db.withdrawals.find_one({"withdrawal_id": wd["withdrawal_id"]}, {"_id": 0})
-
-@app.get("/api/withdrawals")
-async def list_withdrawals(
-    request: Request,
-    status: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
-    user: dict = Depends(get_current_user),
-):
+@app.get("/api/admin/dashboard")
+async def admin_dashboard(request: Request, user: dict = Depends(require_admin())):
     db = request.app.db
-    query = {}
-    if user.get("access_level") > 1:
-        query["user_id"] = user["user_id"]
-    if status:
-        query["status"] = status
-
-    total = await db.withdrawals.count_documents(query)
-    wds = await db.withdrawals.find(query, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"withdrawals": wds, "total": total, "page": page}
-
-@app.put("/api/withdrawals/{withdrawal_id}")
-async def update_withdrawal(request: Request, withdrawal_id: str, status: str = Query(...), user: dict = Depends(require_level(1))):
-    db = request.app.db
-    wd = await db.withdrawals.find_one({"withdrawal_id": withdrawal_id}, {"_id": 0})
-    if not wd:
-        raise HTTPException(status_code=404, detail="Saque nao encontrado")
-
-    update = {"status": status}
-    now = datetime.now(timezone.utc).isoformat()
-    if status == "approved":
-        update["approved_at"] = now
-    elif status == "paid":
-        update["paid_at"] = now
-    elif status == "rejected":
-        await db.users.update_one(
-            {"user_id": wd["user_id"]},
-            {"$inc": {"available_balance": wd["amount"]}}
-        )
-    await db.withdrawals.update_one({"withdrawal_id": withdrawal_id}, {"$set": update})
-    return {"message": "Saque atualizado"}
-
-# ==================== SETTINGS ====================
-
-@app.get("/api/settings")
-async def get_settings(request: Request, user: dict = Depends(require_level(0))):
-    db = request.app.db
-    s = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    return s or {}
-
-@app.put("/api/settings")
-async def update_settings(request: Request, data: SettingsUpdate, user: dict = Depends(require_level(0))):
-    db = request.app.db
-    val = data.value
-    # Try to convert numeric values
-    try:
-        val = float(val)
-        if val == int(val):
-            val = int(val)
-    except (ValueError, TypeError):
-        pass
-
-    await db.settings.update_one(
-        {"settings_id": "global"},
-        {"$set": {data.key: val, "updated_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    s = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    return s
-
-# ==================== DASHBOARD ====================
-
-@app.get("/api/dashboard/admin")
-async def admin_dashboard(request: Request, user: dict = Depends(require_level(1))):
-    db = request.app.db
-    now = datetime.now(timezone.utc)
-    month_start = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
-
-    total_users = await db.users.count_documents({"status": "active"})
-    users_by_level = {}
-    for lvl in range(7):
-        users_by_level[LEVEL_NAMES.get(lvl, str(lvl))] = await db.users.count_documents({"access_level": lvl, "status": "active"})
-
+    n = datetime.now(timezone.utc)
+    month_start = n.replace(day=1, hour=0, minute=0, second=0).isoformat()
+    total_users = await db.users.count_documents({"role": "customer"})
     total_orders = await db.orders.count_documents({})
     month_orders = await db.orders.count_documents({"created_at": {"$gte": month_start}})
-
-    revenue_agg = await db.orders.aggregate([
-        {"$match": {"payment_status": "paid", "created_at": {"$gte": month_start}}},
-        {"$group": {"_id": None, "total": {"$sum": "$total"}}}
-    ]).to_list(1)
-    month_revenue = revenue_agg[0]["total"] if revenue_agg else 0
-
-    pending_comms = await db.commissions.aggregate([
-        {"$match": {"status": "blocked"}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
-    ]).to_list(1)
-
-    pending_wds = await db.withdrawals.count_documents({"status": "pending"})
-
-    top_sellers = await db.commissions.aggregate([
-        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}}},
-        {"$sort": {"total": -1}},
-        {"$limit": 5}
-    ]).to_list(5)
-
-    top_list = []
-    for ts in top_sellers:
-        u = await db.users.find_one({"user_id": ts["_id"]}, {"_id": 0, "name": 1, "access_level": 1})
-        if u:
-            top_list.append({"name": u["name"], "level": LEVEL_NAMES.get(u.get("access_level"), ""), "total": ts["total"]})
-
-    return {
-        "total_users": total_users,
-        "users_by_level": users_by_level,
-        "total_orders": total_orders,
-        "month_orders": month_orders,
-        "month_revenue": month_revenue,
-        "pending_commissions": pending_comms[0]["total"] if pending_comms else 0,
-        "pending_withdrawals": pending_wds,
-        "top_sellers": top_list,
-    }
-
-@app.get("/api/dashboard/user")
-async def user_dashboard(request: Request, user: dict = Depends(get_current_user)):
-    db = request.app.db
-    uid = user["user_id"]
-    al = user.get("access_level", 99)
-    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0).isoformat()
-
-    month_comms = await db.commissions.aggregate([
-        {"$match": {"user_id": uid, "created_at": {"$gte": month_start}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
-    ]).to_list(1)
-
-    direct_count = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
-    my_orders = await db.orders.count_documents({"user_id": uid})
-
-    base = {
-        "available_balance": user.get("available_balance", 0),
-        "blocked_balance": user.get("blocked_balance", 0),
-        "month_commissions": month_comms[0]["total"] if month_comms else 0,
-        "direct_referrals": direct_count,
-        "total_orders": my_orders,
-        "referral_code": user.get("referral_code", ""),
-        "access_level": al,
-    }
-
-    # Estadual (2): stats about their state
-    if al == 2:
-        state = user.get("state")
-        regionais = await db.users.count_documents({"access_level": 3, "state": state, "status": "active"})
-        cidades = await db.users.count_documents({"access_level": 4, "state": state, "status": "active"})
-        indicadores = await db.users.count_documents({"access_level": {"$gte": 5}, "state": state, "status": "active"})
-        state_revenue_agg = await db.orders.aggregate([
-            {"$lookup": {"from": "users", "localField": "user_id", "foreignField": "user_id", "as": "u"}},
-            {"$unwind": "$u"},
-            {"$match": {"u.state": state, "payment_status": "paid", "created_at": {"$gte": month_start}}},
-            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
-        ]).to_list(1)
-        base["regionais_count"] = regionais
-        base["cidades_count"] = cidades
-        base["indicadores_count"] = indicadores
-        base["state_revenue"] = state_revenue_agg[0]["total"] if state_revenue_agg else 0
-        base["state"] = state
-
-    # Regional (3): stats about their DDD region
-    elif al == 3:
-        ddd = user.get("ddd")
-        cidades = await db.users.count_documents({"access_level": 4, "ddd": ddd, "status": "active"})
-        indicadores = await db.users.count_documents({"access_level": {"$gte": 5}, "ddd": ddd, "status": "active"})
-        region_revenue_agg = await db.orders.aggregate([
-            {"$lookup": {"from": "users", "localField": "user_id", "foreignField": "user_id", "as": "u"}},
-            {"$unwind": "$u"},
-            {"$match": {"u.ddd": ddd, "payment_status": "paid", "created_at": {"$gte": month_start}}},
-            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
-        ]).to_list(1)
-        base["cidades_count"] = cidades
-        base["indicadores_count"] = indicadores
-        base["region_revenue"] = region_revenue_agg[0]["total"] if region_revenue_agg else 0
-        base["ddd"] = ddd
-
-    # Cidade (4): stats about their unit
-    elif al == 4:
-        indicadores = await db.users.count_documents({"sponsor_id": uid, "access_level": {"$gte": 5}, "status": "active"})
-        unit_orders = await db.orders.count_documents({"user_id": uid, "created_at": {"$gte": month_start}})
-        unit_revenue_agg = await db.orders.aggregate([
-            {"$match": {"user_id": uid, "payment_status": "paid", "created_at": {"$gte": month_start}}},
-            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
-        ]).to_list(1)
-        base["indicadores_count"] = indicadores
-        base["month_unit_orders"] = unit_orders
-        base["month_unit_revenue"] = unit_revenue_agg[0]["total"] if unit_revenue_agg else 0
-
-    # Indicador (5): referral stats
-    elif al == 5:
-        total_referrals = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
-        settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-        min_refs = settings.get("indicador_min_referrals_upgrade", 20) if settings else 20
-        investment_needed = settings.get("unidade_indicadora_investment", 500) if settings else 500
-        base["total_referrals"] = total_referrals
-        base["min_referrals_upgrade"] = min_refs
-        base["investment_needed"] = investment_needed
-        base["can_upgrade"] = total_referrals >= min_refs
-
-    # Unidade Indicadora (6): commission stats
-    elif al == 6:
-        total_referrals = await db.users.count_documents({"sponsor_id": uid, "status": "active"})
-        total_comms_agg = await db.commissions.aggregate([
-            {"$match": {"user_id": uid}},
-            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
-        ]).to_list(1)
-        base["total_referrals"] = total_referrals
-        base["total_commissions"] = total_comms_agg[0]["total"] if total_comms_agg else 0
-
-    return base
-
-# ==================== REPORTS ====================
-
-@app.get("/api/reports/sales")
-async def reports_sales(
-    request: Request,
-    period: str = "month",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    state: Optional[str] = None,
-    user: dict = Depends(require_level(1)),
-):
-    db = request.app.db
-    now = datetime.now(timezone.utc)
-
-    if start_date and end_date:
-        date_from = start_date
-        date_to = end_date
-    elif period == "week":
-        date_from = (now - timedelta(days=7)).isoformat()
-        date_to = now.isoformat()
-    elif period == "month":
-        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-    elif period == "quarter":
-        q_month = ((now.month - 1) // 3) * 3 + 1
-        date_from = now.replace(month=q_month, day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-    elif period == "year":
-        date_from = now.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-    else:
-        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-
-    match_q = {"created_at": {"$gte": date_from, "$lte": date_to}}
-
-    # Total sales
-    total_orders = await db.orders.count_documents(match_q)
-    paid_match = {**match_q, "payment_status": "paid"}
-    paid_orders = await db.orders.count_documents(paid_match)
-    revenue_agg = await db.orders.aggregate([
-        {"$match": paid_match},
-        {"$group": {"_id": None, "total": {"$sum": "$total"}, "avg": {"$avg": "$total"}}}
-    ]).to_list(1)
+    revenue_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid"}}, {"$group": {"_id": None, "total": {"$sum": "$total"}}}]).to_list(1)
     total_revenue = revenue_agg[0]["total"] if revenue_agg else 0
-    avg_ticket = revenue_agg[0]["avg"] if revenue_agg else 0
-
-    # Sales by day
-    daily_sales = await db.orders.aggregate([
-        {"$match": paid_match},
-        {"$addFields": {"date_str": {"$substr": ["$created_at", 0, 10]}}},
-        {"$group": {"_id": "$date_str", "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
-        {"$sort": {"_id": 1}}
-    ]).to_list(365)
-
-    # Top products
-    top_products = await db.orders.aggregate([
-        {"$match": paid_match},
-        {"$unwind": "$items"},
-        {"$group": {"_id": "$items.name", "total": {"$sum": "$items.total"}, "qty": {"$sum": "$items.quantity"}}},
-        {"$sort": {"total": -1}},
-        {"$limit": 10}
-    ]).to_list(10)
-
-    # Sales by status
-    by_status = await db.orders.aggregate([
-        {"$match": match_q},
-        {"$group": {"_id": "$order_status", "count": {"$sum": 1}, "total": {"$sum": "$total"}}},
-        {"$sort": {"count": -1}}
-    ]).to_list(20)
-
+    month_rev_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid", "created_at": {"$gte": month_start}}}, {"$group": {"_id": None, "total": {"$sum": "$total"}}}]).to_list(1)
+    month_revenue = month_rev_agg[0]["total"] if month_rev_agg else 0
+    pending_orders = await db.orders.count_documents({"order_status": "pending"})
+    total_products = await db.products.count_documents({"active": True})
+    recent_orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
+    # Orders by status
+    status_agg = await db.orders.aggregate([{"$group": {"_id": "$order_status", "count": {"$sum": 1}}}]).to_list(20)
+    by_status = {s["_id"]: s["count"] for s in status_agg}
     return {
-        "period": period,
-        "date_from": date_from,
-        "date_to": date_to,
-        "total_orders": total_orders,
-        "paid_orders": paid_orders,
-        "total_revenue": total_revenue,
-        "avg_ticket": round(avg_ticket, 2),
-        "daily_sales": daily_sales,
-        "top_products": top_products,
-        "by_status": by_status,
+        "total_users": total_users, "total_orders": total_orders, "month_orders": month_orders,
+        "total_revenue": total_revenue, "month_revenue": month_revenue,
+        "pending_orders": pending_orders, "total_products": total_products,
+        "recent_orders": recent_orders, "orders_by_status": by_status,
     }
-
-@app.get("/api/reports/commissions")
-async def reports_commissions(
-    request: Request,
-    period: str = "month",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    user: dict = Depends(require_level(1)),
-):
-    db = request.app.db
-    now = datetime.now(timezone.utc)
-
-    if start_date and end_date:
-        date_from = start_date
-        date_to = end_date
-    elif period == "month":
-        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-    elif period == "year":
-        date_from = now.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-    else:
-        date_from = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
-        date_to = now.isoformat()
-
-    match_q = {"created_at": {"$gte": date_from, "$lte": date_to}}
-
-    # Total commissions
-    total_agg = await db.commissions.aggregate([
-        {"$match": match_q},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
-    ]).to_list(1)
-    total_commissions = total_agg[0]["total"] if total_agg else 0
-    total_count = total_agg[0]["count"] if total_agg else 0
-
-    # By generation
-    by_gen = await db.commissions.aggregate([
-        {"$match": match_q},
-        {"$group": {"_id": "$generation", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        {"$sort": {"_id": 1}}
-    ]).to_list(10)
-
-    gen_data = []
-    for g in by_gen:
-        gen_data.append({
-            "generation": g["_id"],
-            "label": "Nacional" if g["_id"] == 0 else f"{g['_id']}a Geracao",
-            "total": g["total"],
-            "count": g["count"],
-        })
-
-    # By level
-    by_level = await db.commissions.aggregate([
-        {"$match": match_q},
-        {"$lookup": {"from": "users", "localField": "user_id", "foreignField": "user_id", "as": "u"}},
-        {"$unwind": "$u"},
-        {"$group": {"_id": "$u.access_level", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        {"$sort": {"_id": 1}}
-    ]).to_list(10)
-
-    level_data = []
-    for l in by_level:
-        level_data.append({
-            "level": l["_id"],
-            "label": LEVEL_NAMES.get(l["_id"], str(l["_id"])),
-            "total": l["total"],
-            "count": l["count"],
-        })
-
-    # By status
-    by_status = await db.commissions.aggregate([
-        {"$match": match_q},
-        {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
-    ]).to_list(10)
-
-    # Daily commissions
-    daily = await db.commissions.aggregate([
-        {"$match": match_q},
-        {"$addFields": {"date_str": {"$substr": ["$created_at", 0, 10]}}},
-        {"$group": {"_id": "$date_str", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        {"$sort": {"_id": 1}}
-    ]).to_list(365)
-
-    # Top earners
-    top_earners = await db.commissions.aggregate([
-        {"$match": match_q},
-        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        {"$sort": {"total": -1}},
-        {"$limit": 10}
-    ]).to_list(10)
-
-    earners_list = []
-    for e in top_earners:
-        u = await db.users.find_one({"user_id": e["_id"]}, {"_id": 0, "name": 1, "access_level": 1, "state": 1})
-        if u:
-            earners_list.append({
-                "name": u["name"],
-                "level": LEVEL_NAMES.get(u.get("access_level"), ""),
-                "state": u.get("state", ""),
-                "total": e["total"],
-                "count": e["count"],
-            })
-
-    return {
-        "period": period,
-        "date_from": date_from,
-        "date_to": date_to,
-        "total_commissions": total_commissions,
-        "total_count": total_count,
-        "by_generation": gen_data,
-        "by_level": level_data,
-        "by_status": by_status,
-        "daily": daily,
-        "top_earners": earners_list,
-    }
-
-@app.get("/api/reports/network")
-async def reports_network(request: Request, user: dict = Depends(require_level(1))):
-    db = request.app.db
-
-    by_level = []
-    for lvl in range(7):
-        count = await db.users.count_documents({"access_level": lvl, "status": "active"})
-        by_level.append({"level": lvl, "label": LEVEL_NAMES.get(lvl, str(lvl)), "count": count})
-
-    by_state = await db.users.aggregate([
-        {"$match": {"status": "active", "state": {"$ne": None}}},
-        {"$group": {"_id": "$state", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}}
-    ]).to_list(30)
-
-    # New users this month
-    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0).isoformat()
-    new_this_month = await db.users.count_documents({"created_at": {"$gte": month_start}, "status": "active"})
-
-    # Growth daily
-    daily_signups = await db.users.aggregate([
-        {"$match": {"created_at": {"$gte": month_start}}},
-        {"$addFields": {"date_str": {"$substr": ["$created_at", 0, 10]}}},
-        {"$group": {"_id": "$date_str", "count": {"$sum": 1}}},
-        {"$sort": {"_id": 1}}
-    ]).to_list(31)
-
-    return {
-        "by_level": by_level,
-        "by_state": by_state,
-        "new_this_month": new_this_month,
-        "daily_signups": daily_signups,
-    }
-
-# ==================== UPGRADE INDICADOR -> UNIDADE INDICADORA ====================
-
-@app.get("/api/upgrade/status")
-async def upgrade_status(request: Request, user: dict = Depends(get_current_user)):
-    """Check if indicador is eligible for upgrade"""
-    db = request.app.db
-    if user.get("access_level") != 5:
-        raise HTTPException(status_code=400, detail="Apenas indicadores podem solicitar upgrade")
-
-    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    min_refs = settings.get("indicador_min_referrals_upgrade", 20) if settings else 20
-    investment = settings.get("unidade_indicadora_investment", 500) if settings else 500
-
-    total_referrals = await db.users.count_documents({"sponsor_id": user["user_id"], "status": "active"})
-
-    # Check if there's a pending upgrade request
-    pending = await db.upgrade_requests.find_one(
-        {"user_id": user["user_id"], "status": {"$in": ["pending", "approved"]}},
-        {"_id": 0}
-    )
-
-    return {
-        "eligible": total_referrals >= min_refs,
-        "total_referrals": total_referrals,
-        "min_referrals": min_refs,
-        "investment_required": investment,
-        "progress_percent": min(100, round((total_referrals / max(1, min_refs)) * 100)),
-        "pending_request": pending,
-    }
-
-@app.post("/api/upgrade/request")
-async def request_upgrade(request: Request, data: UpgradeRequest, user: dict = Depends(get_current_user)):
-    """Request upgrade from Indicador to Unidade Indicadora"""
-    db = request.app.db
-    if user.get("access_level") != 5:
-        raise HTTPException(status_code=400, detail="Apenas indicadores podem solicitar upgrade")
-
-    settings = await db.settings.find_one({"settings_id": "global"}, {"_id": 0})
-    min_refs = settings.get("indicador_min_referrals_upgrade", 20) if settings else 20
-    investment = settings.get("unidade_indicadora_investment", 500) if settings else 500
-
-    total_referrals = await db.users.count_documents({"sponsor_id": user["user_id"], "status": "active"})
-    if total_referrals < min_refs:
-        raise HTTPException(status_code=400, detail=f"Voce precisa de pelo menos {min_refs} indicacoes ({total_referrals} atualmente)")
-
-    if data.investment_amount < investment:
-        raise HTTPException(status_code=400, detail=f"Investimento minimo: R$ {investment}")
-
-    # Check existing pending
-    existing = await db.upgrade_requests.find_one({"user_id": user["user_id"], "status": "pending"})
-    if existing:
-        raise HTTPException(status_code=400, detail="Voce ja tem uma solicitacao pendente")
-
-    req = {
-        "request_id": generate_id("upg_"),
-        "user_id": user["user_id"],
-        "user_name": user.get("name"),
-        "user_email": user.get("email"),
-        "from_level": 5,
-        "to_level": 6,
-        "total_referrals": total_referrals,
-        "investment_amount": data.investment_amount,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.upgrade_requests.insert_one(req)
-    return await db.upgrade_requests.find_one({"request_id": req["request_id"]}, {"_id": 0})
-
-@app.get("/api/upgrade/requests")
-async def list_upgrade_requests(
-    request: Request,
-    status: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
-    user: dict = Depends(require_level(1)),
-):
-    db = request.app.db
-    query = {}
-    if status:
-        query["status"] = status
-    total = await db.upgrade_requests.count_documents(query)
-    reqs = await db.upgrade_requests.find(query, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"requests": reqs, "total": total, "page": page}
-
-@app.put("/api/upgrade/requests/{request_id}")
-async def handle_upgrade_request(
-    request: Request, request_id: str,
-    action: str = Query(...),
-    user: dict = Depends(require_level(1)),
-):
-    """Approve or reject upgrade request"""
-    db = request.app.db
-    req = await db.upgrade_requests.find_one({"request_id": request_id}, {"_id": 0})
-    if not req:
-        raise HTTPException(status_code=404, detail="Solicitacao nao encontrada")
-    if req.get("status") != "pending":
-        raise HTTPException(status_code=400, detail="Solicitacao ja foi processada")
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    if action == "approve":
-        # Upgrade the user
-        await db.users.update_one(
-            {"user_id": req["user_id"]},
-            {"$set": {"access_level": 6, "upgraded_at": now}}
-        )
-        await db.upgrade_requests.update_one(
-            {"request_id": request_id},
-            {"$set": {"status": "approved", "processed_at": now, "processed_by": user["user_id"]}}
-        )
-        # Record investment as transaction
-        await db.transactions.insert_one({
-            "transaction_id": generate_id("tx_"),
-            "user_id": req["user_id"],
-            "type": "upgrade_investment",
-            "amount": -req["investment_amount"],
-            "description": f"Investimento para Unidade Indicadora - R$ {req['investment_amount']:.2f}",
-            "created_at": now,
-        })
-        return {"message": "Upgrade aprovado! Usuario promovido a Unidade Indicadora"}
-
-    elif action == "reject":
-        await db.upgrade_requests.update_one(
-            {"request_id": request_id},
-            {"$set": {"status": "rejected", "processed_at": now, "processed_by": user["user_id"]}}
-        )
-        return {"message": "Solicitacao rejeitada"}
-
-    raise HTTPException(status_code=400, detail="Acao invalida. Use 'approve' ou 'reject'")
-
-# ==================== STATES/DDD REFERENCE ====================
-
-BRAZILIAN_STATES = [
-    {"uf": "AC", "name": "Acre"}, {"uf": "AL", "name": "Alagoas"},
-    {"uf": "AP", "name": "Amapa"}, {"uf": "AM", "name": "Amazonas"},
-    {"uf": "BA", "name": "Bahia"}, {"uf": "CE", "name": "Ceara"},
-    {"uf": "DF", "name": "Distrito Federal"}, {"uf": "ES", "name": "Espirito Santo"},
-    {"uf": "GO", "name": "Goias"}, {"uf": "MA", "name": "Maranhao"},
-    {"uf": "MT", "name": "Mato Grosso"}, {"uf": "MS", "name": "Mato Grosso do Sul"},
-    {"uf": "MG", "name": "Minas Gerais"}, {"uf": "PA", "name": "Para"},
-    {"uf": "PB", "name": "Paraiba"}, {"uf": "PR", "name": "Parana"},
-    {"uf": "PE", "name": "Pernambuco"}, {"uf": "PI", "name": "Piaui"},
-    {"uf": "RJ", "name": "Rio de Janeiro"}, {"uf": "RN", "name": "Rio Grande do Norte"},
-    {"uf": "RS", "name": "Rio Grande do Sul"}, {"uf": "RO", "name": "Rondonia"},
-    {"uf": "RR", "name": "Roraima"}, {"uf": "SC", "name": "Santa Catarina"},
-    {"uf": "SP", "name": "Sao Paulo"}, {"uf": "SE", "name": "Sergipe"},
-    {"uf": "TO", "name": "Tocantins"},
-]
-
-DDD_BY_STATE = {
-    "SP": ["11","12","13","14","15","16","17","18","19"],
-    "RJ": ["21","22","24"],
-    "ES": ["27","28"],
-    "MG": ["31","32","33","34","35","37","38"],
-    "PR": ["41","42","43","44","45","46"],
-    "SC": ["47","48","49"],
-    "RS": ["51","53","54","55"],
-    "DF": ["61"],
-    "GO": ["62","64"],
-    "MT": ["65","66"],
-    "MS": ["67"],
-    "AC": ["68"],
-    "RO": ["69"],
-    "PA": ["91","93","94"],
-    "AM": ["92","97"],
-    "RR": ["95"],
-    "AP": ["96"],
-    "MA": ["98","99"],
-    "PI": ["86","89"],
-    "CE": ["85","88"],
-    "RN": ["84"],
-    "PB": ["83"],
-    "PE": ["81","87"],
-    "AL": ["82"],
-    "SE": ["79"],
-    "BA": ["71","73","74","75","77"],
-    "TO": ["63"],
-}
-
-@app.get("/api/reference/states")
-async def get_states():
-    return {"states": BRAZILIAN_STATES}
-
-@app.get("/api/reference/ddds")
-async def get_ddds(state: Optional[str] = None):
-    if state:
-        return {"ddds": DDD_BY_STATE.get(state.upper(), [])}
-    return {"ddds": DDD_BY_STATE}
 
 @app.get("/api/health")
 async def health():
