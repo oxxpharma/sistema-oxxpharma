@@ -1341,7 +1341,7 @@ async def create_withdrawal(request: Request, data: WithdrawalCreate, user: dict
         selected.append(c["commission_id"])
         accum += c["amount"]
     if accum < data.amount:
-        raise HTTPException(status_code=400, detail="Nao foi possivel compor o saque com comissoes elegiveis")
+        raise HTTPException(status_code=400, detail=f"Saldo disponivel insuficiente (R$ {balance['available']:.2f})")
 
     wid = gen_id("wd_")
     withdrawal = {

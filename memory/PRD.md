@@ -113,17 +113,22 @@ Sistema com 3 pilares:
 - [x] Painel admin: Configuracoes, Redes MMN (3 tabs + import CSV), Candidatos, Relatorio comissoes
 - [x] 18/18 testes backend + 95% frontend validado
 
+### Sessao 3 (2026-04-23) - Fase 2B: Saques (Withdrawals)
+- [x] Collection `withdrawals` + campo `withdrawal_id` em commissions + status novo `paid_out`
+- [x] GET /api/users/me/balance (available, quarantine, pending_commissions, reserved_in_withdrawals, total_withdrawn + settings)
+- [x] POST /api/withdrawals (valida enabled/min/available, FIFO por paid_at, reserva commissions via withdrawal_id)
+- [x] POST /api/users/me/withdrawals/{id}/cancel (so pending, libera commissions)
+- [x] Admin CRUD: GET com summary, approve, reject com reason, mark-paid (converte commissions a paid_out)
+- [x] GET /api/admin/withdrawals/export?status=X (CSV pronto p/ cartao de beneficios)
+- [x] Pagina /meus-saques (cards saldo + modal solicitacao + historico)
+- [x] Pagina /backoffice/saques (filtros + summary + modal de detalhes + acoes + CSV)
+- [x] Link "Meus saques" no menu do usuario e botao em /minha-rede
+- [x] Quarentena respeita withdrawal_release_days
+- [x] 17/18 testes backend (1 skip) + 95% frontend validado
+
 ## Backlog
 
-### P0 - Fase 2B (proxima sessao): Saques
-- [ ] Modelo withdrawals (amount, pix_key, status, created_at)
-- [ ] Endpoint POST /api/withdrawals (validar saldo disponivel respeitando release_days)
-- [ ] Endpoint GET /api/withdrawals (user) e /api/admin/withdrawals (admin)
-- [ ] Aprovacao/rejeicao admin
-- [ ] Pagina /meus-saques (user) e /backoffice/saques (admin)
-- [ ] Botao "Solicitar saque" em /minha-rede (so aparece se withdrawal_enabled)
-
-### P1 - Fase 2C: Faturamento interno
+### P0 - Fase 2C (proxima sessao): Faturamento interno
 - [ ] Nota de faturamento (numero, itens, totais, cliente, endereco)
 - [ ] Layout imprimível/PDF
 - [ ] Geracao no pedido pago
