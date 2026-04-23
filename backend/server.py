@@ -33,6 +33,12 @@ JWT_ALGORITHM = "HS256"
 def gen_id(prefix=""):
     return f"{prefix}{uuid.uuid4().hex[:12]}"
 
+def gen_referral_code() -> str:
+    return uuid.uuid4().hex[:8].upper()
+
+# Comissao por afiliado sobre vendas via link de indicacao
+AFFILIATE_COMMISSION_RATE = 0.08
+
 def hash_pw(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -90,6 +96,7 @@ class AuthRegister(BaseModel):
     password: str
     name: str
     phone: Optional[str] = None
+    sponsor_code: Optional[str] = None  # Codigo de indicacao (referral do afiliado)
 
 class AuthLogin(BaseModel):
     email: EmailStr
@@ -134,8 +141,9 @@ class CartItemAdd(BaseModel):
 
 class CheckoutData(BaseModel):
     address_id: str
-    payment_method: str = "pix"
+    payment_method: str = "pix"  # pix | credit_card | boleto (MVP: mock)
     notes: Optional[str] = None
+    ref_code: Optional[str] = None  # Codigo de indicacao do afiliado (URL ?ref=XXX)
 
 # ==================== LIFESPAN ====================
 
@@ -148,11 +156,19 @@ async def seed_admin(db):
             "user_id": gen_id("user_"), "email": email, "password_hash": hash_pw(pw),
             "name": "Administrador OxxPharma", "phone": None, "role": "admin",
             "access_level": 0, "status": "active", "addresses": [],
+            "referral_code": gen_referral_code(),
+            "sponsor_id": None, "sponsor_code": None,
             "created_at": now_iso(),
         })
         logger.info(f"Admin criado: {email}")
-    elif not verify_pw(pw, existing.get("password_hash", "")):
-        await db.users.update_one({"email": email}, {"$set": {"password_hash": hash_pw(pw)}})
+    else:
+        update = {}
+        if not verify_pw(pw, existing.get("password_hash", "")):
+            update["password_hash"] = hash_pw(pw)
+        if not existing.get("referral_code"):
+            update["referral_code"] = gen_referral_code()
+        if update:
+            await db.users.update_one({"email": email}, {"$set": update})
 
 async def seed_categories(db):
     count = await db.categories.count_documents({})
@@ -191,12 +207,15 @@ async def lifespan(app: FastAPI):
     logger.info("Conectado ao MongoDB")
     await app.db.users.create_index("email", unique=True)
     await app.db.users.create_index("user_id", unique=True)
+    await app.db.users.create_index("referral_code", unique=True)
     await app.db.products.create_index("product_id", unique=True)
     await app.db.products.create_index("category")
     await app.db.orders.create_index("order_id", unique=True)
     await app.db.orders.create_index("user_id")
     await app.db.categories.create_index("category_id", unique=True)
     await app.db.carts.create_index("user_id", unique=True)
+    await app.db.commissions.create_index("commission_id", unique=True)
+    await app.db.commissions.create_index("user_id")
     await seed_admin(app.db)
     await seed_categories(app.db)
     await seed_products(app.db)
@@ -213,11 +232,30 @@ async def register(request: Request, response: Response, data: AuthRegister):
     db = request.app.db
     if await db.users.find_one({"email": data.email.lower()}):
         raise HTTPException(status_code=400, detail="Email ja cadastrado")
+
+    # Processar sponsor_code (indicacao) se fornecido
+    sponsor_id = None
+    sponsor_code_norm = None
+    if data.sponsor_code:
+        code = data.sponsor_code.strip().upper()
+        sponsor = await db.users.find_one({"referral_code": code}, {"_id": 0})
+        if sponsor:
+            sponsor_id = sponsor["user_id"]
+            sponsor_code_norm = code
+
+    # Gerar referral_code unico
+    referral_code = gen_referral_code()
+    while await db.users.find_one({"referral_code": referral_code}):
+        referral_code = gen_referral_code()
+
     user = {
         "user_id": gen_id("user_"), "email": data.email.lower(),
         "password_hash": hash_pw(data.password), "name": data.name,
         "phone": data.phone, "role": "customer", "access_level": 99,
-        "status": "active", "addresses": [], "created_at": now_iso(),
+        "status": "active", "addresses": [],
+        "referral_code": referral_code,
+        "sponsor_id": sponsor_id, "sponsor_code": sponsor_code_norm,
+        "created_at": now_iso(),
     }
     await db.users.insert_one(user)
     token = create_token(user["user_id"], user["email"], "customer")
@@ -522,6 +560,24 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     if not items:
         raise HTTPException(status_code=400, detail="Nenhum produto valido")
     shipping = 15.90  # Frete fixo MVP
+
+    # Identificar afiliado (prioridade: sponsor_id do usuario, senao ref_code do checkout)
+    affiliate_id = None
+    affiliate_code = None
+    if user.get("sponsor_id"):
+        aff = await db.users.find_one({"user_id": user["sponsor_id"]}, {"_id": 0})
+        if aff:
+            affiliate_id = aff["user_id"]
+            affiliate_code = aff.get("referral_code")
+    elif data.ref_code:
+        code = data.ref_code.strip().upper()
+        aff = await db.users.find_one({"referral_code": code}, {"_id": 0})
+        if aff and aff["user_id"] != user["user_id"]:
+            affiliate_id = aff["user_id"]
+            affiliate_code = code
+
+    commission_amount = round(subtotal * AFFILIATE_COMMISSION_RATE, 2) if affiliate_id else 0
+
     order = {
         "order_id": gen_id("ord_"), "user_id": user["user_id"],
         "customer_name": user.get("name"), "customer_email": user.get("email"),
@@ -529,9 +585,29 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "shipping_cost": shipping, "total": round(subtotal + shipping, 2),
         "shipping_address": addr, "payment_method": data.payment_method,
         "payment_status": "pending", "order_status": "pending",
+        "payment_provider": "mock",  # Sera "mercadopago" quando integrado
+        "payment_id": None, "payment_url": None,
+        "affiliate_id": affiliate_id, "affiliate_code": affiliate_code,
+        "affiliate_commission": commission_amount,
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+
+    # Registrar comissao pendente para o afiliado
+    if affiliate_id and commission_amount > 0:
+        await db.commissions.insert_one({
+            "commission_id": gen_id("com_"),
+            "user_id": affiliate_id,
+            "order_id": order["order_id"],
+            "customer_id": user["user_id"],
+            "customer_name": user.get("name"),
+            "amount": commission_amount,
+            "rate": AFFILIATE_COMMISSION_RATE,
+            "order_subtotal": round(subtotal, 2),
+            "status": "pending",  # pending -> paid quando pedido for marcado como pago
+            "created_at": now_iso(),
+        })
+
     # Clear cart
     await db.carts.delete_one({"user_id": user["user_id"]})
     return await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
@@ -593,6 +669,17 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
         for item in o.get("items", []):
             await db.products.update_one({"product_id": item["product_id"]}, {"$inc": {"stock": item["quantity"]}})
     await db.orders.update_one({"order_id": order_id}, {"$set": update})
+    # Sincronizar status das comissoes do afiliado
+    if status == "paid":
+        await db.commissions.update_many(
+            {"order_id": order_id, "status": "pending"},
+            {"$set": {"status": "paid", "paid_at": now_iso()}},
+        )
+    elif status == "cancelled":
+        await db.commissions.update_many(
+            {"order_id": order_id, "status": {"$in": ["pending", "paid"]}},
+            {"$set": {"status": "cancelled"}},
+        )
     return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
 
 # ==================== ADMIN USERS ====================
@@ -645,6 +732,118 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
         "pending_orders": pending_orders, "total_products": total_products,
         "recent_orders": recent_orders, "orders_by_status": by_status,
     }
+
+# ==================== AFFILIATE / REFERRALS ====================
+
+@app.get("/api/referrals/validate/{code}")
+async def validate_referral_code(request: Request, code: str):
+    """Valida codigo de indicacao publico - usado pela loja antes do checkout."""
+    db = request.app.db
+    code_norm = code.strip().upper()
+    u = await db.users.find_one({"referral_code": code_norm, "status": "active"}, {"_id": 0, "password_hash": 0})
+    if not u:
+        return {"valid": False}
+    return {"valid": True, "code": code_norm, "affiliate_name": u.get("name")}
+
+@app.get("/api/users/me/referral")
+async def my_referral(request: Request, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    # Garantir que o usuario tem referral_code (caso tenha sido criado antes)
+    if not user.get("referral_code"):
+        code = gen_referral_code()
+        while await db.users.find_one({"referral_code": code}):
+            code = gen_referral_code()
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"referral_code": code}})
+        user["referral_code"] = code
+    # Estatisticas
+    total_comm = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"]}},
+        {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+    ]).to_list(10)
+    stats = {"pending": 0, "paid": 0, "cancelled": 0, "total_count": 0, "total_earned": 0}
+    for s in total_comm:
+        k = s["_id"] or "pending"
+        stats[k] = round(s["total"], 2)
+        stats["total_count"] += s["count"]
+    stats["total_earned"] = round(stats.get("paid", 0), 2)
+    # Total de pessoas indicadas
+    referrals_count = await db.users.count_documents({"sponsor_id": user["user_id"]})
+    return {
+        "referral_code": user["referral_code"],
+        "commission_rate": AFFILIATE_COMMISSION_RATE,
+        "referrals_count": referrals_count,
+        "stats": stats,
+    }
+
+@app.get("/api/users/me/commissions")
+async def my_commissions(request: Request, page: int = 1, limit: int = 20, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    q = {"user_id": user["user_id"]}
+    total = await db.commissions.count_documents(q)
+    comms = await db.commissions.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"commissions": comms, "total": total, "page": page}
+
+# ==================== PAYMENT - MERCADO PAGO (STUB) ====================
+# Placeholder para integracao futura com Mercado Pago.
+# Quando usuario fornecer as credenciais (MERCADO_PAGO_ACCESS_TOKEN), este
+# endpoint criara uma preferencia de pagamento real. Por ora, retorna mock.
+
+@app.post("/api/payments/create/{order_id}")
+async def create_payment(request: Request, order_id: str, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    if order["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    mp_token = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
+    if mp_token:
+        # TODO: integracao real com Mercado Pago SDK
+        # import mercadopago
+        # sdk = mercadopago.SDK(mp_token)
+        # preference = sdk.preference().create({...})
+        # payment_url = preference["response"]["init_point"]
+        payment_url = None  # placeholder
+        payment_id = None
+        provider = "mercadopago"
+    else:
+        # MOCK: auto-aprova pagamento em ambiente de desenvolvimento
+        payment_url = None
+        payment_id = f"mock_{uuid.uuid4().hex[:12]}"
+        provider = "mock"
+
+    await db.orders.update_one(
+        {"order_id": order_id},
+        {"$set": {"payment_provider": provider, "payment_id": payment_id, "payment_url": payment_url}},
+    )
+    return {"order_id": order_id, "payment_id": payment_id, "payment_url": payment_url, "provider": provider}
+
+@app.post("/api/payments/mock/confirm/{order_id}")
+async def mock_confirm_payment(request: Request, order_id: str, user: dict = Depends(get_current_user)):
+    """MVP: confirma pagamento manualmente (mock). Remover quando Mercado Pago estiver ativo."""
+    db = request.app.db
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    if order["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    await db.orders.update_one(
+        {"order_id": order_id},
+        {"$set": {"payment_status": "paid", "order_status": "paid", "paid_at": now_iso()}},
+    )
+    await db.commissions.update_many(
+        {"order_id": order_id, "status": "pending"},
+        {"$set": {"status": "paid", "paid_at": now_iso()}},
+    )
+    return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+
+@app.post("/api/payments/webhook/mercadopago")
+async def mp_webhook(request: Request):
+    """Webhook Mercado Pago (placeholder). Sera implementado quando credenciais forem fornecidas."""
+    body = await request.json()
+    logger.info(f"MP webhook received: {body}")
+    return {"received": True}
 
 @app.get("/api/health")
 async def health():

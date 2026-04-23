@@ -3,35 +3,18 @@
 ## Admin
 - **Email**: admin@oxxpharma.com
 - **Password**: admin123
-- **Access Level**: 0 (Administrador)
+- **Access Level**: 0 (admin)
+- **Role**: admin (acessa /backoffice)
 
-## Nacional
-- **Email**: nacional@oxxpharma.com
-- **Password**: nacional123
-- **Access Level**: 1 (Nacional)
+## Observações
+- O admin é criado automaticamente no startup do backend
+- Clientes comuns se cadastram em /cadastrar (role: customer, access_level: 99)
+- Cadastro via /cadastrar gera automaticamente um `referral_code` único
+- Clientes cadastrados com `?ref=XXX` na URL capturam o sponsor automaticamente
+- Comissão de afiliado fixada em 8% sobre o subtotal (AFFILIATE_COMMISSION_RATE)
 
-## Estadual (Teste)
-- **Email**: estadual@test.com
-- **Password**: test123
-- **Access Level**: 2 (Estadual) - Estado: SP
-
-## Regional (Teste)
-- **Email**: regional@test.com
-- **Password**: test123
-- **Access Level**: 3 (Regional) - Estado: SP, DDD: 11
-
-## Cidade (Teste)
-- **Email**: cidade@test.com
-- **Password**: test123
-- **Access Level**: 4 (Cidade) - Estado: SP, DDD: 11, Cidade: Sao Paulo
-
-## Indicador (Teste)
-- **Email**: indicador@test.com
-- **Password**: test123
-- **Access Level**: 5 (Indicador) - Estado: SP
-
-## Notes
-- Admin and Nacional are seeded automatically on startup
-- Test users were created during development
-- New users can register at /register (default level: Indicador)
-- Admin can create users at any level from /users page
+## Fluxo E-commerce (MVP)
+- Loja pública: `/` (sem auth para navegar e adicionar ao carrinho)
+- Checkout requer login
+- Pagamento: MOCK (botão "Simular pagamento" na tela do pedido)
+- Mercado Pago: estrutura preparada, ativa ao setar `MERCADO_PAGO_ACCESS_TOKEN` no .env

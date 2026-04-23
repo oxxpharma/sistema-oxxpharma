@@ -1,92 +1,102 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { RefProvider } from './contexts/RefContext';
+import { CartProvider } from './contexts/CartContext';
 
-// Pages
-import LandingPage from './pages/LandingPage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import DashboardPage from './pages/DashboardPage';
-import UsersPage from './pages/UsersPage';
-import ProductsPage from './pages/ProductsPage';
-import NetworkPage from './pages/NetworkPage';
-import SettingsPage from './pages/SettingsPage';
-import CommissionsPage from './pages/CommissionsPage';
-import WalletPage from './pages/WalletPage';
-import OrdersPage from './pages/OrdersPage';
-import WithdrawalsPage from './pages/WithdrawalsAdminPage';
-import ProfilePage from './pages/ProfilePage';
-import StorePage from './pages/StorePage';
-import ReferralPage from './pages/ReferralPage';
-import FranchisesPage from './pages/FranchisesPage';
-import ReportsPage from './pages/ReportsPage';
-import UpgradePage from './pages/UpgradePage';
-import UpgradeRequestsPage from './pages/UpgradeRequestsPage';
+// Layouts
+import StoreLayout from './layouts/StoreLayout';
+import BackofficeLayout from './layouts/BackofficeLayout';
 
-function ProtectedRoute({ children, maxLevel = 99 }) {
-  const { isAuthenticated, loading, accessLevel } = useAuth();
+// Store pages (publicas)
+import StoreHome from './pages/store/StoreHome';
+import ProductDetails from './pages/store/ProductDetails';
+import CartPage from './pages/store/CartPage';
+import CheckoutPage from './pages/store/CheckoutPage';
+import OrderDetails from './pages/store/OrderDetails';
+import MyOrders from './pages/store/MyOrders';
+import MyAddresses from './pages/store/MyAddresses';
+import MyReferral from './pages/store/MyReferral';
+import MyAccount from './pages/store/MyAccount';
+import SearchPage from './pages/store/SearchPage';
+
+// Auth
+import LoginPage from './pages/auth/LoginPage';
+import RegisterPage from './pages/auth/RegisterPage';
+
+// Backoffice
+import AdminDashboard from './pages/backoffice/AdminDashboard';
+import AdminProducts from './pages/backoffice/AdminProducts';
+import AdminCategories from './pages/backoffice/AdminCategories';
+import AdminOrders from './pages/backoffice/AdminOrders';
+import AdminUsers from './pages/backoffice/AdminUsers';
+
+function Guard({ children, requireAuth = false, requireAdmin = false }) {
+  const { isAuthenticated, isAdmin, loading } = useAuth();
   const location = useLocation();
-
   if (loading) {
     return (
       <div className="min-h-screen bg-bg-secondary flex items-center justify-center">
-        <div className="w-8 h-8 border-3 border-brand-main border-t-transparent rounded-full spinner" />
+        <div className="w-8 h-8 border-[3px] border-brand-main border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
-  if (!isAuthenticated) {
+  if (requireAuth && !isAuthenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
   }
-  if (accessLevel > maxLevel) {
-    return <Navigate to="/dashboard" replace />;
+  if (requireAdmin && !isAdmin) {
+    return <Navigate to="/" replace />;
   }
   return children;
 }
 
-function AppRouter() {
+function AppRoutes() {
   return (
     <Routes>
-      {/* Public */}
-      <Route path="/" element={<LandingPage />} />
+      {/* LOJA PÚBLICA */}
+      <Route element={<StoreLayout />}>
+        <Route path="/" element={<StoreHome />} />
+        <Route path="/produto/:id" element={<ProductDetails />} />
+        <Route path="/buscar" element={<SearchPage />} />
+        <Route path="/carrinho" element={<CartPage />} />
+        <Route path="/checkout" element={<Guard requireAuth><CheckoutPage /></Guard>} />
+        <Route path="/pedido/:id" element={<Guard requireAuth><OrderDetails /></Guard>} />
+        <Route path="/meus-pedidos" element={<Guard requireAuth><MyOrders /></Guard>} />
+        <Route path="/meus-enderecos" element={<Guard requireAuth><MyAddresses /></Guard>} />
+        <Route path="/indique-ganhe" element={<Guard requireAuth><MyReferral /></Guard>} />
+        <Route path="/minha-conta" element={<Guard requireAuth><MyAccount /></Guard>} />
+      </Route>
+
+      {/* AUTH */}
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/store" element={<StorePage />} />
+      <Route path="/cadastrar" element={<RegisterPage />} />
 
-      {/* All Authenticated */}
-      <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-      <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-      <Route path="/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
-      <Route path="/commissions" element={<ProtectedRoute><CommissionsPage /></ProtectedRoute>} />
-      <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
-      <Route path="/referral" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
-      <Route path="/upgrade" element={<ProtectedRoute><UpgradePage /></ProtectedRoute>} />
-      <Route path="/network" element={<ProtectedRoute maxLevel={4}><NetworkPage /></ProtectedRoute>} />
+      {/* BACKOFFICE (ADMIN) */}
+      <Route path="/backoffice" element={<Guard requireAuth requireAdmin><BackofficeLayout /></Guard>}>
+        <Route index element={<AdminDashboard />} />
+        <Route path="produtos" element={<AdminProducts />} />
+        <Route path="categorias" element={<AdminCategories />} />
+        <Route path="pedidos" element={<AdminOrders />} />
+        <Route path="usuarios" element={<AdminUsers />} />
+      </Route>
 
-      {/* Admin + Nacional */}
-      <Route path="/users" element={<ProtectedRoute maxLevel={4}><UsersPage /></ProtectedRoute>} />
-      <Route path="/products" element={<ProtectedRoute maxLevel={1}><ProductsPage /></ProtectedRoute>} />
-      <Route path="/withdrawals" element={<ProtectedRoute maxLevel={1}><WithdrawalsPage /></ProtectedRoute>} />
-      <Route path="/franchises" element={<ProtectedRoute maxLevel={1}><FranchisesPage /></ProtectedRoute>} />
-      <Route path="/reports" element={<ProtectedRoute maxLevel={1}><ReportsPage /></ProtectedRoute>} />
-      <Route path="/upgrade-requests" element={<ProtectedRoute maxLevel={1}><UpgradeRequestsPage /></ProtectedRoute>} />
-
-      {/* Admin Only */}
-      <Route path="/settings" element={<ProtectedRoute maxLevel={0}><SettingsPage /></ProtectedRoute>} />
-
-      {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
 
-function App() {
+export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRouter />
+        <RefProvider>
+          <CartProvider>
+            <AppRoutes />
+            <Toaster richColors position="top-right" />
+          </CartProvider>
+        </RefProvider>
       </AuthProvider>
     </BrowserRouter>
   );
 }
-
-export default App;
