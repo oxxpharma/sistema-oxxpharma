@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, API_URL } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2 } from 'lucide-react';
+import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function MyReferral() {
@@ -63,6 +64,12 @@ export default function MyReferral() {
       <p className="text-sm text-txt-secondary mb-6">
         Compartilhe seu link personalizado. A cada compra feita através dele, você ganha {Math.round(data.commission_rate * 100)}% de comissão.
       </p>
+
+      <div className="flex justify-end mb-4">
+        <Link to="/meus-saques" className="text-sm text-brand-main font-semibold inline-flex items-center gap-1 hover:underline">
+          <Wallet className="w-4 h-4" /> Ver meus saques →
+        </Link>
+      </div>
 
       {/* Cartão principal */}
       <div className="bg-gradient-to-br from-brand-main via-brand-hover to-orange-700 text-white rounded-2xl p-6 md:p-8 mb-6 relative overflow-hidden">

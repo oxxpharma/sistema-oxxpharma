@@ -171,6 +171,14 @@ class CheckoutData(BaseModel):
     notes: Optional[str] = None
     ref_code: Optional[str] = None  # Codigo de indicacao do afiliado (URL ?ref=XXX)
 
+class WithdrawalCreate(BaseModel):
+    amount: float
+    pix_key: str
+    pix_key_type: str  # cpf | email | phone | random
+    pix_name: str
+    pix_cpf: str
+    notes: Optional[str] = None
+
 # ==================== LIFESPAN ====================
 
 async def seed_admin(db):
@@ -246,9 +254,13 @@ async def lifespan(app: FastAPI):
     await app.db.commissions.create_index("commission_id", unique=True)
     await app.db.commissions.create_index("user_id")
     await app.db.commissions.create_index([("user_id", 1), ("status", 1)])
+    await app.db.commissions.create_index("withdrawal_id")
     await app.db.users.create_index("network_type")
     await app.db.users.create_index("network_sponsor_id")
     await app.db.users.create_index("external_id", sparse=True)
+    await app.db.withdrawals.create_index("withdrawal_id", unique=True)
+    await app.db.withdrawals.create_index("user_id")
+    await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
     await seed_admin(app.db)
     await seed_categories(app.db)
     await seed_products(app.db)
@@ -1251,6 +1263,230 @@ async def admin_commissions_report(request: Request, status: str = "paid", start
             "commissions_count": a["count"],
         })
     return {"rows": rows, "status": status, "period": {"start": start, "end": end}}
+
+# ==================== WITHDRAWALS (SAQUES) ====================
+
+async def compute_balance(db, user_id: str):
+    """Calcula saldo disponivel, em quarentena, total pago, total sacado."""
+    settings = await get_settings(db)
+    release_days = int(settings.get("withdrawal_release_days") or 0)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=release_days)).isoformat()
+
+    # Comissoes pagas (status=paid) ainda nao vinculadas a saque
+    # Considerar quarentena: paid_at <= cutoff => available; > cutoff => quarentine
+    available_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid", "withdrawal_id": {"$in": [None, ""]}, "paid_at": {"$lte": cutoff}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    quarantine_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid", "withdrawal_id": {"$in": [None, ""]}, "paid_at": {"$gt": cutoff}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    # Saques
+    withdrawn_agg = await db.withdrawals.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid_out"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    reserved_agg = await db.withdrawals.aggregate([
+        {"$match": {"user_id": user_id, "status": {"$in": ["pending", "approved"]}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    pending_commissions_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "pending"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+
+    return {
+        "available": round((available_agg[0]["total"] if available_agg else 0), 2),
+        "quarantine": round((quarantine_agg[0]["total"] if quarantine_agg else 0), 2),
+        "pending_commissions": round((pending_commissions_agg[0]["total"] if pending_commissions_agg else 0), 2),
+        "reserved_in_withdrawals": round((reserved_agg[0]["total"] if reserved_agg else 0), 2),
+        "total_withdrawn": round((withdrawn_agg[0]["total"] if withdrawn_agg else 0), 2),
+        "withdrawal_enabled": bool(settings.get("withdrawal_enabled")),
+        "withdrawal_min_amount": float(settings.get("withdrawal_min_amount") or 0),
+        "withdrawal_release_days": release_days,
+    }
+
+@app.get("/api/users/me/balance")
+async def my_balance(request: Request, user: dict = Depends(get_current_user)):
+    return await compute_balance(request.app.db, user["user_id"])
+
+@app.post("/api/withdrawals")
+async def create_withdrawal(request: Request, data: WithdrawalCreate, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    settings = await get_settings(db)
+    if not settings.get("withdrawal_enabled"):
+        raise HTTPException(status_code=400, detail="Saques estao desativados no momento")
+
+    min_amt = float(settings.get("withdrawal_min_amount") or 0)
+    if data.amount < min_amt:
+        raise HTTPException(status_code=400, detail=f"Valor minimo de saque: R$ {min_amt:.2f}")
+
+    balance = await compute_balance(db, user["user_id"])
+    if data.amount > balance["available"]:
+        raise HTTPException(status_code=400, detail=f"Saldo disponivel insuficiente (R$ {balance['available']:.2f})")
+
+    # Selecionar comissoes elegiveis (FIFO pelo paid_at) ate cobrir o valor
+    release_days = int(settings.get("withdrawal_release_days") or 0)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=release_days)).isoformat()
+    candidates = await db.commissions.find(
+        {"user_id": user["user_id"], "status": "paid", "withdrawal_id": {"$in": [None, ""]}, "paid_at": {"$lte": cutoff}},
+        {"_id": 0}
+    ).sort("paid_at", 1).to_list(10000)
+    selected = []
+    accum = 0
+    for c in candidates:
+        if accum >= data.amount:
+            break
+        selected.append(c["commission_id"])
+        accum += c["amount"]
+    if accum < data.amount:
+        raise HTTPException(status_code=400, detail="Nao foi possivel compor o saque com comissoes elegiveis")
+
+    wid = gen_id("wd_")
+    withdrawal = {
+        "withdrawal_id": wid,
+        "user_id": user["user_id"],
+        "user_name": user.get("name"),
+        "user_email": user.get("email"),
+        "amount": round(float(data.amount), 2),
+        "selected_amount": round(accum, 2),
+        "commission_ids": selected,
+        "pix_key": data.pix_key,
+        "pix_key_type": data.pix_key_type,
+        "pix_name": data.pix_name,
+        "pix_cpf": data.pix_cpf,
+        "notes": data.notes,
+        "status": "pending",  # pending -> approved -> paid_out; ou rejected
+        "created_at": now_iso(),
+        "decided_at": None,
+        "decided_by": None,
+        "admin_notes": None,
+        "paid_at": None,
+    }
+    await db.withdrawals.insert_one(withdrawal)
+    # Marca comissoes como reservadas via withdrawal_id
+    await db.commissions.update_many(
+        {"commission_id": {"$in": selected}},
+        {"$set": {"withdrawal_id": wid}},
+    )
+    # Atualiza perfil do usuario com dados PIX (conveniencia)
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "pix_key": data.pix_key, "pix_key_type": data.pix_key_type,
+            "cpf": data.pix_cpf,
+        }},
+    )
+    return await db.withdrawals.find_one({"withdrawal_id": wid}, {"_id": 0})
+
+@app.get("/api/users/me/withdrawals")
+async def my_withdrawals(request: Request, page: int = 1, limit: int = 20, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    q = {"user_id": user["user_id"]}
+    total = await db.withdrawals.count_documents(q)
+    items = await db.withdrawals.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"withdrawals": items, "total": total, "page": page}
+
+@app.post("/api/users/me/withdrawals/{wid}/cancel")
+async def cancel_withdrawal(request: Request, wid: str, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    w = await db.withdrawals.find_one({"withdrawal_id": wid}, {"_id": 0})
+    if not w:
+        raise HTTPException(status_code=404, detail="Solicitacao nao encontrada")
+    if w["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    if w["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Apenas solicitacoes pendentes podem ser canceladas")
+    await db.withdrawals.update_one({"withdrawal_id": wid}, {"$set": {"status": "cancelled", "decided_at": now_iso()}})
+    await db.commissions.update_many({"withdrawal_id": wid}, {"$set": {"withdrawal_id": None}})
+    return {"message": "Solicitacao cancelada"}
+
+# === ADMIN WITHDRAWALS ===
+
+@app.get("/api/admin/withdrawals")
+async def admin_list_withdrawals(request: Request, status: Optional[str] = None, search: Optional[str] = None, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    q = {}
+    if status:
+        q["status"] = status
+    if search:
+        q["$or"] = [{"user_name": {"$regex": search, "$options": "i"}}, {"user_email": {"$regex": search, "$options": "i"}}, {"pix_cpf": search}]
+    total = await db.withdrawals.count_documents(q)
+    items = await db.withdrawals.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    # Agregados
+    agg = await db.withdrawals.aggregate([{"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}]).to_list(10)
+    summary = {s["_id"]: {"total": round(s["total"], 2), "count": s["count"]} for s in agg}
+    return {"withdrawals": items, "total": total, "page": page, "summary": summary}
+
+@app.put("/api/admin/withdrawals/{wid}/approve")
+async def admin_approve_withdrawal(request: Request, wid: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    w = await db.withdrawals.find_one({"withdrawal_id": wid})
+    if not w:
+        raise HTTPException(status_code=404, detail="Nao encontrado")
+    if w["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Status atual nao permite aprovacao")
+    await db.withdrawals.update_one(
+        {"withdrawal_id": wid},
+        {"$set": {"status": "approved", "decided_at": now_iso(), "decided_by": user["user_id"]}},
+    )
+    return await db.withdrawals.find_one({"withdrawal_id": wid}, {"_id": 0})
+
+@app.put("/api/admin/withdrawals/{wid}/reject")
+async def admin_reject_withdrawal(request: Request, wid: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    body = await request.json()
+    reason = (body or {}).get("reason", "")
+    w = await db.withdrawals.find_one({"withdrawal_id": wid})
+    if not w:
+        raise HTTPException(status_code=404, detail="Nao encontrado")
+    if w["status"] not in ("pending", "approved"):
+        raise HTTPException(status_code=400, detail="Status atual nao permite rejeicao")
+    await db.withdrawals.update_one(
+        {"withdrawal_id": wid},
+        {"$set": {"status": "rejected", "decided_at": now_iso(), "decided_by": user["user_id"], "admin_notes": reason}},
+    )
+    # Devolve comissoes
+    await db.commissions.update_many({"withdrawal_id": wid}, {"$set": {"withdrawal_id": None}})
+    return await db.withdrawals.find_one({"withdrawal_id": wid}, {"_id": 0})
+
+@app.put("/api/admin/withdrawals/{wid}/mark-paid")
+async def admin_mark_paid(request: Request, wid: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    w = await db.withdrawals.find_one({"withdrawal_id": wid})
+    if not w:
+        raise HTTPException(status_code=404, detail="Nao encontrado")
+    if w["status"] not in ("approved", "pending"):
+        raise HTTPException(status_code=400, detail="Status atual nao permite pagamento")
+    now = now_iso()
+    await db.withdrawals.update_one(
+        {"withdrawal_id": wid},
+        {"$set": {"status": "paid_out", "paid_at": now, "decided_by": user["user_id"], "decided_at": now}},
+    )
+    # Marcar comissoes vinculadas como paid_out
+    await db.commissions.update_many(
+        {"withdrawal_id": wid},
+        {"$set": {"status": "paid_out", "paid_out_at": now}},
+    )
+    return await db.withdrawals.find_one({"withdrawal_id": wid}, {"_id": 0})
+
+@app.get("/api/admin/withdrawals/export")
+async def admin_export_withdrawals(request: Request, status: str = "approved", user: dict = Depends(require_admin())):
+    """Exporta solicitacoes de saque (formato pronto para empresa de cartao de beneficios)."""
+    db = request.app.db
+    items = await db.withdrawals.find({"status": status}, {"_id": 0}).sort("created_at", -1).to_list(10000)
+    rows = [{
+        "withdrawal_id": w["withdrawal_id"],
+        "cpf": w.get("pix_cpf"),
+        "name": w.get("pix_name") or w.get("user_name"),
+        "email": w.get("user_email"),
+        "pix_key_type": w.get("pix_key_type"),
+        "pix_key": w.get("pix_key"),
+        "amount": w["amount"],
+        "created_at": w["created_at"],
+    } for w in items]
+    return {"rows": rows, "status": status, "count": len(rows)}
 
 @app.get("/api/health")
 async def health():

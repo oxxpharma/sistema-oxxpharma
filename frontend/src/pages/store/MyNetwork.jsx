@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Network, Users, DollarSign, Clock, Loader2, Award, TrendingUp, Share2 } from 'lucide-react';
+import { Network, Users, DollarSign, Clock, Loader2, Award, TrendingUp, Share2, Wallet } from 'lucide-react';
 
 const NETWORK_LABELS = {
   customer: { label: 'Indicador', color: 'default' },
@@ -72,6 +72,9 @@ export default function MyNetwork() {
         </div>
         <Link to="/indique-ganhe">
           <Button variant="outline"><Share2 className="w-4 h-4" /> Compartilhar link</Button>
+        </Link>
+        <Link to="/meus-saques">
+          <Button data-testid="go-withdrawals-btn"><Wallet className="w-4 h-4" /> Meus saques</Button>
         </Link>
       </div>
 

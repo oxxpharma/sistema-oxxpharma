@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
-import { LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu, X, Network, Award, FileText, Settings } from 'lucide-react';
+import { LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu, X, Network, Award, FileText, Settings, Wallet } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [

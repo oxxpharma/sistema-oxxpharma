@@ -19,6 +19,7 @@ import MyOrders from './pages/store/MyOrders';
 import MyAddresses from './pages/store/MyAddresses';
 import MyReferral from './pages/store/MyReferral';
 import MyNetwork from './pages/store/MyNetwork';
+import MyWithdrawals from './pages/store/MyWithdrawals';
 import MyAccount from './pages/store/MyAccount';
 import SearchPage from './pages/store/SearchPage';
 
@@ -36,6 +37,7 @@ import AdminSettings from './pages/backoffice/AdminSettings';
 import AdminNetworks from './pages/backoffice/AdminNetworks';
 import AdminCandidates from './pages/backoffice/AdminCandidates';
 import AdminCommissionsReport from './pages/backoffice/AdminCommissionsReport';
+import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -70,6 +72,8 @@ function AppRoutes() {
         <Route path="/meus-pedidos" element={<Guard requireAuth><MyOrders /></Guard>} />
         <Route path="/meus-enderecos" element={<Guard requireAuth><MyAddresses /></Guard>} />
         <Route path="/indique-ganhe" element={<Guard requireAuth><MyReferral /></Guard>} />
+        <Route path="/minha-rede" element={<Guard requireAuth><MyNetwork /></Guard>} />
+        <Route path="/meus-saques" element={<Guard requireAuth><MyWithdrawals /></Guard>} />
         <Route path="/minha-conta" element={<Guard requireAuth><MyAccount /></Guard>} />
       </Route>
 
@@ -87,6 +91,7 @@ function AppRoutes() {
         <Route path="redes" element={<AdminNetworks />} />
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
+        <Route path="saques" element={<AdminWithdrawals />} />
         <Route path="configuracoes" element={<AdminSettings />} />
       </Route>
 
