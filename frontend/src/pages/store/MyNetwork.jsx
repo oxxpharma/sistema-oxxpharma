@@ -73,9 +73,6 @@ export default function MyNetwork() {
         <Link to="/indique-ganhe">
           <Button variant="outline"><Share2 className="w-4 h-4" /> Compartilhar link</Button>
         </Link>
-        <Link to="/meus-saques">
-          <Button data-testid="go-withdrawals-btn"><Wallet className="w-4 h-4" /> Meus saques</Button>
-        </Link>
       </div>
 
       {/* Totais */}

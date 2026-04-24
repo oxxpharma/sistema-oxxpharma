@@ -42,6 +42,7 @@ import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
 import AdminInvoices from './pages/backoffice/AdminInvoices';
 import AdminEmails from './pages/backoffice/AdminEmails';
 import AdminWebhook from './pages/backoffice/AdminWebhook';
+import AdminGiftCards from './pages/backoffice/AdminGiftCards';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -98,6 +99,7 @@ function AppRoutes() {
         <Route path="redes" element={<AdminNetworks />} />
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
+        <Route path="cartao" element={<AdminGiftCards />} />
         <Route path="saques" element={<AdminWithdrawals />} />
         <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="emails" element={<AdminEmails />} />

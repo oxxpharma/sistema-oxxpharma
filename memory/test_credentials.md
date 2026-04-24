@@ -12,10 +12,20 @@
 
 ## Observações importantes
 - Admin seedado automaticamente no startup
-- Cadastro público via /cadastrar cria usuário `network_type='customer'`
+- Cadastro público via /cadastrar cria usuário `network_type='customer'` **SEM** `referral_code` (novo fluxo de cartão de benefícios)
+- Usuário precisa aderir ao programa via banner em `/indique-ganhe` preenchendo formulário dinâmico
+- Admin pode ativar programa manualmente em `/backoffice/usuarios`
 - Cadastro com `?ref=CODE` na URL vincula `sponsor_id` (8% afiliado permanente)
 - Promoção a Propagandista: admin manualmente via `/backoffice/candidatos` ou `/backoffice/redes` tab Customer
 - Senha default para imports Rede 1: **oxx@pharma** (configurável no payload da API)
+
+## Programa Cartão de Benefícios (FASE 3 - nova)
+- Admin painel: `/backoffice/cartao` (abas: Config, Campos form, Lotes, Logs)
+- Campos default do form de adesão: cpf, full_name, birth_date, mother_name, phone (configuráveis pelo admin)
+- Cron: todos dias 23:59 BRT (GMT-3) envia lote agregado das commissions `status=paid` e `sent_to_card=false`
+- Adapter HTTP genérico: URL, método, auth (none/bearer/apikey/basic), template de payload
+- Fallback: se API não configurada, admin exporta CSV manualmente e marca "enviado"
+
 
 ## Fluxo de teste MMN
 1. Cliente A se cadastra → `customer`

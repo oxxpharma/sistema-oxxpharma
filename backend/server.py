@@ -9,7 +9,7 @@ import asyncio
 import bcrypt
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -304,7 +304,7 @@ async def lifespan(app: FastAPI):
     logger.info("Conectado ao MongoDB")
     await app.db.users.create_index("email", unique=True)
     await app.db.users.create_index("user_id", unique=True)
-    await app.db.users.create_index("referral_code", unique=True)
+    await app.db.users.create_index("referral_code", unique=True, partialFilterExpression={"referral_code": {"$type": "string"}})
     await app.db.products.create_index("product_id", unique=True)
     await app.db.products.create_index("category")
     await app.db.orders.create_index("order_id", unique=True)
@@ -338,12 +338,14 @@ async def lifespan(app: FastAPI):
     if not migration:
         await app.db.users.update_many(
             {"role": {"$ne": "admin"}},
-            {"$set": {
-                "referral_code": None,
-                "referral_program_active": False,
-                "referral_enrollment": None,
-                "referral_enrolled_at": None,
-            }},
+            {
+                "$unset": {"referral_code": ""},
+                "$set": {
+                    "referral_program_active": False,
+                    "referral_enrollment": None,
+                    "referral_enrolled_at": None,
+                },
+            },
         )
         # Admin continua com codigo (pode indicar normal)
         await app.db.users.update_many(
@@ -1018,13 +1020,8 @@ async def validate_referral_code(request: Request, code: str):
 @app.get("/api/users/me/referral")
 async def my_referral(request: Request, user: dict = Depends(get_current_user)):
     db = request.app.db
-    # Garantir que o usuario tem referral_code (caso tenha sido criado antes)
-    if not user.get("referral_code"):
-        code = gen_referral_code()
-        while await db.users.find_one({"referral_code": code}):
-            code = gen_referral_code()
-        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"referral_code": code}})
-        user["referral_code"] = code
+    # referral_code agora so eh gerado quando usuario adere ao programa (via /referral-enrollment)
+    has_program = bool(user.get("referral_program_active") and user.get("referral_code"))
     # Estatisticas
     total_comm = await db.commissions.aggregate([
         {"$match": {"user_id": user["user_id"]}},
@@ -1038,11 +1035,24 @@ async def my_referral(request: Request, user: dict = Depends(get_current_user)):
     stats["total_earned"] = round(stats.get("paid", 0), 2)
     # Total de pessoas indicadas
     referrals_count = await db.users.count_documents({"sponsor_id": user["user_id"]})
+    # Saldos do novo modelo (cartao)
+    account_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    sent_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
     return {
-        "referral_code": user["referral_code"],
+        "has_referral_program": has_program,
+        "referral_code": user.get("referral_code") if has_program else None,
         "commission_rate": AFFILIATE_COMMISSION_RATE,
         "referrals_count": referrals_count,
         "stats": stats,
+        "account_balance": round((account_agg[0]["total"] if account_agg else 0), 2),
+        "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
+        "referral_enrollment": user.get("referral_enrollment"),
     }
 
 @app.get("/api/users/me/commissions")
@@ -2019,3 +2029,201 @@ async def regenerate_webhook_token(request: Request, user: dict = Depends(requir
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "app": "OxxPharma"}
+
+# ==================== CARTAO DE BENEFICIOS / GIFT CARD ====================
+
+def _validate_enrollment_payload(fields: List[Dict], data: Dict) -> Dict:
+    """Valida dados submetidos contra os campos configurados. Retorna dict sanitizado."""
+    clean = {}
+    for f in fields or []:
+        key = f.get("key")
+        if not key:
+            continue
+        val = data.get(key)
+        if f.get("required") and (val is None or str(val).strip() == ""):
+            raise HTTPException(status_code=400, detail=f"Campo obrigatorio: {f.get('label') or key}")
+        if val is not None:
+            clean[key] = val
+    return clean
+
+
+@app.get("/api/admin/card-config")
+async def get_admin_card_config(request: Request, user: dict = Depends(require_admin())):
+    return await card_service.get_card_config(request.app.db)
+
+
+@app.put("/api/admin/card-config")
+async def update_admin_card_config(request: Request, user: dict = Depends(require_admin())):
+    body = await request.json()
+    cfg = await card_service.update_card_config(request.app.db, body or {})
+    return cfg
+
+
+@app.get("/api/public/card-enrollment-fields")
+async def public_card_fields(request: Request):
+    """Campos publicos (apenas meta) para montar o formulario no frontend do usuario."""
+    cfg = await card_service.get_card_config(request.app.db)
+    return {"fields": cfg.get("enrollment_fields", [])}
+
+
+@app.post("/api/users/me/referral-enrollment")
+async def submit_referral_enrollment(request: Request, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    if user.get("referral_program_active") and user.get("referral_code"):
+        raise HTTPException(status_code=400, detail="Usuario ja esta no programa de indicacao")
+    body = await request.json()
+    cfg = await card_service.get_card_config(db)
+    clean = _validate_enrollment_payload(cfg.get("enrollment_fields", []), body or {})
+    # Gera referral_code unico
+    code = gen_referral_code()
+    while await db.users.find_one({"referral_code": code}):
+        code = gen_referral_code()
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "referral_code": code,
+            "referral_program_active": True,
+            "referral_enrollment": clean,
+            "referral_enrolled_at": now_iso(),
+        }},
+    )
+    # Tenta cadastrar beneficiario na API do cartao (best-effort)
+    try:
+        await card_service.send_enrollment_to_card_api(db, {**user, "referral_code": code}, clean)
+    except Exception as e:
+        logger.warning(f"Falha enviando enrollment para API cartao: {e}")
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    app_url = get_app_url()
+    return {
+        "ok": True,
+        "referral_code": code,
+        "referral_link": f"{app_url}/?ref={code}",
+        "enrollment": clean,
+        "user": u,
+    }
+
+
+@app.post("/api/admin/users/{user_id}/activate-referral")
+async def admin_activate_referral(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Admin ativa manualmente o programa de indicacao para um usuario, sem formulario."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if target.get("referral_program_active") and target.get("referral_code"):
+        return {"ok": True, "already_active": True, "referral_code": target.get("referral_code")}
+    code = gen_referral_code()
+    while await db.users.find_one({"referral_code": code}):
+        code = gen_referral_code()
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "referral_code": code,
+            "referral_program_active": True,
+            "referral_enrolled_at": now_iso(),
+            "referral_activated_by_admin": user["user_id"],
+        }},
+    )
+    return {"ok": True, "referral_code": code}
+
+
+@app.post("/api/admin/users/{user_id}/deactivate-referral")
+async def admin_deactivate_referral(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"referral_program_active": False}, "$unset": {"referral_code": ""}},
+    )
+    return {"ok": True}
+
+
+@app.post("/api/admin/reset-all-referrals")
+async def admin_reset_all_referrals(request: Request, user: dict = Depends(require_admin())):
+    """Reseta TODOS os referral_codes (exceto admin), desativando o programa para todos."""
+    db = request.app.db
+    res = await db.users.update_many(
+        {"role": {"$ne": "admin"}},
+        {"$set": {"referral_program_active": False}, "$unset": {"referral_code": ""}},
+    )
+    return {"ok": True, "updated": res.modified_count}
+
+
+@app.get("/api/admin/card-batches")
+async def admin_list_card_batches(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    q = {"is_lock": {"$ne": True}}
+    total = await db.card_batches.count_documents(q)
+    batches = await db.card_batches.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"batches": batches, "total": total, "page": page}
+
+
+@app.get("/api/admin/card-batches/{batch_id}")
+async def admin_get_card_batch(request: Request, batch_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    b = await db.card_batches.find_one({"batch_id": batch_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch nao encontrado")
+    return b
+
+
+@app.post("/api/admin/card-batches/run")
+async def admin_run_card_batch(request: Request, user: dict = Depends(require_admin())):
+    """Dispara manualmente a transferencia do dia."""
+    db = request.app.db
+    result = await card_service.run_daily_transfer(db, mode="manual", triggered_by=user["user_id"])
+    return result
+
+
+@app.post("/api/admin/card-batches/{batch_id}/mark-exported")
+async def admin_mark_batch_exported(request: Request, batch_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    b = await card_service.mark_batch_exported(db, batch_id, mode="manual")
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch nao encontrado")
+    return b
+
+
+@app.get("/api/admin/card-batches/{batch_id}/export.csv")
+async def admin_export_batch_csv(request: Request, batch_id: str, user: dict = Depends(require_admin())):
+    from fastapi.responses import Response as FastAPIResponse
+    db = request.app.db
+    b = await db.card_batches.find_one({"batch_id": batch_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch nao encontrado")
+    csv_bytes = card_service.batch_to_csv(b)
+    return FastAPIResponse(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{batch_id}.csv"'},
+    )
+
+
+@app.get("/api/admin/card-logs")
+async def admin_list_card_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.card_api_logs.count_documents({})
+    logs = await db.card_api_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
+
+@app.get("/api/users/me/card-balance")
+async def my_card_balance(request: Request, user: dict = Depends(get_current_user)):
+    """Saldo 'na conta' (paid ainda nao enviado) + 'enviado para cartao' (historico)."""
+    db = request.app.db
+    account_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    sent_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    pending_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"], "status": "pending"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    return {
+        "account_balance": round((account_agg[0]["total"] if account_agg else 0), 2),
+        "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
+        "pending_commissions": round((pending_agg[0]["total"] if pending_agg else 0), 2),
+    }

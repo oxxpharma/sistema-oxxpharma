@@ -1,0 +1,32 @@
+{
+  "summary": "Phase 3 - Card Benefits Program fully tested. Backend: 23/23 pytest pass covering health, public enrollment fields, register-without-referral-code, my_referral before/after enrollment, enrollment validation (400 on missing + block re-enroll), card-balance endpoint, admin card-config GET/PUT/persist, admin manual activate/deactivate/idempotent, card-batches run/list/detail/export.csv/logs, E2E sponsor+buyer linkage, reset-all-referrals destructive. Frontend: /indique-ganhe banner with enroll-program-btn visible for new user; modal opens; /backoffice/cartao loads with toggle-enabled + save-config-btn (other tab-specific buttons render only when respective tabs active); /backoffice/usuarios shows 83 activate-* buttons and 1 deactivate-* button; 'Meus saques' link successfully removed from StoreHeader.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase3_card_program.py",
+    "/app/test_reports/pytest/pytest_phase3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 2230 lines - past the 700-line guideline. Split into routers: auth, store, admin/card, admin/users. Already flagged in iteration_15.",
+    "card_service.get_current_user reads cookie BEFORE Authorization header. If a browser/test session has any access_token cookie from a prior user login, subsequent admin Bearer-token calls via the SAME session will be authenticated AS the user and return 403. This is a known gotcha - tests/SDKs must use isolated sessions per principal. Consider: if both cookie AND Bearer header are present, prefer Bearer (explicit) or return 401 on mismatch.",
+    "run_daily_transfer with empty api_url still creates a batch doc in 'queued' state but never transitions it - only mark_batch_exported or a subsequent successful API call does. Dashboard should make this state obvious; otherwise queued batches pile up.",
+    "Scheduler tick uses insert/delete of a 'lock' doc with is_lock=true and queries against card_batches with {is_lock: {$ne: true}}. Safer would be a dedicated locks collection or a unique index on scheduler_key to guarantee idempotency across multiple replicas.",
+    "call_card_api logs request_body including potentially sensitive PII (cpf, full_name, mother_name, phone) in plaintext. Consider redaction for logs >30 days old or encrypt at rest.",
+    "AdminGiftCards.jsx renders tab-specific buttons only when the tab is active. Test scripts must click tab-fields/tab-batches/tab-logs first to access save-fields-btn/run-batch-btn etc. Dynamic enrollment form rows use data-testid=field-row-${i} (by index), NOT field-${key} (by key) - if main agent wants tests to target fields by key, also add data-testid=field-input-${key} on the inner input."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase3_card_program.py (new - 23 tests, all pass)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "100% of tested elements present (banner, tabs-admin-cartao, activate/deactivate buttons, Meus saques removed)"},
+  "test_credentials": "admin@oxxpharma.com / admin123; new users via POST /api/auth/register (no ref_code issued)",
+  "seed_data_creation": "Test run created TEST_* users: test_phase3_<tag>, test_p3_manual_<tag>, test_p3_sponsor_<tag>, test_p3_buyer_<tag>, test_p3_reset_<tag>, fe_phase3_<tag>. reset-all-referrals test is destructive - clears ALL non-admin referral_codes. If network_1 users (joao/maria/pedro) had referral codes, they are now cleared; main agent may need to re-seed or re-activate them via POST /api/admin/users/{id}/activate-referral for future E2E MMN tests.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 3 Card Program fully green. Important: (a) get_current_user reads cookie BEFORE Bearer header - tests MUST use separate requests.Session per principal (admin/user) or rotate cookies between calls; the shared test.py helper has a _fresh_session() util + _AdminClient wrapper for this. (b) Destructive reset-all-referrals ran last and cleared non-admin ref codes; re-activate test users via /api/admin/users/{id}/activate-referral if E2E commissions flow needs to be re-verified. (c) Frontend dynamic enrollment form fields: testid is field-row-${i} (not field-${key}); main agent may want to add field-input-${key} testids for more robust Playwright selectors. (d) Admin card-config is now enabled=true cron 23:59 BRT (set during test_update_config); scheduler tick may actually run the daily job. To prevent test batches in prod, main agent should set enabled=false or api_url='' after deploy.",
+  "rca of the issue": "N/A - no failures. Initial 9/23 test failures were a TEST HARNESS issue (shared requests.Session leaked user cookie across admin calls because server prioritizes cookie over Bearer header). Fixed by introducing _fresh_session() per principal and _AdminClient wrapper. No production code changes required."
+}
