@@ -22,6 +22,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import jwt
 
 import email_service
+import card_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -328,6 +329,31 @@ async def lifespan(app: FastAPI):
     await app.db.webhook_logs.create_index("log_id", unique=True)
     await app.db.webhook_logs.create_index("created_at")
     await email_service.seed_default_templates(app.db)
+    await app.db.card_batches.create_index("batch_id", unique=True)
+    await app.db.card_batches.create_index("created_at")
+    await app.db.card_api_logs.create_index("log_id", unique=True)
+    await app.db.card_api_logs.create_index("created_at")
+    # Migracao: se ainda nao rodou, reseta referral_codes -> None e marca referral_program_active=False
+    migration = await app.db.migrations.find_one({"_id": "reset_referrals_for_card_program"})
+    if not migration:
+        await app.db.users.update_many(
+            {"role": {"$ne": "admin"}},
+            {"$set": {
+                "referral_code": None,
+                "referral_program_active": False,
+                "referral_enrollment": None,
+                "referral_enrolled_at": None,
+            }},
+        )
+        # Admin continua com codigo (pode indicar normal)
+        await app.db.users.update_many(
+            {"role": "admin", "referral_program_active": {"$exists": False}},
+            {"$set": {"referral_program_active": True}},
+        )
+        await app.db.migrations.insert_one({"_id": "reset_referrals_for_card_program", "ran_at": now_iso()})
+        logger.info("Migracao reset_referrals_for_card_program aplicada")
+    # Inicia scheduler do cartao
+    card_service.start_scheduler(lambda: app.db)
     # Garantir token de webhook
     settings_doc = await app.db.settings.find_one({"_id": "global"}) or {}
     if not settings_doc.get("external_webhook_token"):
@@ -363,17 +389,16 @@ async def register(request: Request, response: Response, data: AuthRegister):
             sponsor_id = sponsor["user_id"]
             sponsor_code_norm = code
 
-    # Gerar referral_code unico
-    referral_code = gen_referral_code()
-    while await db.users.find_one({"referral_code": referral_code}):
-        referral_code = gen_referral_code()
-
+    # referral_code so eh gerado quando usuario adere ao programa (nao mais no cadastro)
     user = {
         "user_id": gen_id("user_"), "email": data.email.lower(),
         "password_hash": hash_pw(data.password), "name": data.name,
         "phone": data.phone, "role": "customer", "access_level": 99,
         "status": "active", "addresses": [],
-        "referral_code": referral_code,
+        "referral_code": None,
+        "referral_program_active": False,
+        "referral_enrollment": None,
+        "referral_enrolled_at": None,
         "sponsor_id": sponsor_id, "sponsor_code": sponsor_code_norm,
         "network_type": NETWORK_CUSTOMER,
         "network_sponsor_id": None,

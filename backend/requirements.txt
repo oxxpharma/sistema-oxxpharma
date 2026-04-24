@@ -133,3 +133,5 @@ websockets==15.0.1
 xmltodict==1.0.3
 yarl==1.22.0
 zipp==3.23.0
+apscheduler>=3.10,<4.0
+pytz
