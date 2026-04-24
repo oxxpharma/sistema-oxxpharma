@@ -160,39 +160,64 @@ Sistema com 3 pilares:
 - [x] Pagina /backoffice/webhook (URL/token + docs + exemplo curl + logs)
 - [x] 19/19 testes backend (100%) + 100% frontend validado
 
+### Sessao 6 (2026-04-24) - Fase 3: Cartao de Beneficios (pivot do saque PIX)
+- [x] Migracao: removido auto-gen de referral_code no cadastro; usuarios existentes (exceto admin) foram resetados
+- [x] Indice `users.referral_code` virou unique + partialFilterExpression `{referral_code: {$type: string}}`
+- [x] Modulo `card_service.py`: get/update config, build_daily_batch, run_daily_transfer, mark_batch_exported, batch_to_csv, APScheduler (tick a cada minuto, TZ=America/Sao_Paulo)
+- [x] Collection `settings` com doc `_id=card_config`: enabled, cron_hour/minute, enrollment_fields (dinamicos), api adapter (url/method/auth/headers/template/timeout), enrollment_api separado
+- [x] Collection `card_batches`: batch_id, entries, total_amount, status (queued/sent_api/sent_manual/failed), mode, triggered_by
+- [x] Collection `card_api_logs`: log de toda chamada HTTP (URL, method, status, response, contexto)
+- [x] Adapter HTTP generico (none/bearer/apikey/basic) + template JSON + headers extras
+- [x] Campo novo em users: `referral_program_active`, `referral_enrollment` (dados do form), `referral_enrolled_at`
+- [x] Campo novo em commissions: `sent_to_card`, `sent_to_card_at`, `card_batch_id`
+- [x] Endpoints:
+  - GET /api/public/card-enrollment-fields (frontend do user monta o form)
+  - POST /api/users/me/referral-enrollment (valida, gera referral_code, ativa programa, best-effort API)
+  - GET /api/users/me/referral (ja retorna has_referral_program, account_balance, sent_to_card_total)
+  - GET /api/users/me/card-balance
+  - GET/PUT /api/admin/card-config
+  - POST /api/admin/users/{id}/activate-referral (admin ativa manualmente)
+  - POST /api/admin/users/{id}/deactivate-referral
+  - POST /api/admin/reset-all-referrals (destroi todos codigos exceto admin)
+  - GET /api/admin/card-batches, GET /api/admin/card-batches/{id}
+  - POST /api/admin/card-batches/run (disparo manual)
+  - POST /api/admin/card-batches/{id}/mark-exported
+  - GET /api/admin/card-batches/{id}/export.csv
+  - GET /api/admin/card-logs
+- [x] Frontend user: Banner de adesao em /indique-ganhe + modal ReferralEnrollmentForm dinamico (suporta text, number, email, date, tel, select, textarea; mascaras cpf/phone/cep)
+- [x] Frontend user: dois saldos novos "Saldo na conta" e "Enviado para o cartao"; coluna "Cartao" no historico de comissoes; link "Meus saques" removido do menu
+- [x] Frontend admin: /backoffice/cartao com 4 abas (Config, Form de adesao, Lotes, Logs) + reset-all
+- [x] Frontend admin: coluna Programa em /backoffice/usuarios com botoes Ativar/Desativar
+- [x] Sidebar admin: item "Cartao Beneficios" substitui "Saques" na navegacao
+- [x] 23/23 testes backend + 100% frontend validado
+
 ## Backlog
 
-### P0 - Fase 2D (proxima sessao): MercadoPago real
-- [ ] Aguardando MERCADO_PAGO_ACCESS_TOKEN do user
-- [ ] PIX/cartao/boleto via SDK Mercado Pago
-- [ ] Webhook `/api/payments/webhook/mercadopago` processando status
-- [ ] Remover botao "Simular pagamento" quando token ativo
+### P1 - Integracao real API Cartao de Beneficios (proxima sessao)
+- [ ] Aguardando documentacao da empresa (chega na proxima semana)
+- [ ] Testar adapter com endpoint real e ajustar template
+- [ ] Campos especificos que o cartao exige (alem do CPF)
 
-### P1 - Notificacoes
-- [ ] Email transacional via Resend/SendGrid:
-  - Pedido criado, pago, enviado
-  - Comissao gerada
-  - Candidato a Propagandista (para admin)
-  - Saque aprovado/pago
-  - Cadastro via link de indicacao (para o afiliado)
+### P0 - Fase 2D: MercadoPago real
+- [ ] Aguardando MERCADO_PAGO_ACCESS_TOKEN do user
+- [ ] PIX/cartao/boleto via SDK
+- [ ] Webhook /api/payments/webhook/mercadopago
+- [ ] Remover "Simular pagamento" quando token ativo
 
 ### P2 - Melhorias
 - [ ] Upload de imagem para S3 (hoje base64)
-- [ ] Notificacoes email (pedido criado/pago/enviado; comissao gerada; candidato a propagandista)
-- [ ] Modularizar server.py (ja passou de 1000 linhas)
-- [ ] Calendar UI no relatorio (trocar input type=date)
+- [ ] Modularizar server.py (ja passou de 2000 linhas)
 - [ ] Favicon + manifest.json
 - [ ] React Router v7 future flags
-- [ ] API sync automatica com sistema externo (hoje so import manual)
 
 ### P3 - Future
 - [ ] Exportar tree MMN em PDF
-- [ ] Dashboard financeiro do Propagandista (grafico de evolucao)
+- [ ] Dashboard financeiro do Propagandista
 - [ ] Metas + gamificacao
-- [ ] Programa de indicacao com bonus de ativacao
-- [ ] Cupons/promoções
+- [ ] Cupons/promocoes
+- [ ] Extrato detalhado do cartao por usuario (listar batches em que ele participou)
 
 ## Next Tasks
-1. Sistema de saques (Fase 2B)
-2. Faturamento interno (Fase 2C)
-3. MercadoPago real (aguarda credenciais)
+1. Integracao real API do cartao (quando docs chegarem)
+2. MercadoPago real (aguarda credenciais)
+3. Modularizar server.py
