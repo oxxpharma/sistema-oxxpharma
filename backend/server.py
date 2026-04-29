@@ -2239,7 +2239,10 @@ async def admin_correios_config(request: Request, user: dict = Depends(require_a
 @app.put("/api/admin/correios-config")
 async def admin_update_correios_config(request: Request, user: dict = Depends(require_admin())):
     body = await request.json() or {}
-    cfg = await correios_service.update_config(request.app.db, body)
+    try:
+        cfg = await correios_service.update_config(request.app.db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return cfg
 
 
@@ -2321,6 +2324,12 @@ async def admin_correios_test(request: Request, user: dict = Depends(require_adm
     items = [{"weight": weight, "quantity": 1}]
     result = await correios_service.calculate_freight(request.app.db, cep, items, 0)
     return result
+
+
+@app.post("/api/admin/correios-test-auth")
+async def admin_correios_test_auth(request: Request, user: dict = Depends(require_admin())):
+    """Testa apenas autenticacao com Correios CWS (sem calcular frete)."""
+    return await correios_service.test_credentials(request.app.db)
 
 
 @app.get("/api/health")

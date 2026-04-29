@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 19 validates the Correios CWS (Bearer Token) migration. Backend 11/11 pytest passed. Found + fixed ONE real bug: PUT /api/admin/correios-config with invalid environment was returning 500 instead of the 400 required by the spec (caught ValueError in server.py). Frontend: all new data-testids present and functional (env-homologacao-btn, env-producao-btn, cfg-user, cfg-api-code type=password, cfg-contract, cfg-origin-cep, test-auth-btn, auth-result, tab-config/test/logs, save-correios-btn, run-test-btn, toggle-correios, toggle-pickup, add-service-btn, nav-shipping). auth-result displays red error '✗ Falha autenticacao Correios CWS 401:' proving real CWS integration. Logs tab shows real hits to apihom.correios.com.br/token/v1/autentica/contrato and /preco/v1/nacional. No legacy correios_password references anywhere. Token cache invalidation on credential change verified (correios_tokens collection cleared). Pickup option correctly prepended at index 0. Package minimum dimensions (16x11x2, 0.3kg) enforced.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/admin/correios-config", "issue": "FIXED by testing agent: invalid correios_environment raised ValueError propagating as 500. Wrapped in try/except -> HTTPException(400). Spec explicitly required 400."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration19.py",
+    "/app/test_reports/pytest/iteration19.xml"
+  ],
+  "action_items": [
+    "[Optional] Add Pydantic model for correios-config PUT body (currently accepts raw JSON) for better OpenAPI + 422 validation on unknown fields.",
+    "[Optional] Add TTL index on db.correios_tokens.expires_at and db.correios_logs.created_at (7-30d) to prevent unbounded growth — carry-over from iter 18.",
+    "[Optional] _get_token parses ISO datetime assuming UTC if no tz; CWS returns Brasilia time — verify by reading a real token once available and adjust offset if needed (current code subtracts 3h which is correct for BRT assumption)."
+  ],
+  "critical_code_review_comments": [
+    "correios_service._get_token: when expiraEm has no tz info, code assumes it's BRT (subtracts 3h) — reasonable but NOT documented in CWS spec. Should log the parsed expiry for first prod run to verify.",
+    "correios_service.update_config: token cache invalidation triggers on any credential-field change but uses 'break' after first match inside for loop — technically deletes ALL tokens on any change (intended), but code reads awkwardly. Consider moving delete_many outside the loop with a boolean flag.",
+    "server.py: /api/admin/correios-config PUT had no ValueError→400 handling (FIXED). Same pattern likely needed for other admin config endpoints (payments-config spec violation from iter 18).",
+    "_calculate_prices parses pcFinal expecting BR format '12,34' OR numeric; good. But iterating items it matches by coProduto OR nuRequisicao — if CWS returns only nuRequisicao under error, the code falls back to that as the dict key, which could collide with another service's code. Consider mapping by nuRequisicao index primarily then falling back to coProduto.",
+    "calculate_freight: cache stores only {code, price, deadline_days} — error entries are NOT cached (good UX) but means retries happen every 60s for persistent config errors. Consider short negative-caching (e.g., 5min).",
+    "Frontend AdminShipping.jsx: 329 lines - OK for now. COMMON_SERVICES are duplicated as datalist — works but a shared constants module would help when other pages need CWS codes.",
+    "No rate-limit on /api/shipping/calculate (public endpoint) — abuse vector for triggering Correios calls. Add basic token-bucket per IP."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (wrapped admin-correios-config PUT in try/except ValueError -> 400)",
+    "/app/backend/tests/test_iteration19.py (new, 11 tests all passing)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% of testids present + integration working"},
+  "test_credentials": "admin@oxxpharma.com / admin123",
+  "seed_data_creation": "Tests leave correios with fake credentials and disabled (teardown_module clears fields + sets enabled=false + environment=homologacao). correios_tokens cleared. correios_logs accumulates real 401 calls to apihom.correios.com.br — these are useful proof of integration; consider periodic cleanup in prod.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Correios CWS migration is complete and all flows work. Credentials are left empty/fake after tests (correios_enabled=false). Real auth test requires valid CWS contract credentials — NOT available in this env, so 401 from apihom.correios.com.br is EXPECTED and acceptable proof of real integration. Token cache is in db.correios_tokens with composite _id='{env}:{user}:{contract}'. Logs in db.correios_logs grow fast (each test-auth = 1 entry). If need cleaning: db.correios_logs.delete_many({}). PUT /api/admin/correios-config now correctly returns 400 on invalid environment (fixed this iteration).",
+  "rca of the issue": "Bug: PUT /api/admin/correios-config with correios_environment='staging' returned 500. RCA: correios_service.update_config raises ValueError('correios_environment deve ser ...') which FastAPI does not auto-map to 400 (only HTTPException maps). Fix: wrapped the call site in try/except ValueError -> raise HTTPException(400). Reproduction: curl -X PUT /api/admin/correios-config -H 'Authorization: Bearer <admin>' -H 'Content-Type: application/json' -d '{\"correios_environment\":\"staging\"}'. Before fix: 500 Internal Server Error. After fix: 400 with detail 'correios_environment deve ser homologacao ou producao'. Verified via both pytest AND browser JS fetch."
+}

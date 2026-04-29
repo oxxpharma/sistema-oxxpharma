@@ -1,47 +1,57 @@
-"""Correios shipping calculation service.
+"""Correios shipping calculation service - CWS API (Bearer Token).
 
-Estrategia pragmatica:
-- Usa o endpoint legacy CalcPrecoPrazo (XML por GET) que funciona sem contrato
-  para servicos publicos (PAC 04510, SEDEX 04014). Com contrato (sCdEmpresa+sDsSenha)
-  retorna preco contratual.
-- Cache 1h por (cep_destino, peso_total, dimensoes, servicos).
-- "Retirada Local" gerenciado aqui (preco e flag configuraveis).
+Auth: POST /token/v1/autentica/contrato
+  Basic Auth: user:api_code
+  Body: { "numero": contract_number }
+  Returns: { token, expiraEm (ISO datetime) }
+
+Price: POST /preco/v1/nacional - parametrosProduto array
+Deadline: POST /prazo/v1/nacional - parametrosPrazo array
+
+Environments:
+  homologacao -> https://apihom.correios.com.br
+  producao    -> https://api.correios.com.br
 
 Config no DB (settings doc _id=global):
   correios_enabled: bool
-  correios_origin_cep: str (CEP origem da empresa)
-  correios_contract: str (sCdEmpresa, opcional)
-  correios_password: str (sDsSenha, opcional)
-  correios_services: list[{code, label}] - default PAC e SEDEX
-  correios_pickup_enabled: bool
-  correios_pickup_label: str ("Retirada no Local")
-  correios_pickup_address: str
-  correios_pickup_price: float (default 0)
-  correios_default_dimensions: {length,width,height} (cm)
+  correios_environment: "homologacao" | "producao"
+  correios_user: str (login Meu Correios)
+  correios_api_code: str (codigo de acesso CWS)
+  correios_contract: str (numero do contrato)
+  correios_origin_cep: str
+  correios_services: list[{code, label}]
+  correios_pickup_*
+  correios_default_dimensions
+  correios_min_weight_kg
+  correios_cache_minutes
 """
 import os
 import logging
 import hashlib
 import json
+import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import httpx
-import xml.etree.ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
-CORREIOS_ENDPOINT = "http://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx"
+API_HOM = "https://apihom.correios.com.br"
+API_PROD = "https://api.correios.com.br"
 
+# Codigos comuns CWS (com contrato)
 DEFAULT_SERVICES = [
-    {"code": "04510", "label": "PAC"},
-    {"code": "04014", "label": "SEDEX"},
+    {"code": "03298", "label": "PAC"},
+    {"code": "03220", "label": "SEDEX"},
 ]
 
 DEFAULT_CONFIG = {
     "correios_enabled": False,
-    "correios_origin_cep": "",
+    "correios_environment": "homologacao",
+    "correios_user": "",
+    "correios_api_code": "",
     "correios_contract": "",
-    "correios_password": "",
+    "correios_origin_cep": "",
     "correios_services": DEFAULT_SERVICES,
     "correios_pickup_enabled": False,
     "correios_pickup_label": "Retirada no Local",
@@ -67,25 +77,116 @@ async def get_config(db) -> Dict:
 async def update_config(db, updates: Dict) -> Dict:
     allowed = set(DEFAULT_CONFIG.keys())
     set_doc = {k: v for k, v in updates.items() if k in allowed}
+    # Validar environment
+    if "correios_environment" in set_doc and set_doc["correios_environment"] not in ("homologacao", "producao"):
+        raise ValueError("correios_environment deve ser 'homologacao' ou 'producao'")
     if set_doc:
         set_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.settings.update_one({"_id": "global"}, {"$set": set_doc}, upsert=True)
+        # Invalida tokens cacheados ao mudar credenciais
+        for k in ("correios_user", "correios_api_code", "correios_contract", "correios_environment"):
+            if k in set_doc:
+                await db.correios_tokens.delete_many({})
+                break
     return await get_config(db)
+
+
+def _api_base(env: str) -> str:
+    return API_PROD if env == "producao" else API_HOM
 
 
 def _normalize_cep(cep: str) -> str:
     return "".join(c for c in (cep or "") if c.isdigit())
 
 
+# ============================ AUTH ============================
+
+async def _get_token(db, cfg: Dict) -> str:
+    """Retorna Bearer token, usando cache (50min) e renovando quando expirar."""
+    user = (cfg.get("correios_user") or "").strip()
+    code = (cfg.get("correios_api_code") or "").strip()
+    contract = (cfg.get("correios_contract") or "").strip()
+    env = cfg.get("correios_environment") or "homologacao"
+    if not (user and code and contract):
+        raise RuntimeError("Credenciais Correios incompletas (user/api_code/contract)")
+
+    cache_id = f"{env}:{user}:{contract}"
+    cached = await db.correios_tokens.find_one({"_id": cache_id})
+    if cached and cached.get("expires_at"):
+        try:
+            exp = datetime.fromisoformat(cached["expires_at"])
+            if exp > datetime.now(timezone.utc) + timedelta(seconds=60):
+                return cached["token"]
+        except Exception:
+            pass
+
+    base = _api_base(env)
+    url = f"{base}/token/v1/autentica/contrato"
+    auth = httpx.BasicAuth(user, code)
+    payload = {"numero": contract}
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(url, json=payload, auth=auth)
+        if r.status_code >= 400:
+            await _log(db, "auth", url, payload, r.status_code, r.text[:500], None, env)
+            raise RuntimeError(f"Falha autenticacao Correios CWS {r.status_code}: {r.text[:200]}")
+        data = r.json()
+
+    token = data.get("token") or ""
+    expira = data.get("expiraEm")
+    try:
+        # Correios retorna em formato ISO sem timezone (assume horario de Brasilia)
+        if expira:
+            if "+" not in expira and "Z" not in expira:
+                expira_dt = datetime.fromisoformat(expira).replace(tzinfo=timezone.utc) - timedelta(hours=3)
+                expira_dt = expira_dt.astimezone(timezone.utc)
+            else:
+                expira_dt = datetime.fromisoformat(expira.replace("Z", "+00:00"))
+        else:
+            expira_dt = datetime.now(timezone.utc) + timedelta(minutes=55)
+    except Exception:
+        expira_dt = datetime.now(timezone.utc) + timedelta(minutes=55)
+
+    await db.correios_tokens.update_one(
+        {"_id": cache_id},
+        {"$set": {"_id": cache_id, "token": token, "expires_at": expira_dt.isoformat(),
+                  "obtained_at": datetime.now(timezone.utc).isoformat(),
+                  "env": env, "user": user, "contract": contract}},
+        upsert=True,
+    )
+    await _log(db, "auth", url, payload, r.status_code, "token_ok", None, env)
+    return token
+
+
+# ============================ LOGS ============================
+
+async def _log(db, kind: str, url: str, request_body, status_code, response_body, error, env: str):
+    try:
+        await db.correios_logs.insert_one({
+            "log_id": "clog_" + os.urandom(6).hex(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "kind": kind,
+            "env": env,
+            "url": url,
+            "request_body": request_body,
+            "status_code": status_code,
+            "response_body": str(response_body)[:1500] if response_body else None,
+            "error": str(error)[:500] if error else None,
+        })
+    except Exception:
+        pass
+
+
+# ============================ PRICE + DEADLINE ============================
+
 def _calc_package(items: List[Dict], cfg: Dict) -> Dict:
-    """Calcula peso total (kg), dimensoes max (cm). Items sao do carrinho com quantity."""
     total_w = 0.0
     max_l = cfg.get("correios_default_length_cm") or 16
     max_w = cfg.get("correios_default_width_cm") or 11
     max_h = cfg.get("correios_default_height_cm") or 6
     for it in items:
         qty = int(it.get("quantity") or 1)
-        w = float(it.get("weight") or 0) or 0.3  # default 300g
+        w = float(it.get("weight") or 0) or 0.3
         total_w += w * qty
         L = float(it.get("length_cm") or 0) or max_l
         W = float(it.get("width_cm") or 0) or max_w
@@ -94,7 +195,6 @@ def _calc_package(items: List[Dict], cfg: Dict) -> Dict:
         max_w = max(max_w, W)
         max_h = max(max_h, H)
     total_w = max(total_w, float(cfg.get("correios_min_weight_kg") or 0.3))
-    # Correios minimos: comprimento >=16, largura >=11, altura >=2
     return {
         "weight_kg": round(total_w, 3),
         "length_cm": max(int(max_l), 16),
@@ -103,12 +203,14 @@ def _calc_package(items: List[Dict], cfg: Dict) -> Dict:
     }
 
 
-def _cache_key(cep_dest: str, pkg: Dict, services: List[str]) -> str:
-    raw = json.dumps({"cep": cep_dest, "pkg": pkg, "svc": sorted(services)}, sort_keys=True)
+def _cache_key(env: str, contract: str, cep_dest: str, pkg: Dict, services: List[str]) -> str:
+    raw = json.dumps({
+        "e": env, "c": contract, "cep": cep_dest, "pkg": pkg, "svc": sorted(services)
+    }, sort_keys=True)
     return "freight_" + hashlib.md5(raw.encode()).hexdigest()
 
 
-async def _get_cached(db, key: str, max_age_minutes: int) -> Optional[Dict]:
+async def _get_cached(db, key: str, max_age_minutes: int) -> Optional[List[Dict]]:
     rec = await db.freight_cache.find_one({"cache_key": key}, {"_id": 0})
     if not rec:
         return None
@@ -118,7 +220,7 @@ async def _get_cached(db, key: str, max_age_minutes: int) -> Optional[Dict]:
     return rec.get("result")
 
 
-async def _set_cached(db, key: str, result: Dict):
+async def _set_cached(db, key: str, result):
     await db.freight_cache.update_one(
         {"cache_key": key},
         {"$set": {"cache_key": key, "result": result, "cached_at": datetime.now(timezone.utc).isoformat()}},
@@ -126,72 +228,125 @@ async def _set_cached(db, key: str, result: Dict):
     )
 
 
-async def _call_correios(cep_origin: str, cep_dest: str, pkg: Dict, codes_csv: str,
-                          contract: str = "", password: str = "", declared_value: float = 0.0) -> List[Dict]:
-    params = {
-        "nCdEmpresa": contract or "",
-        "sDsSenha": password or "",
-        "nCdServico": codes_csv,
-        "sCepOrigem": cep_origin,
-        "sCepDestino": cep_dest,
-        "nVlPeso": str(pkg["weight_kg"]),
-        "nCdFormato": "1",  # caixa/pacote
-        "nVlComprimento": str(pkg["length_cm"]),
-        "nVlAltura": str(pkg["height_cm"]),
-        "nVlLargura": str(pkg["width_cm"]),
-        "nVlDiametro": "0",
-        "sCdMaoPropria": "N",
-        "nVlValorDeclarado": f"{declared_value:.2f}" if declared_value > 0 else "0",
-        "sCdAvisoRecebimento": "N",
-        "StrRetorno": "xml",
-    }
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.get(CORREIOS_ENDPOINT, params=params)
-        r.raise_for_status()
-        text = r.text
-    out = []
-    try:
-        root = ET.fromstring(text)
-        for serv in root.findall(".//cServico"):
-            def gt(tag):
-                el = serv.find(tag)
-                return (el.text or "").strip() if el is not None else ""
-            erro = gt("Erro")
-            if erro and erro != "0":
-                out.append({"code": gt("Codigo"), "error_code": erro, "error_msg": gt("MsgErro")})
-                continue
-            try:
-                price = float((gt("Valor") or "0").replace(".", "").replace(",", "."))
-            except Exception:
-                price = 0.0
-            try:
-                deadline = int(gt("PrazoEntrega") or 0)
-            except Exception:
-                deadline = 0
-            out.append({"code": gt("Codigo"), "price": price, "deadline_days": deadline})
-    except Exception as e:
-        logger.exception(f"Falha parsing XML correios: {e} | body={text[:500]}")
-        raise
+async def _post_with_token(db, cfg, path: str, body: Dict) -> Tuple[int, Dict]:
+    env = cfg.get("correios_environment") or "homologacao"
+    base = _api_base(env)
+    url = base + path
+    token = await _get_token(db, cfg)
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(url, json=body, headers=headers)
+        # Token expirado: limpa cache e tenta uma vez
+        if r.status_code == 401:
+            await db.correios_tokens.delete_many({})
+            token = await _get_token(db, cfg)
+            headers["Authorization"] = f"Bearer {token}"
+            r = await client.post(url, json=body, headers=headers)
+        await _log(db, path, url, body, r.status_code, r.text[:1500], None, env)
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+    return r.status_code, data
+
+
+async def _calculate_prices(db, cfg: Dict, cep_orig: str, cep_dest: str, pkg: Dict,
+                              services: List[Dict], declared_value: float = 0) -> Dict[str, Dict]:
+    """Retorna {service_code: {price, base_price}} ou {service_code: {error}}."""
+    out: Dict[str, Dict] = {}
+    weight_grams = int(round(pkg["weight_kg"] * 1000))
+    products = []
+    for idx, s in enumerate(services):
+        body = {
+            "coProduto": s["code"],
+            "nuRequisicao": f"{idx+1:04d}",
+            "cepOrigem": cep_orig,
+            "cepDestino": cep_dest,
+            "psObjeto": str(weight_grams),
+            "tpObjeto": "2",
+            "comprimento": str(pkg["length_cm"]),
+            "largura": str(pkg["width_cm"]),
+            "altura": str(pkg["height_cm"]),
+            "diametro": "0",
+            "nuContrato": cfg.get("correios_contract") or "",
+        }
+        if declared_value and declared_value > 0:
+            body["vlDeclarado"] = f"{declared_value:.2f}"
+        products.append(body)
+
+    payload = {"idLote": f"lote_{int(datetime.now(timezone.utc).timestamp())}", "parametrosProduto": products}
+    status, data = await _post_with_token(db, cfg, "/preco/v1/nacional", payload)
+    if status >= 400:
+        for s in services:
+            out[s["code"]] = {"error": f"HTTP {status}: {str(data)[:120]}"}
+        return out
+
+    items = data if isinstance(data, list) else data.get("parametrosProduto") or [data]
+    for item in items:
+        code = item.get("coProduto") or item.get("nuRequisicao") or ""
+        if item.get("txErro") or item.get("msgErro") or item.get("erro"):
+            out[code] = {"error": str(item.get("txErro") or item.get("msgErro") or item.get("erro"))[:200]}
+            continue
+        # Valor pode vir como "12,34" ou numero
+        v = item.get("pcFinal") or item.get("vlCobrado") or item.get("pcBase") or 0
+        try:
+            if isinstance(v, str):
+                v = float(v.replace(".", "").replace(",", "."))
+            price = float(v)
+        except Exception:
+            price = 0.0
+        out[code] = {"price": price}
     return out
 
 
+async def _calculate_deadlines(db, cfg: Dict, cep_orig: str, cep_dest: str,
+                                services: List[Dict]) -> Dict[str, Dict]:
+    out: Dict[str, Dict] = {}
+    posting = datetime.now(timezone.utc).strftime("%d-%m-%Y")
+    params = []
+    for idx, s in enumerate(services):
+        params.append({
+            "coProduto": s["code"],
+            "nuRequisicao": f"{idx+1:04d}",
+            "cepOrigem": cep_orig,
+            "cepDestino": cep_dest,
+            "dtEvento": posting,
+        })
+    payload = {"idLote": f"lote_{int(datetime.now(timezone.utc).timestamp())}", "parametrosPrazo": params}
+    status, data = await _post_with_token(db, cfg, "/prazo/v1/nacional", payload)
+    if status >= 400:
+        for s in services:
+            out[s["code"]] = {"deadline_days": 0, "error": f"HTTP {status}"}
+        return out
+    items = data if isinstance(data, list) else data.get("parametrosPrazo") or [data]
+    for item in items:
+        code = item.get("coProduto") or ""
+        if item.get("txErro") or item.get("msgErro"):
+            out[code] = {"deadline_days": 0, "error": str(item.get("txErro") or item.get("msgErro"))[:200]}
+            continue
+        try:
+            d = int(item.get("prazoEntrega") or 0)
+        except Exception:
+            d = 0
+        out[code] = {"deadline_days": d}
+    return out
+
+
+# ============================ PUBLIC ENTRYPOINT ============================
+
 async def calculate_freight(db, cep_destination: str, items: List[Dict],
                              declared_value: float = 0.0) -> Dict:
-    """Calcula frete. items=[{weight, length_cm, width_cm, height_cm, quantity}].
-
-    Retorna {options:[{code,label,price,deadline_days,error?}], package:{...}, cache:bool}
-    """
     cep_dest = _normalize_cep(cep_destination)
     if len(cep_dest) != 8:
         return {"options": [], "package": None, "error": "CEP destino invalido"}
 
     cfg = await get_config(db)
     pkg = _calc_package(items, cfg)
-
     options: List[Dict] = []
     cache_used = False
 
-    # Pickup local
+    # Pickup local primeiro
     if cfg.get("correios_pickup_enabled"):
         options.append({
             "code": "PICKUP",
@@ -205,72 +360,74 @@ async def calculate_freight(db, cep_destination: str, items: List[Dict],
     if not cfg.get("correios_enabled"):
         return {"options": options, "package": pkg, "cache": False}
 
-    cep_origin = _normalize_cep(cfg.get("correios_origin_cep"))
-    if len(cep_origin) != 8:
+    cep_orig = _normalize_cep(cfg.get("correios_origin_cep"))
+    if len(cep_orig) != 8:
         return {"options": options, "package": pkg, "error": "CEP de origem nao configurado"}
 
     services = cfg.get("correios_services") or DEFAULT_SERVICES
     if not services:
         return {"options": options, "package": pkg}
-    codes = [s["code"] for s in services]
     code_to_label = {s["code"]: s.get("label") or s["code"] for s in services}
+    codes = [s["code"] for s in services]
 
     # Cache
-    key = _cache_key(cep_dest, pkg, codes)
+    env = cfg.get("correios_environment") or "homologacao"
+    contract = cfg.get("correios_contract") or ""
+    key = _cache_key(env, contract, cep_dest, pkg, codes)
     cached = await _get_cached(db, key, cfg.get("correios_cache_minutes") or 60)
     if cached:
         cache_used = True
         for c in cached:
-            options.append({
-                **c,
-                "label": code_to_label.get(c.get("code"), c.get("code")),
-            })
+            options.append({**c, "label": code_to_label.get(c["code"], c["code"])})
         return {"options": options, "package": pkg, "cache": cache_used}
 
-    # Chamada real
+    # Chamadas reais (preco + prazo em paralelo)
     try:
-        results = await _call_correios(
-            cep_origin=cep_origin, cep_dest=cep_dest, pkg=pkg,
-            codes_csv=",".join(codes),
-            contract=cfg.get("correios_contract") or "",
-            password=cfg.get("correios_password") or "",
-            declared_value=declared_value,
-        )
+        prices_task = _calculate_prices(db, cfg, cep_orig, cep_dest, pkg, services, declared_value)
+        deadlines_task = _calculate_deadlines(db, cfg, cep_orig, cep_dest, services)
+        prices, deadlines = await asyncio.gather(prices_task, deadlines_task)
     except Exception as e:
-        logger.exception(f"Erro Correios: {e}")
+        logger.exception(f"Erro CWS Correios: {e}")
+        await _log(db, "error", "cws", {"cep_orig": cep_orig, "cep_dest": cep_dest}, None, None, str(e), env)
         for c in codes:
-            options.append({
-                "code": c, "label": code_to_label.get(c, c), "price": 0,
-                "deadline_days": 0, "error": "Servico indisponivel temporariamente",
-            })
-        await db.correios_logs.insert_one({
-            "log_id": "clog_" + os.urandom(6).hex(),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "cep_origin": cep_origin, "cep_dest": cep_dest, "pkg": pkg,
-            "error": str(e)[:300],
-        })
+            options.append({"code": c, "label": code_to_label.get(c, c), "price": 0,
+                             "deadline_days": 0, "error": str(e)[:120]})
         return {"options": options, "package": pkg, "cache": False}
 
     cacheable = []
-    for r in results:
+    for s in services:
+        c = s["code"]
+        p = prices.get(c, {})
+        d = deadlines.get(c, {})
         item = {
-            "code": r.get("code"),
-            "label": code_to_label.get(r.get("code"), r.get("code")),
-            "price": float(r.get("price") or 0),
-            "deadline_days": int(r.get("deadline_days") or 0),
+            "code": c,
+            "label": code_to_label.get(c, c),
+            "price": float(p.get("price") or 0),
+            "deadline_days": int(d.get("deadline_days") or 0),
         }
-        if r.get("error_code"):
-            item["error"] = f"[{r['error_code']}] {r.get('error_msg', '')}"
+        err = p.get("error") or d.get("error")
+        if err:
+            item["error"] = err
         else:
-            cacheable.append({"code": item["code"], "price": item["price"], "deadline_days": item["deadline_days"]})
+            cacheable.append({"code": c, "price": item["price"], "deadline_days": item["deadline_days"]})
         options.append(item)
     if cacheable:
         await _set_cached(db, key, cacheable)
-
-    await db.correios_logs.insert_one({
-        "log_id": "clog_" + os.urandom(6).hex(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "cep_origin": cep_origin, "cep_dest": cep_dest, "pkg": pkg,
-        "results": results,
-    })
     return {"options": options, "package": pkg, "cache": False}
+
+
+async def test_credentials(db) -> Dict:
+    """Testa autenticacao com Correios CWS. Retorna {ok, env, expires_at?, error?}."""
+    cfg = await get_config(db)
+    try:
+        token = await _get_token(db, cfg)
+        cache_id = f"{cfg.get('correios_environment')}:{cfg.get('correios_user')}:{cfg.get('correios_contract')}"
+        rec = await db.correios_tokens.find_one({"_id": cache_id})
+        return {
+            "ok": True,
+            "environment": cfg.get("correios_environment"),
+            "expires_at": rec.get("expires_at") if rec else None,
+            "token_preview": token[:24] + "..." if token else None,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}

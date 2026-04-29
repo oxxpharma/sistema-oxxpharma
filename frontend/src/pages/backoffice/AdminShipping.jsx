@@ -7,13 +7,12 @@ import { toast } from 'sonner';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 
 const COMMON_SERVICES = [
-  { code: '04510', label: 'PAC' },
-  { code: '04014', label: 'SEDEX' },
-  { code: '04162', label: 'SEDEX Contrato' },
-  { code: '04669', label: 'PAC Contrato' },
-  { code: '04790', label: 'SEDEX 10' },
-  { code: '40215', label: 'SEDEX 12' },
-  { code: '40169', label: 'SEDEX Hoje' },
+  { code: '03298', label: 'PAC' },
+  { code: '03220', label: 'SEDEX' },
+  { code: '03158', label: 'PAC Mini' },
+  { code: '03212', label: 'SEDEX Hoje' },
+  { code: '03247', label: 'SEDEX 12' },
+  { code: '03204', label: 'SEDEX 10' },
 ];
 
 export default function AdminShipping() {
@@ -23,6 +22,22 @@ export default function AdminShipping() {
   const [tab, setTab] = useState('config');
   const [logs, setLogs] = useState([]);
   const [test, setTest] = useState({ cep: '', weight: 0.5, result: null, running: false });
+  const [authTesting, setAuthTesting] = useState(false);
+  const [authResult, setAuthResult] = useState(null);
+
+  const testAuth = async () => {
+    setAuthTesting(true);
+    setAuthResult(null);
+    try {
+      const r = await api.post('/api/admin/correios-test-auth');
+      setAuthResult(r);
+      if (r.ok) toast.success('Autenticado com sucesso');
+      else toast.error('Falha na autenticação');
+    } catch (e) {
+      setAuthResult({ ok: false, error: e?.message || 'Erro' });
+      toast.error(e?.message || 'Erro');
+    } finally { setAuthTesting(false); }
+  };
 
   const load = async () => {
     try {
@@ -93,6 +108,54 @@ export default function AdminShipping() {
       {tab === 'config' && (
         <div className="space-y-4 max-w-3xl">
           <Card>
+            <h3 className="font-heading font-bold mb-3">Ambiente CWS Correios</h3>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button onClick={() => set('correios_environment', 'homologacao')}
+                className={`text-left p-4 rounded-xl border-2 transition ${cfg.correios_environment === 'homologacao' ? 'border-brand-main bg-brand-light' : 'border-border'}`}
+                data-testid="env-homologacao-btn">
+                <div className="flex justify-between mb-1">
+                  <Badge variant="warning">Homologação</Badge>
+                  {cfg.correios_environment === 'homologacao' && <Badge variant="brand">ATIVO</Badge>}
+                </div>
+                <div className="text-xs text-txt-secondary">apihom.correios.com.br — testes sem cobrança</div>
+              </button>
+              <button onClick={() => set('correios_environment', 'producao')}
+                className={`text-left p-4 rounded-xl border-2 transition ${cfg.correios_environment === 'producao' ? 'border-red-500 bg-red-50' : 'border-border'}`}
+                data-testid="env-producao-btn">
+                <div className="flex justify-between mb-1">
+                  <Badge variant="error">Produção</Badge>
+                  {cfg.correios_environment === 'producao' && <Badge variant="error">ATIVO</Badge>}
+                </div>
+                <div className="text-xs text-txt-secondary">api.correios.com.br — postagens reais</div>
+              </button>
+            </div>
+            <p className="text-xs text-txt-secondary">⚠️ Lembre de salvar após mudar o ambiente.</p>
+          </Card>
+
+          <Card>
+            <h3 className="font-heading font-bold mb-1">Credenciais CWS (Bearer Token)</h3>
+            <p className="text-xs text-txt-secondary mb-3">Autenticação por <b>Contrato</b>. Gere o "código de acesso" no portal CWS dos Correios.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Usuário (login Meu Correios)" value={cfg.correios_user} onChange={(v) => set('correios_user', v)} placeholder="seu_usuario" testId="cfg-user" />
+              <Field label="Código de acesso (CWS)" value={cfg.correios_api_code} onChange={(v) => set('correios_api_code', v)} type="password" placeholder="••••••••" testId="cfg-api-code" />
+              <Field label="Número do contrato" value={cfg.correios_contract} onChange={(v) => set('correios_contract', v)} placeholder="9999999999" testId="cfg-contract" />
+              <Field label="CEP de origem" value={cfg.correios_origin_cep} onChange={(v) => set('correios_origin_cep', v)} placeholder="01310-100" testId="cfg-origin-cep" />
+            </div>
+            <div className="mt-3">
+              <Button variant="outline" size="sm" onClick={testAuth} disabled={authTesting} data-testid="test-auth-btn">
+                {authTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />} Testar autenticação
+              </Button>
+              {authResult && (
+                <div className={`mt-3 p-3 rounded text-xs ${authResult.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}`} data-testid="auth-result">
+                  {authResult.ok
+                    ? <>✓ Autenticado em <b>{authResult.environment}</b>. Token expira em {authResult.expires_at?.slice(0, 19).replace('T', ' ')}</>
+                    : <>✗ {authResult.error}</>}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="font-heading font-bold">Status</h3>
@@ -102,16 +165,6 @@ export default function AdminShipping() {
                 <input type="checkbox" checked={!!cfg.correios_enabled} onChange={(e) => set('correios_enabled', e.target.checked)} className="w-5 h-5 accent-brand-main" data-testid="toggle-correios" />
                 <span className="text-sm font-semibold">{cfg.correios_enabled ? 'Ativado' : 'Desativado'}</span>
               </label>
-            </div>
-            <Field label="CEP de origem" value={cfg.correios_origin_cep} onChange={(v) => set('correios_origin_cep', v)} placeholder="01310-100" testId="cfg-origin-cep" />
-          </Card>
-
-          <Card>
-            <h3 className="font-heading font-bold mb-4">Credenciais Correios (opcional)</h3>
-            <p className="text-xs text-txt-secondary mb-3">Para preços contratuais. Sem contrato, apenas serviços públicos (PAC/SEDEX) funcionam com tabela balcão.</p>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Código da empresa (contrato)" value={cfg.correios_contract} onChange={(v) => set('correios_contract', v)} placeholder="9999999" testId="cfg-contract" />
-              <Field label="Senha do contrato" value={cfg.correios_password} onChange={(v) => set('correios_password', v)} type="password" testId="cfg-password" />
             </div>
           </Card>
 
