@@ -4,6 +4,7 @@ import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, L
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { useReferral } from '../../contexts/RefContext';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../ui/Button';
 
 export default function StoreHeader() {
@@ -14,6 +15,7 @@ export default function StoreHeader() {
   const [searchTerm, setSearchTerm] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const settings = useSiteSettings();
 
   const onSearch = (e) => {
     e.preventDefault();
@@ -22,6 +24,14 @@ export default function StoreHeader() {
 
   return (
     <header className="bg-white border-b border-border sticky top-0 z-40" data-testid="store-header">
+      {settings?.announcement_bar_enabled && settings?.announcement_bar_text && (
+        <a href={settings.announcement_bar_link || '#'}
+          className="block text-center text-xs py-2 px-4 font-medium text-white"
+          style={{ backgroundColor: settings.announcement_bar_bg_color || '#E8731A' }}
+          data-testid="announcement-bar">
+          {settings.announcement_bar_text}
+        </a>
+      )}
       {refName && (
         <div className="bg-brand-light text-brand-main text-center text-xs py-2 px-4 font-medium" data-testid="ref-banner">
           <Share2 className="w-3.5 h-3.5 inline mr-1.5" />
@@ -32,10 +42,16 @@ export default function StoreHeader() {
         <div className="flex items-center justify-between h-16 gap-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 flex-shrink-0" data-testid="logo-link">
-            <div className="w-9 h-9 rounded-lg bg-brand-main flex items-center justify-center">
-              <span className="text-white font-heading font-black text-lg">O</span>
-            </div>
-            <span className="font-heading font-black text-xl text-txt-primary">OxxPharma</span>
+            {settings?.logo_url ? (
+              <img src={settings.logo_url} alt={settings?.store_name || 'OxxPharma'} className="h-10 max-w-[180px] object-contain" />
+            ) : (
+              <>
+                <div className="w-9 h-9 rounded-lg bg-brand-main flex items-center justify-center">
+                  <span className="text-white font-heading font-black text-lg">{(settings?.store_name || 'O')[0]}</span>
+                </div>
+                <span className="font-heading font-black text-xl text-txt-primary">{settings?.store_name || 'OxxPharma'}</span>
+              </>
+            )}
           </Link>
 
           {/* Search */}

@@ -25,6 +25,7 @@ import email_service
 import card_service
 import payments_service
 import correios_service
+import maxx_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1219,6 +1220,11 @@ async def register_points_from_order(db, order_id: str):
         })
     if logs:
         await db.points_log.insert_many(logs)
+        # Realtime sync para Maxx (best-effort, nao bloqueia)
+        try:
+            await maxx_service.trigger_realtime(db, [l["log_id"] for l in logs])
+        except Exception as e:
+            logger.warning(f"trigger_realtime maxx falhou: {e}")
 
 @app.post("/api/payments/webhook/mercadopago")
 async def mp_webhook(request: Request):
@@ -2331,6 +2337,207 @@ async def admin_correios_test(request: Request, user: dict = Depends(require_adm
 async def admin_correios_test_auth(request: Request, user: dict = Depends(require_admin())):
     """Testa apenas autenticacao com Correios CWS (sem calcular frete)."""
     return await correios_service.test_credentials(request.app.db)
+
+
+# ==================== MAXX MMN INTEGRATION ====================
+
+@app.get("/api/admin/maxx-config")
+async def admin_maxx_config(request: Request, user: dict = Depends(require_admin())):
+    return await maxx_service.get_config(request.app.db)
+
+
+@app.put("/api/admin/maxx-config")
+async def admin_update_maxx_config(request: Request, user: dict = Depends(require_admin())):
+    body = await request.json() or {}
+    try:
+        cfg = await maxx_service.update_config(request.app.db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return cfg
+
+
+@app.post("/api/admin/maxx-sync-points")
+async def admin_maxx_sync(request: Request, user: dict = Depends(require_admin())):
+    """Dispara envio manual de TODOS os pontos pendentes para o Maxx."""
+    return await maxx_service.send_pending_batch(request.app.db, kind="manual")
+
+
+@app.post("/api/admin/maxx-sync-points/{log_id}")
+async def admin_maxx_sync_one(request: Request, log_id: str, user: dict = Depends(require_admin())):
+    """Reenviar um registro especifico."""
+    db = request.app.db
+    p = await db.points_log.find_one({"log_id": log_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Log nao encontrado")
+    return await maxx_service.send_points(db, [p], kind="manual")
+
+
+@app.get("/api/admin/maxx-logs")
+async def admin_maxx_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.maxx_logs.count_documents({})
+    logs = await db.maxx_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
+
+# ==================== SITE SETTINGS (APARENCIA DA LOJA) ====================
+
+DEFAULT_SITE_SETTINGS = {
+    "store_name": "OxxPharma",
+    "tagline": "Sua farmácia online de confiança",
+    "logo_url": "",
+    "logo_dark_url": "",
+    "favicon_url": "",
+    "brand_primary_color": "#E8731A",
+    "brand_secondary_color": "#1F2937",
+    "hero_title": "Saúde e bem-estar em sua casa",
+    "hero_subtitle": "Os melhores produtos farmacêuticos com entrega rápida.",
+    "hero_image_url": "",
+    "hero_cta_label": "Comprar agora",
+    "hero_cta_link": "/produtos",
+    "hero_overlay_opacity": 0.4,
+    "social_instagram": "",
+    "social_facebook": "",
+    "social_youtube": "",
+    "social_whatsapp": "",
+    "footer_about": "Cuidando da sua saúde com qualidade desde 2026.",
+    "footer_contact_email": "contato@oxxpharma.com",
+    "footer_contact_phone": "(11) 9 9999-9999",
+    "footer_address": "Av Paulista, 1000 - São Paulo/SP",
+    "footer_pages": [
+        {"label": "Sobre nós", "slug": "sobre"},
+        {"label": "Política de Privacidade", "slug": "politica-de-privacidade"},
+        {"label": "Termos de Uso", "slug": "termos"},
+    ],
+    "announcement_bar_enabled": False,
+    "announcement_bar_text": "",
+    "announcement_bar_link": "",
+    "announcement_bar_bg_color": "#E8731A",
+}
+
+
+async def _get_site_settings(db) -> dict:
+    s = await db.settings.find_one({"_id": "site"}) or {}
+    out = {**DEFAULT_SITE_SETTINGS}
+    for k, v in s.items():
+        if k != "_id":
+            out[k] = v
+    return out
+
+
+@app.get("/api/site-settings")
+async def public_site_settings(request: Request):
+    return await _get_site_settings(request.app.db)
+
+
+@app.put("/api/admin/site-settings")
+async def admin_site_settings(request: Request, user: dict = Depends(require_admin())):
+    body = await request.json() or {}
+    body["updated_at"] = now_iso()
+    db = request.app.db
+    await db.settings.update_one({"_id": "site"}, {"$set": body}, upsert=True)
+    return await _get_site_settings(db)
+
+
+@app.post("/api/admin/upload-image")
+async def admin_upload_image(request: Request, user: dict = Depends(require_admin())):
+    """Upload simples de imagem (base64). Retorna URL data:."""
+    body = await request.json() or {}
+    data_url = body.get("data") or ""
+    if not data_url.startswith("data:"):
+        raise HTTPException(status_code=400, detail="Formato invalido (use data URL)")
+    # Persiste em coleção uploads para poder referenciar depois (opcional)
+    db = request.app.db
+    upload_id = "img_" + os.urandom(8).hex()
+    await db.uploads.insert_one({
+        "upload_id": upload_id,
+        "data": data_url,
+        "name": body.get("name") or upload_id,
+        "uploaded_by": user["user_id"],
+        "created_at": now_iso(),
+    })
+    return {"upload_id": upload_id, "url": data_url}
+
+
+# ==================== CMS PAGES (Editor visual) ====================
+
+@app.get("/api/pages/{slug}")
+async def public_get_page(request: Request, slug: str):
+    db = request.app.db
+    p = await db.cms_pages.find_one({"slug": slug, "published": True}, {"_id": 0, "components_json": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
+    return p
+
+
+@app.get("/api/admin/pages")
+async def admin_list_pages(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    pages = await db.cms_pages.find({}, {"_id": 0, "html": 0, "css": 0, "components_json": 0}).sort("updated_at", -1).to_list(200)
+    return {"pages": pages}
+
+
+@app.get("/api/admin/pages/{page_id}")
+async def admin_get_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    p = await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
+    return p
+
+
+@app.post("/api/admin/pages")
+async def admin_create_page(request: Request, user: dict = Depends(require_admin())):
+    body = await request.json() or {}
+    slug = (body.get("slug") or "").strip().lower().replace(" ", "-")
+    title = body.get("title") or slug
+    if not slug:
+        raise HTTPException(status_code=400, detail="slug obrigatorio")
+    db = request.app.db
+    if await db.cms_pages.find_one({"slug": slug}):
+        raise HTTPException(status_code=400, detail="slug ja existe")
+    page_id = "page_" + os.urandom(6).hex()
+    doc = {
+        "page_id": page_id, "slug": slug, "title": title,
+        "html": body.get("html") or "<div><h1>Nova Página</h1><p>Comece a editar...</p></div>",
+        "css": body.get("css") or "",
+        "components_json": body.get("components_json"),
+        "published": bool(body.get("published", True)),
+        "meta_description": body.get("meta_description") or "",
+        "created_at": now_iso(), "updated_at": now_iso(),
+        "created_by": user["user_id"],
+    }
+    await db.cms_pages.insert_one(doc)
+    return await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
+
+
+@app.put("/api/admin/pages/{page_id}")
+async def admin_update_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
+    body = await request.json() or {}
+    db = request.app.db
+    target = await db.cms_pages.find_one({"page_id": page_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
+    update = {k: v for k, v in body.items() if k in {"title", "html", "css", "components_json", "published", "meta_description"}}
+    # Slug pode mudar mas valida unicidade
+    if body.get("slug"):
+        new_slug = body["slug"].strip().lower().replace(" ", "-")
+        if new_slug != target.get("slug"):
+            if await db.cms_pages.find_one({"slug": new_slug, "page_id": {"$ne": page_id}}):
+                raise HTTPException(status_code=400, detail="slug ja existe")
+            update["slug"] = new_slug
+    update["updated_at"] = now_iso()
+    await db.cms_pages.update_one({"page_id": page_id}, {"$set": update})
+    return await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
+
+
+@app.delete("/api/admin/pages/{page_id}")
+async def admin_delete_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    res = await db.cms_pages.delete_one({"page_id": page_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
+    return {"ok": True}
 
 
 @app.get("/api/health")

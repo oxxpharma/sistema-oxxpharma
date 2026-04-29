@@ -46,6 +46,10 @@ import AdminGiftCards from './pages/backoffice/AdminGiftCards';
 import AdminPoints from './pages/backoffice/AdminPoints';
 import AdminPayments from './pages/backoffice/AdminPayments';
 import AdminShipping from './pages/backoffice/AdminShipping';
+import AdminMaxx from './pages/backoffice/AdminMaxx';
+import AdminAppearance from './pages/backoffice/AdminAppearance';
+import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
+import CmsPageView from './pages/store/CmsPageView';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 
@@ -85,6 +89,7 @@ function AppRoutes() {
         <Route path="/minha-rede" element={<Guard requireAuth><MyNetwork /></Guard>} />
         <Route path="/meus-saques" element={<Guard requireAuth><MyWithdrawals /></Guard>} />
         <Route path="/minha-conta" element={<Guard requireAuth><MyAccount /></Guard>} />
+        <Route path="/p/:slug" element={<CmsPageView />} />
       </Route>
 
       {/* Nota de faturamento: standalone (sem header/footer) para impressão limpa */}
@@ -112,6 +117,10 @@ function AppRoutes() {
         <Route path="pontos" element={<AdminPoints />} />
         <Route path="pagamentos" element={<AdminPayments />} />
         <Route path="frete" element={<AdminShipping />} />
+        <Route path="maxx" element={<AdminMaxx />} />
+        <Route path="aparencia" element={<AdminAppearance />} />
+        <Route path="paginas" element={<AdminPagesList />} />
+        <Route path="paginas/:id" element={<AdminPageEditor />} />
         <Route path="saques" element={<AdminWithdrawals />} />
         <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="emails" element={<AdminEmails />} />
