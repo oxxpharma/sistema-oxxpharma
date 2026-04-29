@@ -1,20 +1,47 @@
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
+# Environment files (NUNCA commitar)
+.env
+.env.*
+!deploy/env.*.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node / React
+node_modules/
+build/
+dist/
+.npm/
+.yarn/
+yarn-error.log
+.vercel/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs e relatorios temporarios
+*.log
+test_reports/
+/tmp/
+.emergent/
+
+# Banco / backups
+*.dump
+*.bson
+*.tar.gz
+
+# Build artifacts
+/app/build/
+frontend/build/
+
+# Outros
+.coverage
+htmlcov/

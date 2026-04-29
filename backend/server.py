@@ -100,8 +100,9 @@ async def get_settings(db):
 
 
 def get_app_url():
-    """URL base do frontend para construir links em emails."""
-    return os.environ.get("APP_URL") or os.environ.get("REACT_APP_BACKEND_URL") or "https://oxx-franchise-system.preview.emergentagent.com"
+    """URL pública do app (usado em emails, links, redirects)."""
+    url = os.environ.get("APP_URL") or os.environ.get("BACKEND_URL") or os.environ.get("REACT_APP_BACKEND_URL") or "http://localhost:3000"
+    return url.rstrip("/")
 
 
 def order_ctx(order: dict, user: dict):

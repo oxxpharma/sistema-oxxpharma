@@ -267,6 +267,21 @@ Sistema com 3 pilares:
 - [x] Bug fix do testing agent: PUT /api/admin/correios-config com environment invalido retorna 400 (era 500)
 - [x] 11/11 testes backend + frontend completo (testing_agent_v3_fork iteration_19)
 
+### Sessao 10 (2026-04-29 cont.) - Iter 20: Pacote de Deploy em Producao
+- [x] /app/deploy/install.sh: setup inicial do servidor (Python 3.11, Node 20, MongoDB 7, Nginx, Supervisor, Certbot, UFW)
+- [x] /app/deploy/deploy.sh: deploy/update completo (venv, pip install, yarn build, nginx config, supervisor, health check)
+- [x] /app/deploy/update.sh: git pull + redeploy em 1 comando
+- [x] /app/deploy/nginx.conf.template: nginx + cache de assets + headers de seguranca + gzip + proxy /api -> :8001
+- [x] /app/deploy/supervisor.conf.template: uvicorn 2 workers + log rotation + autorestart
+- [x] /app/deploy/env.backend.example: template com JWT_SECRET, ADMIN_*, MP_* (vazios = fallback DB)
+- [x] /app/deploy/env.frontend.example: REACT_APP_BACKEND_URL com placeholder dominio
+- [x] /app/DEPLOY.md: guia completo passo a passo + troubleshooting + checklist final
+- [x] /app/README.md: visao geral + comandos rapidos
+- [x] /app/.gitignore: limpo (estava com 21 linhas duplicadas), agora cobre .env, venv, node_modules, build, logs
+- [x] /app/backend/requirements.txt: ENXUTO (37 linhas) com versoes pinadas - so o que o app usa, sem lixo do emergentintegrations
+- [x] get_app_url() agora aceita APP_URL > BACKEND_URL > REACT_APP_BACKEND_URL com strip da barra final
+- [x] Domain configurado: oxxpharma.com.br + SSL Let's Encrypt automatico
+
 ## Backlog
 
 ### P1 - Integracao real API Cartao de Beneficios (proxima sessao)

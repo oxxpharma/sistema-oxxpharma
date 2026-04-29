@@ -1,0 +1,22 @@
+; ============================================================
+; Supervisor - OxxPharma backend
+; ============================================================
+
+[program:oxxpharma-backend]
+directory=__APP_DIR__/backend
+command=__APP_DIR__/backend/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001 --workers 2 --proxy-headers --forwarded-allow-ips=*
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+stopsignal=TERM
+stopwaitsecs=10
+user=www-data
+environment=PATH="__APP_DIR__/backend/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",PYTHONUNBUFFERED="1"
+stdout_logfile=/var/log/oxxpharma/backend.out.log
+stderr_logfile=/var/log/oxxpharma/backend.err.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5
+stderr_logfile_maxbytes=10MB
+stderr_logfile_backups=5
+priority=100
