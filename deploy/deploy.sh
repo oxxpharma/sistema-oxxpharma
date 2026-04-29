@@ -27,8 +27,25 @@ cd "$APP_DIR"
 log "Configurando backend Python..."
 cd "$APP_DIR/backend"
 
+# Carrega caminho do Python escolhido pelo install.sh
+PYTHON_BIN=""
+if [[ -f /etc/oxxpharma/env ]]; then
+    # shellcheck disable=SC1091
+    source /etc/oxxpharma/env
+fi
+# Auto-deteccao se nao encontrado
+if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
+    for c in python3.11 python3.12 python3.13 python3; do
+        if command -v "$c" &>/dev/null; then
+            PYTHON_BIN="$(command -v $c)"; break
+        fi
+    done
+fi
+[[ -z "$PYTHON_BIN" ]] && { err "Python nao encontrado. Rode install.sh antes."; exit 1; }
+log "Usando Python: $PYTHON_BIN ($($PYTHON_BIN -V))"
+
 if [[ ! -d .venv ]]; then
-    python3.11 -m venv .venv
+    "$PYTHON_BIN" -m venv .venv
 fi
 
 source .venv/bin/activate
