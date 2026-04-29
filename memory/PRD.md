@@ -191,6 +191,43 @@ Sistema com 3 pilares:
 - [x] Sidebar admin: item "Cartao Beneficios" substitui "Saques" na navegacao
 - [x] 23/23 testes backend + 100% frontend validado
 
+### Sessao 7 (2026-04-29) - Fase 4: Gestao de Usuarios + MercadoPago real + Sistema de Pontos
+- [x] Admin gestao completa de usuarios:
+  - PUT /api/admin/users/{id} (editar nome, email, phone, cpf, role, status, network_type, sponsor, etc - email validado unico)
+  - DELETE /api/admin/users/{id} (HARD delete + remove commissions + cart; pedidos preservados; descendentes da rede recebem network_sponsor_id=null)
+  - POST /api/admin/users/{id}/toggle-status (active/inactive)
+  - POST /api/admin/users/{id}/send-password-reset (envia email Resend, token 60min)
+  - POST /api/admin/users/{id}/send-first-access (envia email com link 7d, marca must_set_password=true)
+  - Login bloqueia status in (cancelled, inactive, deleted) com 401
+- [x] Auth public flows (sem JWT):
+  - POST /api/auth/password-reset/request (sempre {ok:true} - nao vaza emails)
+  - GET /api/auth/password-reset/validate?token=XXX (200 com {email,name,type} ou 400 invalido/expirado/usado)
+  - POST /api/auth/password-reset/confirm {token,password>=6}
+  - POST /api/auth/first-access/request (similar mas type=first_access)
+  - Frontend pages: /esqueci-senha, /primeiro-acesso-solicitar, /redefinir-senha?token=, /primeiro-acesso?token= (ResetPasswordPage + ForgotPasswordPage com mode prop)
+  - Login agora tem links "Esqueci minha senha" e "Primeiro acesso"
+- [x] Importacao Network 1 (CSV/API): novos usuarios criados SEM referral_code, com must_set_password=true e referral_program_active=false (alinhado com Fase 3)
+- [x] MercadoPago integracao real (SDK mercadopago 2.3.0):
+  - payments_service.py: create_preference, get_payment_details, verify_webhook_signature (HMAC SHA256)
+  - Tokens em .env: MP_PUBLIC_KEY_TEST/PROD, MP_ACCESS_TOKEN_TEST/PROD, MP_WEBHOOK_SECRET
+  - Toggle test/production no admin (/backoffice/pagamentos) salva em settings.global.mp_environment
+  - POST /api/payments/create/{order_id} cria preferencia real, redireciona para sandbox_init_point ou init_point conforme env
+  - POST /api/payments/webhook/mercadopago valida assinatura, busca payment, marca pedido como paid, registra commissions e pontos
+  - Mock de pagamento (/api/payments/mock/confirm/{id}) bloqueado em producao
+  - Coleção payment_webhook_logs registra todos os webhooks recebidos
+  - Frontend: CheckoutPage redireciona para payment_url quando MP, OrderDetails mostra botao "Pagar com MercadoPago" se pendente
+- [x] Sistema de pontos manual:
+  - Campo points_value em ProductCreate (manual pelo admin)
+  - register_points_from_order (idempotente) registra em points_log quando pedido vira paid (mock confirm, mp webhook, ou admin atualiza status)
+  - Coleção points_log: log_id, user_id+name+email+external_id, order_id, product_id+name, quantity, points_per_unit, points_total, registered_at, applied_externally
+  - GET /api/admin/points-report com filtros (start, end, user_id, applied=true|false), paginacao, summary {total_points, count}
+  - GET /api/admin/points-report/export.csv (CSV com BOM utf-8-sig, cabecalhos PT-BR)
+  - POST /api/admin/points-report/mark-applied {log_ids:[...]}
+  - Frontend /backoffice/pontos: tabela com checkbox por linha, filtros, export CSV, botao "Marcar como aplicado"
+- [x] UserEditModal: edicao completa + acoes (reset, first-access, toggle, delete) num so modal
+- [x] BackofficeLayout: novos itens "Relatorio pontos" e "Pagamentos (MP)"
+- [x] 19/20 testes backend (1 falha de naming convention dos testes, nao bug) + 100% frontend validado
+
 ## Backlog
 
 ### P1 - Integracao real API Cartao de Beneficios (proxima sessao)

@@ -26,6 +26,29 @@
 - Adapter HTTP genérico: URL, método, auth (none/bearer/apikey/basic), template de payload
 - Fallback: se API não configurada, admin exporta CSV manualmente e marca "enviado"
 
+## Gestão de Usuários (FASE 4)
+- Admin: `/backoffice/usuarios` → botão "Editar" abre modal com TODOS os campos
+- Modal tem ações: Enviar reset de senha, Enviar 1º acesso, Ativar/Desativar, Deletar (hard)
+- Login bloqueia user com `status` in (cancelled, inactive, deleted)
+
+## Primeiro Acesso (pós-importação)
+- Importação CSV/API cria user com `must_set_password=true` e SEM `referral_code`
+- Admin pode disparar email de 1º acesso manualmente (`/api/admin/users/{id}/send-first-access`)
+- User também pode solicitar via `/primeiro-acesso-solicitar` (digita email)
+- Link expira em 7 dias; senha de reset normal expira em 60min
+
+## Pagamentos (MercadoPago)
+- Tokens em `/app/backend/.env`: `MP_PUBLIC_KEY_TEST/PROD`, `MP_ACCESS_TOKEN_TEST/PROD`, `MP_WEBHOOK_SECRET`
+- Toggle Sandbox ↔ Produção no admin: `/backoffice/pagamentos`
+- Webhook URL: `{REACT_APP_BACKEND_URL}/api/payments/webhook/mercadopago` (configurar no painel MP)
+- Em modo TEST, botão "Simular pagamento" continua disponível em `/pedido/:id`
+
+## Sistema de Pontos (manual)
+- Cada produto tem campo `points_value` configurável no admin
+- Quando pedido vira paid, sistema registra `points_log` automaticamente (idempotente)
+- Admin: `/backoffice/pontos` → relatório filtrável + CSV
+- Admin marca registros como "aplicado externamente" após adicionar pontos no outro sistema
+
 
 ## Fluxo de teste MMN
 1. Cliente A se cadastra → `customer`
