@@ -228,6 +228,29 @@ Sistema com 3 pilares:
 - [x] BackofficeLayout: novos itens "Relatorio pontos" e "Pagamentos (MP)"
 - [x] 19/20 testes backend (1 falha de naming convention dos testes, nao bug) + 100% frontend validado
 
+### Sessao 8 (2026-04-29 cont.) - Iter 18: XLSX + MP DB + Correios
+- [x] Relatorio de pontos: substituido CSV por XLSX (openpyxl) com layout simples (Data/Hora, ID, Nome, Pontos totais), header colorido, freeze_panes A2, auto_filter, formato pt-BR de data e numero
+- [x] Endpoint antigo /api/admin/points-report/export.csv removido (substituido por export.xlsx)
+- [x] MercadoPago credenciais migradas para banco (settings doc _id=global): mp_test_public_key, mp_test_access_token, mp_prod_public_key, mp_prod_access_token, mp_webhook_secret. Tokens DB tem precedencia, .env eh fallback
+- [x] payments_service.get_admin_config retorna tokens mascarados (8 primeiros + 4 ultimos chars)
+- [x] PUT /api/admin/payments-config aceita campos parciais (deixar em branco preserva atual)
+- [x] AdminPayments.jsx: nova aba "Credenciais" com toggle show/hide secrets
+- [x] Correios integration:
+  - correios_service.py com get_config/update_config (defaults sensatos)
+  - calculate_freight com cache em DB (freight_cache, 60min) + logs (correios_logs)
+  - Adapter usa endpoint legacy CalcPrecoPrazo (sem contrato funciona com balcão; com contrato passa nCdEmpresa+sDsSenha)
+  - "Retirada Local" gerenciada como opção paralela (label, endereço, preço configuráveis)
+  - Defaults para produtos sem dimensão (16x11x6 cm, 0.3kg min)
+- [x] Endpoints Correios:
+  - GET/PUT /api/admin/correios-config
+  - GET /api/admin/correios-logs
+  - POST /api/admin/correios-test (cep+peso)
+  - POST /api/shipping/calculate (publico, items via product_id ou cart do user logado)
+- [x] ProductCreate ganhou length_cm, width_cm, height_cm (peso ja existia)
+- [x] Frontend: /backoffice/frete (AdminShipping) com 3 abas (Config, Test, Logs); AdminProducts com inputs peso+dimensoes
+- [x] Sidebar admin: novo item "Frete (Correios)"
+- [x] 12/12 testes backend + 100% frontend (testing_agent_v3_fork iteration_18)
+
 ## Backlog
 
 ### P1 - Integracao real API Cartao de Beneficios (proxima sessao)
