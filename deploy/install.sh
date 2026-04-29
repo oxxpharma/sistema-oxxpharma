@@ -96,30 +96,52 @@ npm install -g yarn
 
 # ---------- 4. MongoDB ----------
 log "Instalando MongoDB..."
+
+# Mapeia codename para repo MongoDB oficial (questing -> noble por compat binaria)
+case "$UBUNTU_CODENAME" in
+    jammy)              MONGO_REPO_CN="jammy" ;;
+    noble|questing|*)   MONGO_REPO_CN="noble" ;;
+esac
+log "Usando repo MongoDB para codename: $MONGO_REPO_CN"
+
+# Dependencia comum
+apt-get install -y -qq libssl3 libcurl4 || true
+
+install_mongo_version() {
+    local VER="$1"
+    log "Tentando MongoDB ${VER}.0 (repo $MONGO_REPO_CN)..."
+    rm -f /etc/apt/sources.list.d/mongodb-org-*.list
+    curl -fsSL "https://www.mongodb.org/static/pgp/server-${VER}.0.asc" \
+        | gpg -o "/usr/share/keyrings/mongodb-server-${VER}.0.gpg" --dearmor --yes 2>/dev/null || return 1
+    echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${VER}.0.gpg ] https://repo.mongodb.org/apt/ubuntu ${MONGO_REPO_CN}/mongodb-org/${VER}.0 multiverse" \
+        > "/etc/apt/sources.list.d/mongodb-org-${VER}.0.list"
+    apt-get update -qq 2>/dev/null || return 1
+    apt-get install -y -qq mongodb-org 2>/dev/null || return 1
+    return 0
+}
+
 if ! command -v mongod &>/dev/null; then
-    # Tenta MongoDB 7 oficial (jammy/noble). Em questing usa pacote da distro.
     MONGO_OK=0
-    if [[ "$UBUNTU_CODENAME" == "jammy" || "$UBUNTU_CODENAME" == "noble" ]]; then
-        curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-            | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor || true
-        # Para noble usamos o repo de jammy (compat)
-        REPO_CN="$UBUNTU_CODENAME"
-        [[ "$REPO_CN" == "noble" ]] && REPO_CN="jammy"
-        echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu $REPO_CN/mongodb-org/7.0 multiverse" \
-            > /etc/apt/sources.list.d/mongodb-org-7.0.list
-        apt-get update -qq || true
-        if apt-get install -y -qq mongodb-org; then MONGO_OK=1; fi
-    fi
+    # Tenta 8.0 (mais recente), depois 7.0
+    if install_mongo_version 8; then MONGO_OK=1; log "MongoDB 8.0 instalado."; fi
+    if [[ "$MONGO_OK" -eq 0 ]] && install_mongo_version 7; then MONGO_OK=1; log "MongoDB 7.0 instalado."; fi
+
     if [[ "$MONGO_OK" -eq 0 ]]; then
-        warn "MongoDB 7 oficial não disponível. Usando 'mongodb' do apt da distro..."
-        rm -f /etc/apt/sources.list.d/mongodb-org-7.0.list
-        apt-get update -qq
-        apt-get install -y -qq mongodb || apt-get install -y -qq mongodb-server
+        err "Falha ao instalar MongoDB pelos repos oficiais."
+        err "Tente manualmente: https://www.mongodb.com/docs/manual/installation/"
+        exit 1
     fi
-    systemctl enable mongod 2>/dev/null || systemctl enable mongodb 2>/dev/null || true
-    systemctl start  mongod 2>/dev/null || systemctl start  mongodb 2>/dev/null || true
+
+    systemctl enable mongod 2>/dev/null || true
+    systemctl start  mongod 2>/dev/null || true
+    sleep 2
+    if systemctl is-active --quiet mongod; then
+        log "✓ MongoDB ativo (porta 27017)"
+    else
+        warn "MongoDB instalado mas nao iniciou. Veja: journalctl -u mongod"
+    fi
 else
-    log "MongoDB já instalado."
+    log "MongoDB já instalado: $(mongod --version | head -1)"
 fi
 
 # ---------- 5. Nginx + Supervisor ----------
