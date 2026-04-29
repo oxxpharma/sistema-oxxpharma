@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 17 tested admin user management (edit/delete/toggle/reset/first-access), MercadoPago real integration, manual points system (points_value on product + register_points_from_order + CSV report), and new auth flows (password-reset + first-access). Backend: 19/20 pytest pass (1 test-only naming mismatch, not a bug). Frontend: all sidebar nav items, UserEditModal buttons, pontos/pagamentos pages, and forgot-password/first-access links present and rendered correctly for admin.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/payments-config", "issue": "Response uses key 'production_configured' but review spec expected 'prod_configured' (also 'production_public_key' vs 'prod_public_key'). Frontend reads 'production_configured' correctly so this is a spec/doc mismatch, not a functional bug. If consistency matters, align to 'prod_configured' everywhere."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17.py",
+    "/app/test_reports/pytest/iteration17.xml"
+  ],
+  "action_items": [
+    "[Minor] Decide naming: /api/admin/payments-config returns 'production_configured'/'production_public_key'; review spec used 'prod_configured'/'prod_public_key'. Align server/frontend/spec for consistency."
+  ],
+  "critical_code_review_comments": [
+    "server.py still growing (~1300+ lines flagged earlier). New admin user CRUD + payments + points endpoints should be extracted into routers (admin/users, admin/payments, admin/points).",
+    "mark_order_paid is called both from admin_update_order_status and mock_confirm_payment and mp_webhook, but admin_update_order_status bypasses mark_order_paid and does its own partial flow (updates order_status directly, issues invoice, pays commissions, registers points). Risk of drift between 3 code paths. Recommend: admin_update_order_status('paid') delegates to mark_order_paid for the single source of truth.",
+    "register_points_from_order uses idempotency via existing = db.points_log.find_one({'order_id': order_id}) - correctly prevents duplicates when admin marks the same order paid twice. Verified in test_create_payment_mp_real (marks 2x, no 500).",
+    "get_current_user reads cookie BEFORE Authorization header (known from iteration 16). Tests must isolate sessions or strip cookies before Bearer calls - handled in this iteration's tests via session.cookies.clear().",
+    "MP webhook permissive mode (MP_WEBHOOK_SECRET empty) accepts any request and always returns 200 - correct for dev, but before go-live the secret MUST be set and verify_webhook_signature must enforce HMAC. Add a startup warning log if env=production and MP_WEBHOOK_SECRET empty.",
+    "points-report/export.csv sets BOM correctly (utf-8-sig) - good for Excel/pt-BR."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration17.py (new, 20 tests, 19 pass)"
+  ],
+  "success_rate": {"backend": "95% (19/20)", "frontend": "100% of tested elements present"},
+  "test_credentials": "admin@oxxpharma.com / admin123",
+  "seed_data_creation": "Created TEST_it17_* users during test run. test_password_reset_full_flow changed the customer's password from pass123->newpass456 for the fixture user; subsequent test in same module uses same session so OK. test_admin_hard_delete_user and test_login_blocked_when_inactive clean up their own users. test_product_points_value creates+deletes test product.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Use session.cookies.clear() after setting Authorization Bearer header because get_current_user reads cookie first. MP is in test env (sandbox) - payment URLs should be sandbox.mercadopago.com.br. MP_WEBHOOK_SECRET empty = permissive mode, webhook always accepts. Hard delete removes user+commissions+cart but keeps orders (verified by test_admin_hard_delete_user). Admin user edit duplicate email returns 400. Toggle-status flips active<->inactive. First-access link format /primeiro-acesso?token=..., reset link /redefinir-senha?token=... . CSV export returns BOM utf-8-sig. Idempotency: marking order paid 2x does not duplicate points (existing doc check in register_points_from_order).",
+  "rca of the issue": "N/A - 1 failing test was a naming-mismatch in my test assertion (expected 'prod_configured', server returns 'production_configured'). Not a production bug. If the review spec is authoritative, server key should be renamed."
+}

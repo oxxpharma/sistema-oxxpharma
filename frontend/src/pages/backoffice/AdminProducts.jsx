@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 const emptyForm = {
   name: '', description: '', price: 0, discount_price: null,
   category: '', subcategory: '', images: [], stock: 0,
-  active: true, featured: false, brand: '',
+  active: true, featured: false, brand: '', points_value: 0,
 };
 
 export default function AdminProducts() {
@@ -54,7 +54,7 @@ export default function AdminProducts() {
       discount_price: p.discount_price, category: p.category,
       subcategory: p.subcategory || '', images: p.images || [],
       stock: p.stock, active: p.active, featured: p.featured,
-      brand: p.brand || '',
+      brand: p.brand || '', points_value: p.points_value || 0,
     });
     setShowForm(true);
   };
@@ -68,6 +68,7 @@ export default function AdminProducts() {
         price: parseFloat(form.price),
         discount_price: form.discount_price ? parseFloat(form.discount_price) : null,
         stock: parseInt(form.stock, 10) || 0,
+        points_value: parseFloat(form.points_value || 0),
       };
       if (editing) await api.put(`/api/admin/products/${editing}`, payload);
       else await api.post('/api/admin/products', payload);
@@ -198,6 +199,9 @@ export default function AdminProducts() {
                 <Input label="Preço*" type="number" step="0.01" required value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
                 <Input label="Preço promocional" type="number" step="0.01" value={form.discount_price || ''} onChange={e => setForm({ ...form, discount_price: e.target.value || null })} />
                 <Input label="Estoque" type="number" required value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                <Input label="Pontos por unidade" type="number" step="0.01" value={form.points_value} onChange={e => setForm({ ...form, points_value: e.target.value })} placeholder="Ex: 10" />
               </div>
 
               {/* Images */}

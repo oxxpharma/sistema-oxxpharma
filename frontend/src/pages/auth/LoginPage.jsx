@@ -48,6 +48,10 @@ export default function LoginPage() {
             <Input label="Senha" type="password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} data-testid="login-password" />
             <Button type="submit" loading={loading} className="w-full" size="lg" data-testid="login-submit">Entrar</Button>
           </form>
+          <div className="flex justify-between text-xs mt-3">
+            <Link to="/esqueci-senha" className="text-brand-main font-semibold hover:underline" data-testid="forgot-password-link">Esqueci minha senha</Link>
+            <Link to="/primeiro-acesso-solicitar" className="text-txt-secondary hover:underline" data-testid="first-access-link">Primeiro acesso</Link>
+          </div>
           <p className="text-sm text-center text-txt-secondary mt-6">
             Não tem conta? <Link to="/cadastrar" className="text-brand-main font-semibold">Cadastre-se</Link>
           </p>

@@ -43,6 +43,10 @@ import AdminInvoices from './pages/backoffice/AdminInvoices';
 import AdminEmails from './pages/backoffice/AdminEmails';
 import AdminWebhook from './pages/backoffice/AdminWebhook';
 import AdminGiftCards from './pages/backoffice/AdminGiftCards';
+import AdminPoints from './pages/backoffice/AdminPoints';
+import AdminPayments from './pages/backoffice/AdminPayments';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -88,6 +92,10 @@ function AppRoutes() {
       {/* AUTH */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/cadastrar" element={<RegisterPage />} />
+      <Route path="/esqueci-senha" element={<ForgotPasswordPage mode="reset" />} />
+      <Route path="/redefinir-senha" element={<ResetPasswordPage mode="reset" />} />
+      <Route path="/primeiro-acesso" element={<ResetPasswordPage mode="first_access" />} />
+      <Route path="/primeiro-acesso-solicitar" element={<ForgotPasswordPage mode="first_access" />} />
 
       {/* BACKOFFICE (ADMIN) */}
       <Route path="/backoffice" element={<Guard requireAuth requireAdmin><BackofficeLayout /></Guard>}>
@@ -100,6 +108,8 @@ function AppRoutes() {
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
         <Route path="cartao" element={<AdminGiftCards />} />
+        <Route path="pontos" element={<AdminPoints />} />
+        <Route path="pagamentos" element={<AdminPayments />} />
         <Route path="saques" element={<AdminWithdrawals />} />
         <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="emails" element={<AdminEmails />} />

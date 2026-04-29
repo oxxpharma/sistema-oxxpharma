@@ -20,11 +20,16 @@ export default function OrderDetails() {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [payCfg, setPayCfg] = useState({ environment: 'test', configured: false });
 
   const load = async () => {
     try {
-      const o = await api.get(`/api/orders/${id}`);
+      const [o, cfg] = await Promise.all([
+        api.get(`/api/orders/${id}`),
+        api.get('/api/payments/config'),
+      ]);
       setOrder(o);
+      setPayCfg(cfg);
     } catch (err) {
       toast.error('Pedido não encontrado');
     } finally {
@@ -79,12 +84,26 @@ export default function OrderDetails() {
         )}
         {isPending && (
           <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 text-left">
-            <p className="text-sm text-amber-800 mb-3">
-              <strong>Modo desenvolvimento:</strong> integração Mercado Pago ainda não ativada. Clique abaixo para simular a confirmação do pagamento.
-            </p>
-            <Button onClick={confirmMockPayment} loading={paying} size="sm" data-testid="mock-pay-btn">
-              Simular pagamento
-            </Button>
+            {order.payment_url && order.payment_provider === 'mercadopago' ? (
+              <>
+                <p className="text-sm text-amber-800 mb-3">
+                  <strong>Pagamento pendente.</strong> Clique no botão abaixo para abrir o checkout do MercadoPago.
+                </p>
+                <a href={order.payment_url} target="_blank" rel="noreferrer">
+                  <Button size="sm" data-testid="pay-mp-btn">Pagar com MercadoPago</Button>
+                </a>
+              </>
+            ) : (
+              <p className="text-sm text-amber-800">Aguardando confirmação do pagamento...</p>
+            )}
+            {payCfg.environment === 'test' && (
+              <div className="mt-3 pt-3 border-t border-amber-200">
+                <p className="text-xs text-amber-700 mb-2"><strong>Sandbox:</strong> em modo teste, você pode simular a confirmação.</p>
+                <Button onClick={confirmMockPayment} loading={paying} size="sm" variant="outline" data-testid="mock-pay-btn">
+                  Simular pagamento (sandbox)
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

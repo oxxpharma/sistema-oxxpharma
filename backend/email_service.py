@@ -220,6 +220,32 @@ DEFAULT_TEMPLATES = [
 </div>""",
         "active": True,
     },
+    {
+        "slug": "password_reset",
+        "name": "Recuperacao de senha",
+        "subject": "Recupere sua senha OxxPharma",
+        "body_html": """
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+  <h2>Recuperacao de senha</h2>
+  <p>Ola {{user.name}}, recebemos uma solicitacao para redefinir sua senha.</p>
+  <p><a href="{{reset_link}}" style="background:#E8731A;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">Definir nova senha</a></p>
+  <p style="color:#666;font-size:12px;">O link expira em 60 minutos. Se voce nao pediu, ignore este email.</p>
+</div>""",
+        "active": True,
+    },
+    {
+        "slug": "first_access",
+        "name": "Primeiro acesso (importacao)",
+        "subject": "Bem-vindo a OxxPharma - Crie sua senha",
+        "body_html": """
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+  <h2>Bem-vindo, {{user.name}}!</h2>
+  <p>Sua conta foi criada na OxxPharma. Para o primeiro acesso, defina sua senha clicando no botao abaixo:</p>
+  <p><a href="{{reset_link}}" style="background:#E8731A;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">Criar minha senha</a></p>
+  <p style="color:#666;font-size:12px;">O link expira em 7 dias.</p>
+</div>""",
+        "active": True,
+    },
 ]
 
 

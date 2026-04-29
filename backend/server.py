@@ -23,6 +23,7 @@ import jwt
 
 import email_service
 import card_service
+import payments_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -210,6 +211,7 @@ class ProductCreate(BaseModel):
     featured: bool = False
     brand: Optional[str] = None
     weight: Optional[float] = None
+    points_value: float = 0  # Pontos atribuidos por unidade comprada (manual pelo admin)
 
 class CategoryCreate(BaseModel):
     name: str
@@ -444,7 +446,7 @@ async def login(request: Request, response: Response, data: AuthLogin):
     user = await db.users.find_one({"email": data.email.lower()}, {"_id": 0})
     if not user or not verify_pw(data.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Credenciais invalidas")
-    if user.get("status") == "cancelled":
+    if user.get("status") in ("cancelled", "inactive", "deleted"):
         raise HTTPException(status_code=401, detail="Conta desativada")
     role = user.get("role", "customer")
     if user.get("access_level", 99) <= 1:
@@ -729,7 +731,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         price = prod.get("discount_price") or prod["price"]
         total = round(price * ci["quantity"], 2)
         subtotal += total
-        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0]})
+        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0], "points_value": float(prod.get("points_value") or 0)})
         # Decrement stock
         await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
     if not items:
@@ -938,6 +940,8 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
             {"order_id": order_id, "status": "pending"},
             {"$set": {"status": "paid", "paid_at": now_iso()}},
         )
+        # Registrar pontos
+        await register_points_from_order(db, order_id)
     elif status == "cancelled":
         await db.commissions.update_many(
             {"order_id": order_id, "status": {"$in": ["pending", "paid"]}},
@@ -1063,10 +1067,13 @@ async def my_commissions(request: Request, page: int = 1, limit: int = 20, user:
     comms = await db.commissions.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"commissions": comms, "total": total, "page": page}
 
-# ==================== PAYMENT - MERCADO PAGO (STUB) ====================
-# Placeholder para integracao futura com Mercado Pago.
-# Quando usuario fornecer as credenciais (MERCADO_PAGO_ACCESS_TOKEN), este
-# endpoint criara uma preferencia de pagamento real. Por ora, retorna mock.
+# ==================== PAYMENT - MERCADO PAGO ====================
+
+@app.get("/api/payments/config")
+async def payments_config(request: Request):
+    """Config publica do MP (env + public_key)."""
+    return await payments_service.get_public_config(request.app.db)
+
 
 @app.post("/api/payments/create/{order_id}")
 async def create_payment(request: Request, order_id: str, user: dict = Depends(get_current_user)):
@@ -1076,43 +1083,79 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
         raise HTTPException(status_code=404, detail="Pedido nao encontrado")
     if order["user_id"] != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
+    if order.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Pedido ja pago")
 
-    mp_token = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
-    if mp_token:
-        # TODO: integracao real com Mercado Pago SDK
-        # import mercadopago
-        # sdk = mercadopago.SDK(mp_token)
-        # preference = sdk.preference().create({...})
-        # payment_url = preference["response"]["init_point"]
-        payment_url = None  # placeholder
-        payment_id = None
-        provider = "mercadopago"
-    else:
-        # MOCK: auto-aprova pagamento em ambiente de desenvolvimento
-        payment_url = None
+    if not await payments_service.is_mp_configured(db):
+        # Sem MP configurado: continua mock (auto-aprovavel via /mock/confirm)
         payment_id = f"mock_{uuid.uuid4().hex[:12]}"
-        provider = "mock"
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {"payment_provider": "mock", "payment_id": payment_id, "payment_url": None}},
+        )
+        return {"order_id": order_id, "payment_id": payment_id, "payment_url": None, "provider": "mock"}
+
+    items_full = order.get("items", []) + [{"product_id": "shipping", "name": "Frete", "price": float(order.get("shipping_cost") or 0), "quantity": 1}]
+    items_full = [it for it in items_full if (it.get("price") or 0) > 0]
+
+    frontend_url = get_app_url()
+    backend_url = os.environ.get("BACKEND_URL") or frontend_url
+
+    try:
+        pref = await payments_service.create_preference(db, order, user, items_full, frontend_url, backend_url)
+    except Exception as e:
+        logger.exception(f"Falha criando preferencia MP para {order_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Erro MercadoPago: {e}")
+
+    # Escolhe init_point: se environment=test, usa sandbox_init_point
+    env = pref.get("environment")
+    init_point = pref.get("sandbox_init_point") if env == "test" else pref.get("init_point")
+    init_point = init_point or pref.get("init_point")
 
     await db.orders.update_one(
         {"order_id": order_id},
-        {"$set": {"payment_provider": provider, "payment_id": payment_id, "payment_url": payment_url}},
+        {"$set": {
+            "payment_provider": "mercadopago",
+            "payment_id": pref["preference_id"],
+            "payment_url": init_point,
+            "mp_environment": env,
+        }},
     )
-    return {"order_id": order_id, "payment_id": payment_id, "payment_url": payment_url, "provider": provider}
+    return {
+        "order_id": order_id,
+        "payment_id": pref["preference_id"],
+        "payment_url": init_point,
+        "provider": "mercadopago",
+        "environment": env,
+    }
 
 @app.post("/api/payments/mock/confirm/{order_id}")
 async def mock_confirm_payment(request: Request, order_id: str, user: dict = Depends(get_current_user)):
-    """MVP: confirma pagamento manualmente (mock). Remover quando Mercado Pago estiver ativo."""
+    """Confirma pagamento manualmente (mock). Disponivel em ambiente test ou quando MP nao configurado."""
     db = request.app.db
+    env = await payments_service.get_mp_environment(db)
+    if env == "production" and await payments_service.is_mp_configured(db):
+        raise HTTPException(status_code=403, detail="Mock indisponivel em producao")
     order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Pedido nao encontrado")
     if order["user_id"] != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
+    return await mark_order_paid(db, order_id, payment_id=order.get("payment_id") or f"mock_{uuid.uuid4().hex[:8]}", source="mock")
+
+
+async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, source: str = "mp"):
+    """Helper centralizado: marca pedido como pago, cria nota, paga commissions, registra pontos, dispara email."""
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        return None
+    if order.get("payment_status") == "paid":
+        return order  # idempotente
     await db.orders.update_one(
         {"order_id": order_id},
-        {"$set": {"payment_status": "paid", "order_status": "paid", "paid_at": now_iso()}},
+        {"$set": {"payment_status": "paid", "order_status": "paid", "paid_at": now_iso(), "payment_id": payment_id, "paid_via": source}},
     )
-    # Auto-emitir nota se ainda nao tiver
+    # Nota fiscal
     fresh = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if fresh and not fresh.get("invoice_number"):
         inv = await issue_invoice(db, fresh)
@@ -1120,21 +1163,105 @@ async def mock_confirm_payment(request: Request, order_id: str, user: dict = Dep
             {"order_id": order_id},
             {"$set": {"invoice_number": inv["number"], "invoice_issued_at": inv["issued_at"]}},
         )
+    # Commissions -> paid
     await db.commissions.update_many(
         {"order_id": order_id, "status": "pending"},
         {"$set": {"status": "paid", "paid_at": now_iso()}},
     )
+    # Pontos
+    await register_points_from_order(db, order_id)
+    # Email
     final = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     order_user = await db.users.find_one({"user_id": final.get("user_id")}, {"_id": 0, "password_hash": 0}) if final else None
     if final and order_user and order_user.get("email"):
         asyncio.create_task(email_service.trigger(db, "order_paid", order_user["email"], order_ctx(final, order_user)))
     return final
 
+
+async def register_points_from_order(db, order_id: str):
+    """Registra logs de pontos para cada item com points_value > 0."""
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        return
+    # Idempotencia: se ja registrou, ignora
+    existing = await db.points_log.find_one({"order_id": order_id})
+    if existing:
+        return
+    user = await db.users.find_one({"user_id": o["user_id"]}, {"_id": 0, "password_hash": 0})
+    if not user:
+        return
+    logs = []
+    for it in o.get("items", []):
+        pv = float(it.get("points_value") or 0)
+        if pv <= 0:
+            continue
+        qty = int(it.get("quantity") or 1)
+        total_points = round(pv * qty, 2)
+        logs.append({
+            "log_id": gen_id("pts_"),
+            "user_id": user["user_id"],
+            "user_name": user.get("name"),
+            "user_email": user.get("email"),
+            "user_external_id": user.get("external_id"),
+            "order_id": order_id,
+            "product_id": it.get("product_id"),
+            "product_name": it.get("name"),
+            "quantity": qty,
+            "points_per_unit": pv,
+            "points_total": total_points,
+            "registered_at": now_iso(),
+            "applied_externally": False,
+        })
+    if logs:
+        await db.points_log.insert_many(logs)
+
 @app.post("/api/payments/webhook/mercadopago")
 async def mp_webhook(request: Request):
-    """Webhook Mercado Pago (placeholder). Sera implementado quando credenciais forem fornecidas."""
-    body = await request.json()
-    logger.info(f"MP webhook received: {body}")
+    """Webhook MercadoPago: valida assinatura, busca payment, marca pedido como pago."""
+    db = request.app.db
+    raw = await request.body()
+    x_signature = request.headers.get("x-signature")
+    x_request_id = request.headers.get("x-request-id")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    data_id = (body.get("data") or {}).get("id") or request.query_params.get("data.id") or request.query_params.get("id")
+
+    valid = payments_service.verify_webhook_signature(raw, x_signature, x_request_id, str(data_id) if data_id else None)
+    log_entry = {
+        "log_id": gen_id("mphook_"),
+        "received_at": now_iso(),
+        "type": body.get("type") or body.get("topic") or request.query_params.get("topic"),
+        "data_id": data_id,
+        "valid_signature": valid,
+        "raw_body": body,
+        "query": dict(request.query_params),
+    }
+    if not valid:
+        log_entry["error"] = "invalid_signature"
+        await db.payment_webhook_logs.insert_one(log_entry)
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    notif_type = body.get("type") or body.get("topic") or request.query_params.get("topic")
+    if notif_type == "payment" and data_id:
+        details = await payments_service.get_payment_details(db, str(data_id))
+        log_entry["payment_details"] = {
+            "id": details.get("id") if details else None,
+            "status": details.get("status") if details else None,
+            "external_reference": details.get("external_reference") if details else None,
+        }
+        if details:
+            order_id = details.get("external_reference")
+            status_mp = details.get("status")
+            if order_id and status_mp == "approved":
+                await mark_order_paid(db, order_id, payment_id=str(details.get("id")), source="mercadopago")
+                log_entry["action"] = "marked_paid"
+            elif order_id and status_mp in ("rejected", "cancelled"):
+                await db.orders.update_one({"order_id": order_id}, {"$set": {"payment_status": status_mp}})
+                log_entry["action"] = f"set_{status_mp}"
+
+    await db.payment_webhook_logs.insert_one(log_entry)
     return {"received": True}
 
 # ==================== SETTINGS (ADMIN) ====================
@@ -1390,18 +1517,17 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
                 stats["updated"] += 1
             else:
                 uid = gen_id("user_")
-                rc = gen_referral_code()
-                while await db.users.find_one({"referral_code": rc}):
-                    rc = gen_referral_code()
                 await db.users.insert_one({
                     "user_id": uid, "email": row.email.lower(),
                     "password_hash": pw_hash, "name": row.name,
                     "phone": row.phone, "role": "customer", "access_level": 99,
                     "status": "active", "addresses": [],
-                    "referral_code": rc, "sponsor_id": None, "sponsor_code": None,
+                    "sponsor_id": None, "sponsor_code": None,
                     "network_type": NETWORK_1,
                     "network_sponsor_id": None,
                     "external_id": row.external_id,
+                    "must_set_password": True,
+                    "referral_program_active": False,
                     "created_at": now_iso(),
                 })
                 id_map[row.external_id] = uid
@@ -1962,18 +2088,17 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                     stats["updated"] += 1
                 else:
                     uid = gen_id("user_")
-                    rc = gen_referral_code()
-                    while await db.users.find_one({"referral_code": rc}):
-                        rc = gen_referral_code()
                     await db.users.insert_one({
                         "user_id": uid, "email": row.email.lower(),
                         "password_hash": pw_hash, "name": row.name,
                         "phone": row.phone, "role": "customer", "access_level": 99,
                         "status": "active", "addresses": [],
-                        "referral_code": rc, "sponsor_id": None, "sponsor_code": None,
+                        "sponsor_id": None, "sponsor_code": None,
                         "network_type": NETWORK_1,
                         "network_sponsor_id": None,
                         "external_id": row.external_id,
+                        "must_set_password": True,  # primeiro acesso obriga a definir senha
+                        "referral_program_active": False,
                         "created_at": now_iso(),
                     })
                     id_map[row.external_id] = uid
@@ -2029,6 +2154,314 @@ async def regenerate_webhook_token(request: Request, user: dict = Depends(requir
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "app": "OxxPharma"}
+
+# ==================== ADMIN USERS - GESTAO COMPLETA ====================
+
+@app.put("/api/admin/users/{user_id}")
+async def admin_update_user(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Atualiza qualquer campo do usuario (exceto password e id)."""
+    db = request.app.db
+    body = await request.json() or {}
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    # Campos editaveis
+    allowed = {
+        "name", "email", "phone", "cpf", "status", "role", "access_level",
+        "network_type", "network_sponsor_id", "sponsor_id", "sponsor_code",
+        "external_id", "addresses", "pix_key", "pix_key_type",
+        "referral_program_active", "must_set_password",
+    }
+    update = {}
+    for k, v in body.items():
+        if k in allowed:
+            update[k] = v
+    # Validar email unico
+    if "email" in update and update["email"]:
+        update["email"] = update["email"].lower()
+        existing = await db.users.find_one({"email": update["email"], "user_id": {"$ne": user_id}})
+        if existing:
+            raise HTTPException(status_code=400, detail="Email ja em uso")
+    # Sponsor code -> sponsor_id
+    if "sponsor_code" in update and update["sponsor_code"]:
+        sp = await db.users.find_one({"referral_code": update["sponsor_code"].strip().upper()})
+        if sp:
+            update["sponsor_id"] = sp["user_id"]
+            update["sponsor_code"] = sp.get("referral_code")
+    update["updated_at"] = now_iso()
+    await db.users.update_one({"user_id": user_id}, {"$set": update})
+    fresh = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    return fresh
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Hard delete: remove user + commissions + carrinho. Pedidos sao mantidos por integridade fiscal."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if target.get("role") == "admin" and target.get("user_id") == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Voce nao pode deletar a propria conta")
+    # Restaurar dependentes downstream (descendentes na rede)
+    await db.users.update_many({"network_sponsor_id": user_id}, {"$set": {"network_sponsor_id": None}})
+    await db.users.update_many({"sponsor_id": user_id}, {"$set": {"sponsor_id": None, "sponsor_code": None}})
+    # Deletar dados
+    await db.users.delete_one({"user_id": user_id})
+    await db.carts.delete_many({"user_id": user_id})
+    await db.commissions.delete_many({"user_id": user_id})
+    return {"ok": True, "deleted_user_id": user_id}
+
+
+@app.post("/api/admin/users/{user_id}/toggle-status")
+async def admin_toggle_user_status(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    new_status = "inactive" if target.get("status") == "active" else "active"
+    await db.users.update_one({"user_id": user_id}, {"$set": {"status": new_status, "updated_at": now_iso()}})
+    return {"ok": True, "status": new_status}
+
+
+@app.post("/api/admin/users/{user_id}/send-password-reset")
+async def admin_send_password_reset(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    token = uuid.uuid4().hex + uuid.uuid4().hex
+    expires = (datetime.now(timezone.utc) + timedelta(minutes=60)).isoformat()
+    await db.password_reset_tokens.insert_one({
+        "token": token, "user_id": user_id, "email": target.get("email"),
+        "expires_at": expires, "used": False, "type": "reset",
+        "created_at": now_iso(), "created_by_admin": user["user_id"],
+    })
+    app_url = get_app_url()
+    reset_link = f"{app_url}/redefinir-senha?token={token}"
+    asyncio.create_task(email_service.trigger(db, "password_reset", target["email"], {"user": target, "reset_link": reset_link}))
+    return {"ok": True, "reset_link": reset_link}
+
+
+@app.post("/api/admin/users/{user_id}/send-first-access")
+async def admin_send_first_access(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Marca user como must_set_password e envia email com link."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    token = uuid.uuid4().hex + uuid.uuid4().hex
+    expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    await db.password_reset_tokens.insert_one({
+        "token": token, "user_id": user_id, "email": target.get("email"),
+        "expires_at": expires, "used": False, "type": "first_access",
+        "created_at": now_iso(), "created_by_admin": user["user_id"],
+    })
+    await db.users.update_one({"user_id": user_id}, {"$set": {"must_set_password": True}})
+    app_url = get_app_url()
+    reset_link = f"{app_url}/primeiro-acesso?token={token}"
+    asyncio.create_task(email_service.trigger(db, "first_access", target["email"], {"user": target, "reset_link": reset_link}))
+    return {"ok": True, "reset_link": reset_link}
+
+
+# ==================== AUTH - PASSWORD RESET (PUBLIC) ====================
+
+@app.post("/api/auth/password-reset/request")
+async def password_reset_request(request: Request):
+    """Usuario solicita reset por email. Sempre retorna sucesso para nao vazar quais emails existem."""
+    body = await request.json() or {}
+    email = (body.get("email") or "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email obrigatorio")
+    db = request.app.db
+    target = await db.users.find_one({"email": email}, {"_id": 0, "password_hash": 0})
+    if target:
+        token = uuid.uuid4().hex + uuid.uuid4().hex
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=60)).isoformat()
+        await db.password_reset_tokens.insert_one({
+            "token": token, "user_id": target["user_id"], "email": email,
+            "expires_at": expires, "used": False, "type": "reset",
+            "created_at": now_iso(),
+        })
+        app_url = get_app_url()
+        reset_link = f"{app_url}/redefinir-senha?token={token}"
+        asyncio.create_task(email_service.trigger(db, "password_reset", email, {"user": target, "reset_link": reset_link}))
+    return {"ok": True}
+
+
+@app.get("/api/auth/password-reset/validate")
+async def password_reset_validate(request: Request, token: str):
+    db = request.app.db
+    t = await db.password_reset_tokens.find_one({"token": token, "used": False}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=400, detail="Token invalido ou ja utilizado")
+    if t.get("expires_at", "") < now_iso():
+        raise HTTPException(status_code=400, detail="Token expirado")
+    u = await db.users.find_one({"user_id": t["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {"ok": True, "email": t["email"], "name": u.get("name") if u else None, "type": t.get("type", "reset")}
+
+
+@app.post("/api/auth/password-reset/confirm")
+async def password_reset_confirm(request: Request):
+    body = await request.json() or {}
+    token = body.get("token")
+    new_password = body.get("password")
+    if not token or not new_password or len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Token e senha (>=6) obrigatorios")
+    db = request.app.db
+    t = await db.password_reset_tokens.find_one({"token": token, "used": False})
+    if not t:
+        raise HTTPException(status_code=400, detail="Token invalido")
+    if t.get("expires_at", "") < now_iso():
+        raise HTTPException(status_code=400, detail="Token expirado")
+    pw_hash = hash_pw(new_password)
+    await db.users.update_one(
+        {"user_id": t["user_id"]},
+        {"$set": {"password_hash": pw_hash, "must_set_password": False, "password_changed_at": now_iso()}},
+    )
+    await db.password_reset_tokens.update_one({"token": token}, {"$set": {"used": True, "used_at": now_iso()}})
+    return {"ok": True}
+
+
+@app.post("/api/auth/first-access/request")
+async def first_access_request(request: Request):
+    """Usuario importado solicita link de primeiro acesso por email."""
+    body = await request.json() or {}
+    email = (body.get("email") or "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email obrigatorio")
+    db = request.app.db
+    target = await db.users.find_one({"email": email}, {"_id": 0, "password_hash": 0})
+    if target:
+        token = uuid.uuid4().hex + uuid.uuid4().hex
+        expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        await db.password_reset_tokens.insert_one({
+            "token": token, "user_id": target["user_id"], "email": email,
+            "expires_at": expires, "used": False, "type": "first_access",
+            "created_at": now_iso(),
+        })
+        app_url = get_app_url()
+        reset_link = f"{app_url}/primeiro-acesso?token={token}"
+        asyncio.create_task(email_service.trigger(db, "first_access", email, {"user": target, "reset_link": reset_link}))
+    return {"ok": True}
+
+
+# ==================== POINTS REPORT ====================
+
+@app.get("/api/admin/points-report")
+async def admin_points_report(request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                              user_id: Optional[str] = None, applied: Optional[bool] = None,
+                              page: int = 1, limit: int = 100, user: dict = Depends(require_admin())):
+    db = request.app.db
+    q = {}
+    if start:
+        q.setdefault("registered_at", {})["$gte"] = start
+    if end:
+        q.setdefault("registered_at", {})["$lte"] = end
+    if user_id:
+        q["user_id"] = user_id
+    if applied is not None:
+        q["applied_externally"] = applied
+    total = await db.points_log.count_documents(q)
+    logs = await db.points_log.find(q, {"_id": 0}).sort("registered_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    summary = await db.points_log.aggregate([
+        {"$match": q},
+        {"$group": {"_id": None, "total_points": {"$sum": "$points_total"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    return {
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "summary": {
+            "total_points": round((summary[0]["total_points"] if summary else 0), 2),
+            "count": summary[0]["count"] if summary else 0,
+        },
+    }
+
+
+@app.get("/api/admin/points-report/export.csv")
+async def admin_points_report_csv(request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                                   user_id: Optional[str] = None, user: dict = Depends(require_admin())):
+    from fastapi.responses import Response as FastAPIResponse
+    import io, csv
+    db = request.app.db
+    q = {}
+    if start:
+        q.setdefault("registered_at", {})["$gte"] = start
+    if end:
+        q.setdefault("registered_at", {})["$lte"] = end
+    if user_id:
+        q["user_id"] = user_id
+    logs = await db.points_log.find(q, {"_id": 0}).sort("registered_at", -1).to_list(100000)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["data_hora", "user_id", "external_id", "nome", "email", "produto", "qtd", "pontos_unidade", "pontos_total", "pedido", "aplicado_externamente"])
+    for l in logs:
+        w.writerow([
+            l.get("registered_at"), l.get("user_id"), l.get("user_external_id") or "",
+            l.get("user_name"), l.get("user_email"), l.get("product_name"),
+            l.get("quantity"), l.get("points_per_unit"), l.get("points_total"),
+            l.get("order_id"), "Sim" if l.get("applied_externally") else "Nao",
+        ])
+    return FastAPIResponse(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="relatorio-pontos.csv"'},
+    )
+
+
+@app.post("/api/admin/points-report/mark-applied")
+async def admin_points_mark_applied(request: Request, user: dict = Depends(require_admin())):
+    """Marca um conjunto de pontos como aplicado externamente (admin clicou apos aplicar)."""
+    body = await request.json() or {}
+    log_ids = body.get("log_ids") or []
+    if not log_ids:
+        raise HTTPException(status_code=400, detail="log_ids obrigatorio")
+    db = request.app.db
+    res = await db.points_log.update_many(
+        {"log_id": {"$in": log_ids}},
+        {"$set": {"applied_externally": True, "applied_at": now_iso(), "applied_by": user["user_id"]}},
+    )
+    return {"ok": True, "modified": res.modified_count}
+
+
+# ==================== PAYMENTS - ADMIN ====================
+
+@app.get("/api/admin/payments-config")
+async def admin_payments_config(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    s = await db.settings.find_one({"_id": "global"}) or {}
+    env = s.get("mp_environment", "test")
+    return {
+        "mp_environment": env,
+        "test_configured": bool(os.environ.get("MP_ACCESS_TOKEN_TEST")),
+        "production_configured": bool(os.environ.get("MP_ACCESS_TOKEN_PROD")),
+        "webhook_secret_configured": bool(os.environ.get("MP_WEBHOOK_SECRET")),
+        "test_public_key": os.environ.get("MP_PUBLIC_KEY_TEST", ""),
+        "production_public_key": os.environ.get("MP_PUBLIC_KEY_PROD", ""),
+    }
+
+
+@app.put("/api/admin/payments-config")
+async def admin_set_payments_env(request: Request, user: dict = Depends(require_admin())):
+    body = await request.json() or {}
+    env = body.get("mp_environment", "test")
+    if env not in ("test", "production"):
+        raise HTTPException(status_code=400, detail="environment deve ser 'test' ou 'production'")
+    if env == "production" and not os.environ.get("MP_ACCESS_TOKEN_PROD"):
+        raise HTTPException(status_code=400, detail="Tokens de producao nao configurados em .env (MP_ACCESS_TOKEN_PROD)")
+    db = request.app.db
+    await db.settings.update_one({"_id": "global"}, {"$set": {"mp_environment": env, "updated_at": now_iso()}}, upsert=True)
+    return {"ok": True, "mp_environment": env}
+
+
+@app.get("/api/admin/payments-webhook-logs")
+async def admin_payments_webhook_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.payment_webhook_logs.count_documents({})
+    logs = await db.payment_webhook_logs.find({}, {"_id": 0}).sort("received_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
 
 # ==================== CARTAO DE BENEFICIOS / GIFT CARD ====================
 

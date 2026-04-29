@@ -3,14 +3,16 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Search, Loader2, Mail, Phone, CreditCard, Power } from 'lucide-react';
+import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
+import UserEditModal from '../../components/UserEditModal';
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
+  const [editingId, setEditingId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -78,6 +80,7 @@ export default function AdminUsers() {
                   <th className="text-left p-3">Cadastro</th>
                   <th className="text-center p-3">Programa</th>
                   <th className="text-center p-3">Perfil</th>
+                  <th className="text-right p-3">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -112,13 +115,25 @@ export default function AdminUsers() {
                     <td className="p-3 text-center">
                       {u.role === 'admin' ? <Badge variant="brand">Admin</Badge> : <Badge>Cliente</Badge>}
                     </td>
+                    <td className="p-3 text-right">
+                      <button onClick={() => setEditingId(u.user_id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-brand-main text-white rounded hover:bg-brand-hover" data-testid={`edit-user-${u.user_id}`}>
+                        <Pencil className="w-3 h-3" /> Editar
+                      </button>
+                    </td>
                   </tr>
                 ))}
-                {users.length === 0 && <tr><td colSpan={7} className="p-10 text-center text-txt-secondary">Nenhum usuário.</td></tr>}
+                {users.length === 0 && <tr><td colSpan={8} className="p-10 text-center text-txt-secondary">Nenhum usuário.</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
+      )}
+      {editingId && (
+        <UserEditModal
+          userId={editingId}
+          onClose={() => setEditingId(null)}
+          onSaved={() => load()}
+        />
       )}
     </div>
   );

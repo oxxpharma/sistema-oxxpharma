@@ -68,10 +68,16 @@ export default function CheckoutPage() {
         payment_method: paymentMethod,
         ref_code: refCode || undefined,
       });
-      // Mock de pagamento: cria preferencia
-      await api.post(`/api/payments/create/${order.order_id}`);
+      // Cria preferencia de pagamento
+      const pay = await api.post(`/api/payments/create/${order.order_id}`);
       clear();
       clearRef();
+      // Se MP ativo e tem URL de pagamento, redireciona pro checkout do MP
+      if (pay.provider === 'mercadopago' && pay.payment_url) {
+        toast.success('Redirecionando para o pagamento...');
+        window.location.href = pay.payment_url;
+        return;
+      }
       toast.success('Pedido criado com sucesso!');
       navigate(`/pedido/${order.order_id}`);
     } catch (err) {
