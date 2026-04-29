@@ -282,6 +282,28 @@ Sistema com 3 pilares:
 - [x] get_app_url() agora aceita APP_URL > BACKEND_URL > REACT_APP_BACKEND_URL com strip da barra final
 - [x] Domain configurado: oxxpharma.com.br + SSL Let's Encrypt automatico
 
+### Sessao 11 (2026-04-29 cont.) - Iter 20: Maxx MMN API + Aparencia + CMS Pages
+- [x] Documentacao API Maxx MMN: /app/docs/MAXX_MMN_API.md (completa, 2 fluxos, exemplos curl)
+- [x] Backend Maxx outbound: maxx_service.py com 3 modos (realtime/batch/manual), 4 auth types, template customizavel
+- [x] Hook em register_points_from_order dispara trigger_realtime (best-effort, asyncio.create_task)
+- [x] Endpoints Maxx: GET/PUT /api/admin/maxx-config, POST /api/admin/maxx-sync-points, POST /api/admin/maxx-sync-points/{log_id} (1 reenvio), GET /api/admin/maxx-logs
+- [x] Site Settings (aparencia da loja):
+  - GET publico /api/site-settings + PUT /api/admin/site-settings (logo, hero, cores, footer, social, announcement bar)
+  - POST /api/admin/upload-image (base64 -> db.uploads)
+  - Hook useSiteSettings com cache global compartilhado entre componentes
+  - StoreHeader, StoreFooter, StoreHome consomem as settings
+- [x] CMS Pages com editor visual GrapesJS:
+  - CRUD /api/admin/pages (page_id, slug unico, title, html, css, components_json, published, meta_description)
+  - GET publico /api/pages/{slug} (apenas published=true; 404 caso contrario)
+  - Frontend AdminPagesList + AdminPageEditor (GrapesJS 0.22.16 + grapesjs-preset-webpage + grapesjs-blocks-basic)
+  - Devices: Desktop, Tablet, Mobile preview
+  - CmsPageView publico em /p/{slug} renderiza HTML+CSS injetado
+- [x] AdminAppearance.jsx: 4 abas (Identidade, Banner, Anuncio, Rodape) com upload de imagem, color pickers, drag list de footer pages
+- [x] AdminMaxx.jsx: 2 abas (Config, Logs) com toggle, modos, auth, template
+- [x] Sidebar: 3 novos itens (Maxx MMN, Aparencia, Paginas CMS)
+- [x] Bug fix testing agent: StoreHome.jsx tinha </div> extra causando crash global do frontend - corrigido
+- [x] 23/23 backend pytest + 31/31 frontend (testing_agent_v3_fork iteration_20)
+
 ## Backlog
 
 ### P1 - Integracao real API Cartao de Beneficios (proxima sessao)
