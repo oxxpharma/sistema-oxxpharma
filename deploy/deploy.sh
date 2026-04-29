@@ -94,15 +94,30 @@ supervisorctl reread
 supervisorctl update
 supervisorctl restart oxxpharma-backend || supervisorctl start oxxpharma-backend
 
-sleep 2
+sleep 3
 
 # ---------- 7. Health check ----------
 log "Health check..."
-HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/health)
+log "Status do supervisor:"
+supervisorctl status oxxpharma-backend || true
+
+# Curl com debug, sem set -e tripping
+HEALTH=$(curl -s -o /tmp/health.out -w "%{http_code}" http://localhost:8001/api/health || echo "000")
 if [[ "$HEALTH" == "200" ]]; then
-    log "✓ Backend respondendo em :8001"
+    log "✓ Backend respondendo em :8001 (HTTP $HEALTH)"
 else
-    err "✗ Backend não respondeu (HTTP $HEALTH). Veja: tail -f /var/log/oxxpharma/backend.err.log"
+    err "✗ Backend não respondeu (HTTP $HEALTH)."
+    err ""
+    err "Diagnóstico:"
+    err "  1) Status: sudo supervisorctl status oxxpharma-backend"
+    err "  2) Logs:   sudo tail -n 80 /var/log/oxxpharma/backend.err.log"
+    err "  3) Porta:  sudo ss -tlnp | grep 8001"
+    err ""
+    err "Saída do curl:"
+    cat /tmp/health.out 2>/dev/null || true
+    err ""
+    err "Últimas 30 linhas do log de erro:"
+    tail -n 30 /var/log/oxxpharma/backend.err.log 2>/dev/null || echo "  (log vazio ou ainda não criado)"
     exit 1
 fi
 
