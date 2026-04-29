@@ -49,7 +49,7 @@ export default function AdminPoints() {
 
   const markApplied = async () => {
     if (selected.size === 0) { toast.error('Selecione pelo menos um registro'); return; }
-    if (!confirm(`Marcar ${selected.size} registros como APLICADOS no sistema externo?`)) return;
+    if (!window.confirm(`Marcar ${selected.size} registros como APLICADOS no sistema externo?`)) return;
     try {
       await api.post('/api/admin/points-report/mark-applied', { log_ids: Array.from(selected) });
       toast.success('Marcados');

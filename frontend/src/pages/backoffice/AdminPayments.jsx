@@ -65,7 +65,7 @@ export default function AdminPayments() {
       toast.error('Configure as credenciais de PRODUÇÃO antes de ativar');
       return;
     }
-    if (env === 'production' && !confirm('CUIDADO: ativar PRODUÇÃO vai cobrar pagamentos REAIS dos clientes. Continuar?')) return;
+    if (env === 'production' && !window.confirm('CUIDADO: ativar PRODUÇÃO vai cobrar pagamentos REAIS dos clientes. Continuar?')) return;
     setSaving(true);
     try {
       await api.put('/api/admin/payments-config', { mp_environment: env });

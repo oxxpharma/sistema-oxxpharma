@@ -35,7 +35,7 @@ export default function AdminUsers() {
     } catch (e) { toast.error(e?.message || 'Erro'); }
   };
   const deactivate = async (uid) => {
-    if (!confirm('Desativar o programa para este usuário? O código será removido.')) return;
+    if (!window.confirm('Desativar o programa para este usuário? O código será removido.')) return;
     try {
       await api.post(`/api/admin/users/${uid}/deactivate-referral`);
       toast.success('Desativado');

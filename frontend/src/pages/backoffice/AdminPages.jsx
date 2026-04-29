@@ -36,7 +36,7 @@ export function AdminPagesList() {
   };
 
   const del = async (p) => {
-    if (!confirm(`Deletar a página "${p.title}"?`)) return;
+    if (!window.confirm(`Deletar a página "${p.title}"?`)) return;
     try { await api.del(`/api/admin/pages/${p.page_id}`); toast.success('Deletada'); load(); }
     catch (e) { toast.error(e?.message); }
   };

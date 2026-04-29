@@ -71,7 +71,7 @@ function ConfigTab() {
   };
 
   const resetReferrals = async () => {
-    if (!confirm('Isso vai DESATIVAR o programa de indicação de TODOS os usuários (exceto admin) e zerar os códigos. Continuar?')) return;
+    if (!window.confirm('Isso vai DESATIVAR o programa de indicação de TODOS os usuários (exceto admin) e zerar os códigos. Continuar?')) return;
     try {
       const r = await api.post('/api/admin/reset-all-referrals');
       toast.success(`${r.updated} usuários resetados`);
@@ -280,7 +280,7 @@ function BatchesTab() {
   useEffect(() => { (async () => { try { await load(); } finally { setLoading(false); } })(); }, []);
 
   const runManual = async () => {
-    if (!confirm('Gerar e enviar o lote AGORA com todas as comissões pagas pendentes?')) return;
+    if (!window.confirm('Gerar e enviar o lote AGORA com todas as comissões pagas pendentes?')) return;
     setRunning(true);
     try {
       const r = await api.post('/api/admin/card-batches/run');

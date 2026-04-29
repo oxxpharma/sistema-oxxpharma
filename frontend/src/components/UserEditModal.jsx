@@ -85,8 +85,8 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
   };
 
   const del = async () => {
-    if (!confirm(`Deletar PERMANENTEMENTE o usuário ${u.name}? Esta ação não pode ser desfeita.`)) return;
-    if (!confirm('Tem CERTEZA absoluta? Pedidos serão preservados, mas comissões e dados serão apagados.')) return;
+    if (!window.confirm(`Deletar PERMANENTEMENTE o usuário ${u.name}? Esta ação não pode ser desfeita.`)) return;
+    if (!window.confirm('Tem CERTEZA absoluta? Pedidos serão preservados, mas comissões e dados serão apagados.')) return;
     try {
       await api.del(`/api/admin/users/${userId}`);
       toast.success('Usuário deletado');

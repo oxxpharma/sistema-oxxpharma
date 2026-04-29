@@ -43,7 +43,7 @@ export default function AdminMaxx() {
   };
 
   const runManual = async () => {
-    if (!confirm('Enviar AGORA todos os pontos pendentes para o Maxx?')) return;
+    if (!window.confirm('Enviar AGORA todos os pontos pendentes para o Maxx?')) return;
     setRunning(true);
     try {
       const r = await api.post('/api/admin/maxx-sync-points');
