@@ -251,6 +251,22 @@ Sistema com 3 pilares:
 - [x] Sidebar admin: novo item "Frete (Correios)"
 - [x] 12/12 testes backend + 100% frontend (testing_agent_v3_fork iteration_18)
 
+### Sessao 9 (2026-04-29 cont.) - Iter 19: Migracao Correios CWS API (Bearer Token)
+- [x] Reescrita completa de correios_service.py:
+  - Auth: POST /token/v1/autentica/contrato (Basic Auth user:api_code, body numero=contrato)
+  - Endpoints: POST /preco/v1/nacional + /prazo/v1/nacional (chamados em paralelo via asyncio.gather)
+  - Token cache em db.correios_tokens (TTL respeitando campo expiraEm da resposta CWS)
+  - Auto-renova token em 401 (limpa cache + re-auth + retry)
+- [x] Suporte a 2 ambientes: homologacao (apihom.correios.com.br) e producao (api.correios.com.br) com toggle no admin
+- [x] Defaults atualizados para codigos CWS contratuais (03298=PAC, 03220=SEDEX) - antigos balcao removidos
+- [x] Removido campo legacy correios_password, novos campos: correios_user, correios_api_code, correios_environment
+- [x] Mudar credenciais (user/api_code/contract/environment) invalida tokens cacheados automaticamente
+- [x] Novo endpoint POST /api/admin/correios-test-auth (testa apenas autenticacao sem calcular frete)
+- [x] Frontend AdminShipping.jsx: cards de ambiente (homologacao/producao), inputs CWS (user/api_code/contract/origin_cep), botao "Testar autenticacao" com display de resultado verde/vermelho
+- [x] Datalist atualizado com codigos CWS modernos
+- [x] Bug fix do testing agent: PUT /api/admin/correios-config com environment invalido retorna 400 (era 500)
+- [x] 11/11 testes backend + frontend completo (testing_agent_v3_fork iteration_19)
+
 ## Backlog
 
 ### P1 - Integracao real API Cartao de Beneficios (proxima sessao)
