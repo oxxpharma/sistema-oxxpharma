@@ -11,6 +11,7 @@ const emptyForm = {
   name: '', description: '', price: 0, discount_price: null,
   category: '', subcategory: '', images: [], stock: 0,
   active: true, featured: false, brand: '', points_value: 0,
+  weight: null, length_cm: null, width_cm: null, height_cm: null,
 };
 
 export default function AdminProducts() {
@@ -55,6 +56,8 @@ export default function AdminProducts() {
       subcategory: p.subcategory || '', images: p.images || [],
       stock: p.stock, active: p.active, featured: p.featured,
       brand: p.brand || '', points_value: p.points_value || 0,
+      weight: p.weight ?? null, length_cm: p.length_cm ?? null,
+      width_cm: p.width_cm ?? null, height_cm: p.height_cm ?? null,
     });
     setShowForm(true);
   };
@@ -202,6 +205,12 @@ export default function AdminProducts() {
               </div>
               <div className="grid grid-cols-1 gap-3">
                 <Input label="Pontos por unidade" type="number" step="0.01" value={form.points_value} onChange={e => setForm({ ...form, points_value: e.target.value })} placeholder="Ex: 10" />
+              </div>
+              <div className="grid grid-cols-4 gap-3">
+                <Input label="Peso (kg)" type="number" step="0.001" value={form.weight ?? ''} onChange={e => setForm({ ...form, weight: e.target.value ? parseFloat(e.target.value) : null })} placeholder="0.300" data-testid="prod-weight" />
+                <Input label="Comprimento (cm)" type="number" step="0.1" value={form.length_cm ?? ''} onChange={e => setForm({ ...form, length_cm: e.target.value ? parseFloat(e.target.value) : null })} placeholder="16" data-testid="prod-length" />
+                <Input label="Largura (cm)" type="number" step="0.1" value={form.width_cm ?? ''} onChange={e => setForm({ ...form, width_cm: e.target.value ? parseFloat(e.target.value) : null })} placeholder="11" data-testid="prod-width" />
+                <Input label="Altura (cm)" type="number" step="0.1" value={form.height_cm ?? ''} onChange={e => setForm({ ...form, height_cm: e.target.value ? parseFloat(e.target.value) : null })} placeholder="6" data-testid="prod-height" />
               </div>
 
               {/* Images */}

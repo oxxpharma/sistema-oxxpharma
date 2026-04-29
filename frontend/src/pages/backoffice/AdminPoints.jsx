@@ -32,17 +32,17 @@ export default function AdminPoints() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const downloadCsv = () => {
+  const downloadXlsx = () => {
     const token = localStorage.getItem('token');
     const q = new URLSearchParams();
     if (start) q.set('start', start);
     if (end) q.set('end', end);
-    fetch(`${API_URL}/api/admin/points-report/export.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_URL}/api/admin/points-report/export.xlsx?${q}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.blob())
       .then(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'relatorio-pontos.csv';
+        a.download = 'relatorio-pontos.xlsx';
         a.click();
       });
   };
@@ -106,7 +106,7 @@ export default function AdminPoints() {
         <Button variant="outline" onClick={load}><Search className="w-4 h-4" /> Filtrar</Button>
         <div className="flex-1" />
         <Button variant="outline" onClick={load}><RefreshCw className="w-4 h-4" /> Atualizar</Button>
-        <Button variant="outline" onClick={downloadCsv} data-testid="export-csv-btn"><Download className="w-4 h-4" /> Exportar CSV</Button>
+        <Button variant="outline" onClick={downloadXlsx} data-testid="export-xlsx-btn"><Download className="w-4 h-4" /> Exportar XLSX</Button>
         <Button onClick={markApplied} disabled={selected.size === 0} data-testid="mark-applied-btn">
           <CheckCircle2 className="w-4 h-4" /> Marcar como aplicado ({selected.size})
         </Button>

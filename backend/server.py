@@ -24,6 +24,7 @@ import jwt
 import email_service
 import card_service
 import payments_service
+import correios_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -211,6 +212,9 @@ class ProductCreate(BaseModel):
     featured: bool = False
     brand: Optional[str] = None
     weight: Optional[float] = None
+    length_cm: Optional[float] = None
+    width_cm: Optional[float] = None
+    height_cm: Optional[float] = None
     points_value: float = 0  # Pontos atribuidos por unidade comprada (manual pelo admin)
 
 class CategoryCreate(BaseModel):
@@ -1228,7 +1232,7 @@ async def mp_webhook(request: Request):
         body = {}
     data_id = (body.get("data") or {}).get("id") or request.query_params.get("data.id") or request.query_params.get("id")
 
-    valid = payments_service.verify_webhook_signature(raw, x_signature, x_request_id, str(data_id) if data_id else None)
+    valid = await payments_service.verify_webhook_signature(db, raw, x_signature, x_request_id, str(data_id) if data_id else None)
     log_entry = {
         "log_id": gen_id("mphook_"),
         "received_at": now_iso(),
@@ -2151,6 +2155,174 @@ async def regenerate_webhook_token(request: Request, user: dict = Depends(requir
     await db.settings.update_one({"_id": "global"}, {"$set": {"external_webhook_token": token, "updated_at": now_iso()}})
     return {"external_webhook_token": token}
 
+@app.get("/api/admin/points-report/export.xlsx")
+async def admin_points_report_xlsx(request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                                    user_id: Optional[str] = None, user: dict = Depends(require_admin())):
+    """Exporta relatorio de pontos em XLSX (Data/Hora, ID, Nome, Pontos totais)."""
+    from fastapi.responses import Response as FastAPIResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    import io
+    db = request.app.db
+    q = {}
+    if start:
+        q.setdefault("registered_at", {})["$gte"] = start
+    if end:
+        q.setdefault("registered_at", {})["$lte"] = end
+    if user_id:
+        q["user_id"] = user_id
+    logs = await db.points_log.find(q, {"_id": 0}).sort("registered_at", -1).to_list(100000)
+
+    # Agrupa por user (Data/Hora=ultimo registro do user, ID, Nome, Pontos totais)
+    # Conforme pedido: layout simples com colunas Data/Hora, ID, Nome, Pontos totais
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Relatorio de Pontos"
+
+    # Estilos
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="E8731A", end_color="E8731A", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+    thin = Side(border_style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    headers = ["Data/Hora", "ID", "Nome", "Pontos totais"]
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = border
+
+    # Dados (1 linha por registro de ponto)
+    for row_idx, l in enumerate(logs, start=2):
+        # Formata Data/Hora pt-BR
+        dt = l.get("registered_at", "")
+        try:
+            dt_obj = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            dt_fmt = dt_obj.strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            dt_fmt = dt
+        ws.cell(row=row_idx, column=1, value=dt_fmt).border = border
+        ws.cell(row=row_idx, column=2, value=l.get("user_external_id") or l.get("user_id") or "").border = border
+        ws.cell(row=row_idx, column=3, value=l.get("user_name") or "").border = border
+        c4 = ws.cell(row=row_idx, column=4, value=float(l.get("points_total") or 0))
+        c4.number_format = "#,##0.00"
+        c4.border = border
+
+    # Auto-ajusta largura
+    widths = [22, 28, 32, 16]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    ws.freeze_panes = "A2"
+    # Filtro auto
+    if logs:
+        ws.auto_filter.ref = f"A1:D{len(logs) + 1}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return FastAPIResponse(
+        content=buf.read(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="relatorio-pontos.xlsx"'},
+    )
+
+
+# ==================== CORREIOS / FRETE ====================
+
+@app.get("/api/admin/correios-config")
+async def admin_correios_config(request: Request, user: dict = Depends(require_admin())):
+    return await correios_service.get_config(request.app.db)
+
+
+@app.put("/api/admin/correios-config")
+async def admin_update_correios_config(request: Request, user: dict = Depends(require_admin())):
+    body = await request.json() or {}
+    cfg = await correios_service.update_config(request.app.db, body)
+    return cfg
+
+
+@app.get("/api/admin/correios-logs")
+async def admin_correios_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.correios_logs.count_documents({})
+    logs = await db.correios_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
+
+@app.post("/api/shipping/calculate")
+async def public_calculate_shipping(request: Request):
+    """Endpoint publico para calcular frete: {cep_destination, items:[{product_id,quantity}]}.
+
+    Para usuarios autenticados, podemos buscar o carrinho automaticamente.
+    """
+    db = request.app.db
+    body = await request.json() or {}
+    cep = body.get("cep_destination") or body.get("cep") or ""
+    items_in = body.get("items") or []
+    declared_value = float(body.get("declared_value") or 0)
+
+    full_items = []
+    for it in items_in:
+        pid = it.get("product_id")
+        qty = int(it.get("quantity") or 1)
+        if pid:
+            prod = await db.products.find_one({"product_id": pid}, {"_id": 0})
+            if prod:
+                full_items.append({
+                    "weight": prod.get("weight") or 0.3,
+                    "length_cm": prod.get("length_cm"),
+                    "width_cm": prod.get("width_cm"),
+                    "height_cm": prod.get("height_cm"),
+                    "quantity": qty,
+                })
+        else:
+            full_items.append({
+                "weight": float(it.get("weight") or 0.3),
+                "length_cm": it.get("length_cm"),
+                "width_cm": it.get("width_cm"),
+                "height_cm": it.get("height_cm"),
+                "quantity": qty,
+            })
+
+    # Se nao veio items, tenta usar carrinho do usuario logado
+    if not full_items:
+        token = request.headers.get("authorization", "").replace("Bearer ", "")
+        if token:
+            try:
+                payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                uid = payload.get("sub")
+                cart = await db.carts.find_one({"user_id": uid}, {"_id": 0})
+                if cart:
+                    for ci in cart.get("items", []):
+                        prod = await db.products.find_one({"product_id": ci["product_id"]}, {"_id": 0})
+                        if prod:
+                            full_items.append({
+                                "weight": prod.get("weight") or 0.3,
+                                "length_cm": prod.get("length_cm"),
+                                "width_cm": prod.get("width_cm"),
+                                "height_cm": prod.get("height_cm"),
+                                "quantity": ci["quantity"],
+                            })
+            except Exception:
+                pass
+
+    result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
+    return result
+
+
+@app.post("/api/admin/correios-test")
+async def admin_correios_test(request: Request, user: dict = Depends(require_admin())):
+    """Testa configuracao atual com CEP + peso fornecido."""
+    body = await request.json() or {}
+    cep = body.get("cep_destination") or "01310100"
+    weight = float(body.get("weight") or 0.5)
+    items = [{"weight": weight, "quantity": 1}]
+    result = await correios_service.calculate_freight(request.app.db, cep, items, 0)
+    return result
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "app": "OxxPharma"}
@@ -2429,30 +2601,17 @@ async def admin_points_mark_applied(request: Request, user: dict = Depends(requi
 
 @app.get("/api/admin/payments-config")
 async def admin_payments_config(request: Request, user: dict = Depends(require_admin())):
-    db = request.app.db
-    s = await db.settings.find_one({"_id": "global"}) or {}
-    env = s.get("mp_environment", "test")
-    return {
-        "mp_environment": env,
-        "test_configured": bool(os.environ.get("MP_ACCESS_TOKEN_TEST")),
-        "production_configured": bool(os.environ.get("MP_ACCESS_TOKEN_PROD")),
-        "webhook_secret_configured": bool(os.environ.get("MP_WEBHOOK_SECRET")),
-        "test_public_key": os.environ.get("MP_PUBLIC_KEY_TEST", ""),
-        "production_public_key": os.environ.get("MP_PUBLIC_KEY_PROD", ""),
-    }
+    return await payments_service.get_admin_config(request.app.db)
 
 
 @app.put("/api/admin/payments-config")
-async def admin_set_payments_env(request: Request, user: dict = Depends(require_admin())):
+async def admin_set_payments_config(request: Request, user: dict = Depends(require_admin())):
     body = await request.json() or {}
-    env = body.get("mp_environment", "test")
-    if env not in ("test", "production"):
-        raise HTTPException(status_code=400, detail="environment deve ser 'test' ou 'production'")
-    if env == "production" and not os.environ.get("MP_ACCESS_TOKEN_PROD"):
-        raise HTTPException(status_code=400, detail="Tokens de producao nao configurados em .env (MP_ACCESS_TOKEN_PROD)")
-    db = request.app.db
-    await db.settings.update_one({"_id": "global"}, {"$set": {"mp_environment": env, "updated_at": now_iso()}}, upsert=True)
-    return {"ok": True, "mp_environment": env}
+    try:
+        cfg = await payments_service.update_credentials(request.app.db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return cfg
 
 
 @app.get("/api/admin/payments-webhook-logs")

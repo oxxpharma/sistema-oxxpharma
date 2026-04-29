@@ -45,6 +45,7 @@ import AdminWebhook from './pages/backoffice/AdminWebhook';
 import AdminGiftCards from './pages/backoffice/AdminGiftCards';
 import AdminPoints from './pages/backoffice/AdminPoints';
 import AdminPayments from './pages/backoffice/AdminPayments';
+import AdminShipping from './pages/backoffice/AdminShipping';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 
@@ -110,6 +111,7 @@ function AppRoutes() {
         <Route path="cartao" element={<AdminGiftCards />} />
         <Route path="pontos" element={<AdminPoints />} />
         <Route path="pagamentos" element={<AdminPayments />} />
+        <Route path="frete" element={<AdminShipping />} />
         <Route path="saques" element={<AdminWithdrawals />} />
         <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="emails" element={<AdminEmails />} />

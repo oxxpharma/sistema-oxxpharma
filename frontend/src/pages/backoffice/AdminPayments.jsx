@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { CreditCard, Loader2, AlertTriangle, RefreshCw, Save, Webhook, ExternalLink } from 'lucide-react';
+import { CreditCard, Loader2, AlertTriangle, RefreshCw, Save, Webhook, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime } from '../../lib/utils';
 
@@ -12,12 +12,26 @@ export default function AdminPayments() {
   const [saving, setSaving] = useState(false);
   const [logs, setLogs] = useState([]);
   const [tab, setTab] = useState('config');
+  const [showSecrets, setShowSecrets] = useState(false);
+  const [form, setForm] = useState({
+    mp_test_public_key: '', mp_test_access_token: '',
+    mp_prod_public_key: '', mp_prod_access_token: '',
+    mp_webhook_secret: '',
+  });
   const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
   const load = async () => {
     try {
       const r = await api.get('/api/admin/payments-config');
       setCfg(r);
+      // Pré-preenche form com public keys (texto plano), tokens em branco (não retornamos)
+      setForm({
+        mp_test_public_key: r.test_public_key || '',
+        mp_test_access_token: '',
+        mp_prod_public_key: r.prod_public_key || '',
+        mp_prod_access_token: '',
+        mp_webhook_secret: '',
+      });
     } finally { setLoading(false); }
   };
   const loadLogs = async () => {
@@ -29,9 +43,26 @@ export default function AdminPayments() {
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'logs') loadLogs(); }, [tab]);
 
+  const saveCredentials = async () => {
+    setSaving(true);
+    try {
+      // Só envia campos preenchidos (deixar em branco preserva o atual)
+      const payload = {};
+      if (form.mp_test_public_key !== cfg.test_public_key) payload.mp_test_public_key = form.mp_test_public_key;
+      if (form.mp_test_access_token) payload.mp_test_access_token = form.mp_test_access_token;
+      if (form.mp_prod_public_key !== cfg.prod_public_key) payload.mp_prod_public_key = form.mp_prod_public_key;
+      if (form.mp_prod_access_token) payload.mp_prod_access_token = form.mp_prod_access_token;
+      if (form.mp_webhook_secret) payload.mp_webhook_secret = form.mp_webhook_secret;
+      await api.put('/api/admin/payments-config', payload);
+      toast.success('Credenciais salvas');
+      await load();
+    } catch (e) { toast.error(e?.message); }
+    finally { setSaving(false); }
+  };
+
   const setEnv = async (env) => {
-    if (env === 'production' && !cfg.production_configured) {
-      toast.error('Tokens de PRODUÇÃO não configurados em .env');
+    if (env === 'production' && !cfg.production_configured && form.mp_prod_access_token === '') {
+      toast.error('Configure as credenciais de PRODUÇÃO antes de ativar');
       return;
     }
     if (env === 'production' && !confirm('CUIDADO: ativar PRODUÇÃO vai cobrar pagamentos REAIS dos clientes. Continuar?')) return;
@@ -56,55 +87,48 @@ export default function AdminPayments() {
         <h1 className="font-heading font-black text-2xl flex items-center gap-3">
           <CreditCard className="w-7 h-7 text-brand-main" /> Pagamentos (MercadoPago)
         </h1>
-        <p className="text-sm text-txt-secondary mt-1">Configure ambiente de teste ou produção. Tokens vêm do .env.</p>
+        <p className="text-sm text-txt-secondary mt-1">Configure as credenciais e o ambiente. As credenciais são salvas no banco de dados.</p>
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-border">
-        {['config', 'logs'].map(t => (
+        {['config', 'credentials', 'logs'].map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-3 text-sm font-semibold border-b-2 transition ${tab === t ? 'border-brand-main text-brand-main' : 'border-transparent text-txt-secondary hover:text-txt-primary'}`}
             data-testid={`tab-${t}`}>
-            {t === 'config' ? 'Configuração' : 'Webhook Logs'}
+            {t === 'config' ? 'Ambiente' : t === 'credentials' ? 'Credenciais' : 'Webhook Logs'}
           </button>
         ))}
       </div>
 
       {tab === 'config' && (
         <div className="space-y-4 max-w-3xl">
-          {/* Environment selector */}
           <div className="bg-white rounded-xl border border-border p-6">
             <h3 className="font-heading font-bold mb-4">Ambiente atual</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button
-                onClick={() => setEnv('test')}
-                disabled={saving}
+              <button onClick={() => setEnv('test')} disabled={saving}
                 className={`text-left p-5 rounded-xl border-2 transition ${cfg.mp_environment === 'test' ? 'border-brand-main bg-brand-light' : 'border-border bg-white hover:border-border'}`}
-                data-testid="env-test-btn"
-              >
+                data-testid="env-test-btn">
                 <div className="flex items-center justify-between mb-2">
                   <Badge variant="warning">Sandbox</Badge>
                   {cfg.mp_environment === 'test' && <Badge variant="brand">ATIVO</Badge>}
                 </div>
                 <div className="font-bold mb-1">Ambiente de Testes</div>
-                <p className="text-xs text-txt-secondary">Usuário de teste, sem cobrança real. Recomendado para desenvolvimento e homologação.</p>
-                <div className="mt-3 text-[11px] text-txt-secondary">
-                  Token: {cfg.test_configured ? <span className="text-emerald-600 font-bold">✓ Configurado</span> : <span className="text-red-600">Faltando</span>}
+                <p className="text-xs text-txt-secondary">Sem cobrança real. Recomendado para homologação.</p>
+                <div className="mt-3 text-[11px]">
+                  Credenciais: {cfg.test_configured ? <span className="text-emerald-600 font-bold">✓ Configuradas</span> : <span className="text-red-600">Faltando</span>}
                 </div>
               </button>
-              <button
-                onClick={() => setEnv('production')}
-                disabled={saving}
+              <button onClick={() => setEnv('production')} disabled={saving}
                 className={`text-left p-5 rounded-xl border-2 transition ${isProd ? 'border-red-500 bg-red-50' : 'border-border bg-white hover:border-border'}`}
-                data-testid="env-prod-btn"
-              >
+                data-testid="env-prod-btn">
                 <div className="flex items-center justify-between mb-2">
                   <Badge variant="error">Produção</Badge>
                   {isProd && <Badge variant="error">ATIVO</Badge>}
                 </div>
                 <div className="font-bold mb-1">Ambiente de Produção</div>
-                <p className="text-xs text-txt-secondary">Cobrança real de clientes via MercadoPago. Use com cuidado.</p>
-                <div className="mt-3 text-[11px] text-txt-secondary">
-                  Token: {cfg.production_configured ? <span className="text-emerald-600 font-bold">✓ Configurado</span> : <span className="text-red-600">Faltando — adicione em .env</span>}
+                <p className="text-xs text-txt-secondary">Cobranças reais via MercadoPago.</p>
+                <div className="mt-3 text-[11px]">
+                  Credenciais: {cfg.production_configured ? <span className="text-emerald-600 font-bold">✓ Configuradas</span> : <span className="text-red-600">Faltando</span>}
                 </div>
               </button>
             </div>
@@ -116,22 +140,54 @@ export default function AdminPayments() {
             )}
           </div>
 
-          {/* Public keys info */}
-          <div className="bg-white rounded-xl border border-border p-6 space-y-3">
-            <h3 className="font-heading font-bold">Public Keys (somente leitura)</h3>
-            <p className="text-xs text-txt-secondary">As chaves vêm das variáveis de ambiente do servidor. Para alterar, edite o arquivo <code>/app/backend/.env</code>.</p>
-            <KV label="Test Public Key" value={cfg.test_public_key || '(não configurado)'} />
-            <KV label="Production Public Key" value={cfg.production_public_key || '(não configurado)'} />
-            <KV label="Webhook Secret" value={cfg.webhook_secret_configured ? '✓ Configurado' : 'Não configurado (recomendado configurar para validação HMAC)'} />
-          </div>
-
-          {/* Webhook URL */}
           <div className="bg-white rounded-xl border border-border p-6">
             <h3 className="font-heading font-bold mb-2 flex items-center gap-2"><Webhook className="w-5 h-5" /> URL de Webhook</h3>
             <p className="text-xs text-txt-secondary mb-3">
               Configure esta URL no painel MercadoPago em <a href="https://www.mercadopago.com.br/developers/panel/notifications/webhooks" target="_blank" rel="noreferrer" className="text-brand-main underline">Webhooks</a>:
             </p>
             <div className="bg-bg-secondary p-3 rounded font-mono text-xs break-all">{webhookUrl}</div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'credentials' && (
+        <div className="space-y-4 max-w-3xl">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div>Os <b>access tokens</b> são salvos criptografados no banco. Deixe em branco para preservar o valor atual.</div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-border p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-bold">Credenciais de Teste (Sandbox)</h3>
+              <button onClick={() => setShowSecrets(s => !s)} className="text-xs text-txt-secondary hover:text-brand-main inline-flex items-center gap-1">
+                {showSecrets ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                {showSecrets ? 'Ocultar' : 'Mostrar'}
+              </button>
+            </div>
+            <Field label="Public Key (TEST)" value={form.mp_test_public_key} onChange={(v) => setForm(f => ({ ...f, mp_test_public_key: v }))} testId="mp-test-pub" />
+            <Field label="Access Token (TEST)" value={form.mp_test_access_token} onChange={(v) => setForm(f => ({ ...f, mp_test_access_token: v }))}
+              type={showSecrets ? 'text' : 'password'} placeholder={cfg.test_access_token_masked || 'APP_USR-...'} testId="mp-test-tok" />
+          </div>
+
+          <div className="bg-white rounded-xl border border-border p-6 space-y-4">
+            <h3 className="font-heading font-bold">Credenciais de Produção</h3>
+            <Field label="Public Key (PROD)" value={form.mp_prod_public_key} onChange={(v) => setForm(f => ({ ...f, mp_prod_public_key: v }))} testId="mp-prod-pub" />
+            <Field label="Access Token (PROD)" value={form.mp_prod_access_token} onChange={(v) => setForm(f => ({ ...f, mp_prod_access_token: v }))}
+              type={showSecrets ? 'text' : 'password'} placeholder={cfg.prod_access_token_masked || 'APP_USR-...'} testId="mp-prod-tok" />
+          </div>
+
+          <div className="bg-white rounded-xl border border-border p-6 space-y-4">
+            <h3 className="font-heading font-bold">Webhook Secret (HMAC)</h3>
+            <p className="text-xs text-txt-secondary">Opcional. Quando configurado, valida assinatura HMAC SHA256 dos webhooks recebidos.</p>
+            <Field label="Webhook Secret" value={form.mp_webhook_secret} onChange={(v) => setForm(f => ({ ...f, mp_webhook_secret: v }))}
+              type={showSecrets ? 'text' : 'password'} placeholder={cfg.webhook_secret_masked || 'Cole aqui o secret'} testId="mp-secret" />
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={saveCredentials} disabled={saving} data-testid="save-mp-creds-btn">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar credenciais
+            </Button>
           </div>
         </div>
       )}
@@ -167,7 +223,6 @@ export default function AdminPayments() {
                       </td>
                       <td className="p-3 text-xs">
                         {l.payment_details?.status ? <Badge variant={l.payment_details.status === 'approved' ? 'success' : 'warning'}>{l.payment_details.status}</Badge> : '-'}
-                        {l.payment_details?.external_reference && <div className="font-mono text-[10px] mt-1">{l.payment_details.external_reference}</div>}
                       </td>
                       <td className="p-3 text-xs">{l.action || '-'}</td>
                     </tr>
@@ -182,11 +237,13 @@ export default function AdminPayments() {
   );
 }
 
-function KV({ label, value }) {
+function Field({ label, value, onChange, type = 'text', placeholder, testId }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold text-txt-secondary uppercase mb-1">{label}</div>
-      <div className="bg-bg-secondary p-2 rounded font-mono text-xs break-all">{value}</div>
+      <label className="text-xs font-semibold block mb-1">{label}</label>
+      <input type={type} value={value || ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono focus:outline-none focus:border-brand-main"
+        data-testid={testId} autoComplete="off" />
     </div>
   );
 }
