@@ -45,3 +45,12 @@ frontend/build/
 # Outros
 .coverage
 htmlcov/
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
