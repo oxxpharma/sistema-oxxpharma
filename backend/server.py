@@ -382,7 +382,15 @@ async def lifespan(app: FastAPI):
     app.mongodb_client.close()
 
 app = FastAPI(title="OxxPharma E-commerce API", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# CORS: allow_origins=["*"] eh incompativel com allow_credentials=True (regra do navegador).
+# Solucao: allow_origin_regex=".*" -> o middleware reflete o Origin do request na resposta.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=".*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ==================== AUTH ====================
 
