@@ -65,12 +65,11 @@ fi
 log "Build do frontend..."
 cd "$APP_DIR/frontend"
 
-# .env do frontend
-if [[ ! -f .env ]]; then
-    log "Criando frontend/.env..."
-    cp "$DEPLOY_DIR/env.frontend.example" .env
-    sed -i "s|__DOMAIN__|$DOMAIN|g" .env
-fi
+# .env do frontend (sempre regerado para garantir REACT_APP_BACKEND_URL correto)
+log "Gerando frontend/.env (REACT_APP_BACKEND_URL=https://$DOMAIN)..."
+cat > .env <<EOF
+REACT_APP_BACKEND_URL=https://$DOMAIN
+EOF
 
 yarn install --frozen-lockfile --silent || yarn install --silent
 yarn build
