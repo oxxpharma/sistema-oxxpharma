@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUSES = [
@@ -49,6 +49,28 @@ export default function AdminOrders() {
       setOrders(prev => prev.map(o => o.order_id === orderId ? updated : o));
       if (selected?.order_id === orderId) setSelected(updated);
     } catch (err) { toast.error(err.message); }
+  };
+
+  const deleteOrder = async (o) => {
+    const confirmMsg =
+      `Deletar PERMANENTEMENTE o pedido ${o.order_id}?\n\n` +
+      `Isso vai APAGAR:\n` +
+      `• O registro do pedido\n` +
+      `• Comissões geradas por este pedido\n` +
+      `• Pontos atribuídos por este pedido\n` +
+      `• Logs de webhook (pagamento + MMN)\n\n` +
+      `E REVERTERÁ:\n` +
+      `• Estoque dos produtos\n` +
+      `• Contador de uso do cupom (se houver)\n\n` +
+      `Esta ação NÃO pode ser desfeita.`;
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      const r = await api.delete(`/api/admin/orders/${o.order_id}`);
+      const s = r?.summary || {};
+      toast.success(`Pedido excluído (${s.commissions_deleted || 0} comissões, ${s.points_deleted || 0} pontos${s.stock_restored ? ', estoque revertido' : ''})`);
+      if (selected?.order_id === o.order_id) setSelected(null);
+      setOrders(prev => prev.filter(x => x.order_id !== o.order_id));
+    } catch (err) { toast.error(err.message || 'Erro ao deletar'); }
   };
 
   return (
@@ -102,6 +124,7 @@ export default function AdminOrders() {
                       <td className="p-3 text-center"><Badge variant={s.variant}>{s.label}</Badge></td>
                       <td className="p-3 text-right">
                         <button onClick={() => setSelected(o)} className="p-2 hover:bg-bg-secondary rounded" data-testid={`view-order-${o.order_id}`}><Eye className="w-4 h-4" /></button>
+                        <button onClick={() => deleteOrder(o)} className="p-2 hover:bg-red-50 rounded ml-1" data-testid={`delete-order-${o.order_id}`} title="Deletar pedido"><Trash2 className="w-4 h-4 text-red-500" /></button>
                       </td>
                     </tr>
                   );
@@ -200,6 +223,15 @@ export default function AdminOrders() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Zona de perigo */}
+              <div className="mt-6 pt-4 border-t border-red-200">
+                <h3 className="text-sm font-bold text-red-600 mb-2">Zona de perigo</h3>
+                <p className="text-xs text-txt-secondary mb-3">Deletar um pedido remove todas as comissões, pontos e logs gerados por ele, e reverte estoque e cupom.</p>
+                <Button variant="outline" onClick={() => deleteOrder(selected)} className="border-red-300 text-red-600 hover:bg-red-50" data-testid="delete-order-modal-btn">
+                  <Trash2 className="w-4 h-4" /> Deletar pedido permanentemente
+                </Button>
               </div>
             </div>
           </div>

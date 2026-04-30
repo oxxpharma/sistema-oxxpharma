@@ -1005,6 +1005,86 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
             asyncio.create_task(email_service.trigger(db, slug, order_user["email"], ctx))
     return final
 
+@app.delete("/api/admin/orders/{order_id}")
+async def admin_delete_order(
+    request: Request,
+    order_id: str,
+    restore_stock: bool = True,
+    user: dict = Depends(require_admin()),
+):
+    """Delecao em cascata de um pedido (util para limpeza de testes).
+
+    Remove:
+      - o pedido (`orders`)
+      - comissoes associadas (`commissions`)
+      - pontos associados (`points_log`)
+      - logs de webhook de pagamento (`payment_webhook_logs`)
+      - logs de webhook MMN/Maxx (`webhook_logs`)
+    Reverte:
+      - estoque dos produtos do pedido (se `restore_stock=true`, default true)
+      - usage_count do cupom (se o pedido usou cupom)
+    """
+    db = request.app.db
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+
+    summary = {
+        "order_id": order_id,
+        "commissions_deleted": 0,
+        "points_deleted": 0,
+        "payment_webhook_logs_deleted": 0,
+        "webhook_logs_deleted": 0,
+        "stock_restored": False,
+        "coupon_reverted": None,
+    }
+
+    # 1) Comissoes geradas pelo pedido
+    r = await db.commissions.delete_many({"order_id": order_id})
+    summary["commissions_deleted"] = r.deleted_count
+
+    # 2) Pontos gerados
+    r = await db.points_log.delete_many({"order_id": order_id})
+    summary["points_deleted"] = r.deleted_count
+
+    # 3) Logs de webhooks
+    r = await db.payment_webhook_logs.delete_many(
+        {"$or": [{"order_id": order_id}, {"external_reference": order_id}]}
+    )
+    summary["payment_webhook_logs_deleted"] = r.deleted_count
+
+    r = await db.webhook_logs.delete_many({"order_id": order_id})
+    summary["webhook_logs_deleted"] = r.deleted_count
+
+    # 4) Reverter estoque (apenas se pedido tinha items abatidos e admin pediu)
+    if restore_stock and order.get("items"):
+        # Se o pedido ja foi cancelado antes, o estoque pode ter sido restaurado;
+        # evitamos dupla restauracao checando o status.
+        if order.get("order_status") not in ("cancelled",):
+            for it in order["items"]:
+                await db.products.update_one(
+                    {"product_id": it["product_id"]},
+                    {"$inc": {"stock": int(it.get("quantity", 0))}},
+                )
+            summary["stock_restored"] = True
+
+    # 5) Reverter usage_count do cupom (se o pedido usou)
+    if order.get("coupon_code"):
+        coupon = await db.coupons.find_one({"code": order["coupon_code"]})
+        if coupon and (coupon.get("usage_count") or 0) > 0:
+            await db.coupons.update_one(
+                {"code": order["coupon_code"]},
+                {"$inc": {"usage_count": -1}},
+            )
+            summary["coupon_reverted"] = order["coupon_code"]
+
+    # 6) Deleta o pedido
+    await db.orders.delete_one({"order_id": order_id})
+
+    logger.info(f"Admin {user['user_id']} deletou pedido {order_id}: {summary}")
+    return {"ok": True, "summary": summary}
+
+
 # ==================== ADMIN USERS ====================
 
 @app.get("/api/admin/users")
