@@ -57,8 +57,8 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
     }
     setSubmitting(true);
     try {
-      await api.post('/api/users/me/referral-enrollment', values);
-      onSuccess && onSuccess();
+      const resp = await api.post('/api/users/me/referral-enrollment', values);
+      onSuccess && onSuccess(resp);
     } catch (err) {
       toast.error(err?.message || 'Erro ao enviar');
     } finally {
@@ -88,8 +88,11 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
         ) : (
           <form onSubmit={submit} className="p-5 space-y-4" data-testid="enroll-form">
             <p className="text-sm text-txt-secondary">
-              Preencha os dados abaixo para gerar seu cartão de benefícios e seu link de indicação.
+              Preencha os dados abaixo para enviar sua solicitação de adesão ao programa de indicação.
             </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+              <b>Atenção:</b> sua adesão será analisada pelo administrador antes de ser ativada. Você receberá um e-mail com a resposta.
+            </div>
             {fields.map(f => (
               <FieldRenderer key={f.key} field={f} value={values[f.key]} onChange={(v) => setField(f.key, v)} />
             ))}
@@ -97,7 +100,7 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
               <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
               <Button type="submit" disabled={submitting} data-testid="enroll-submit-btn">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-                {submitting ? 'Enviando...' : 'Aderir ao programa'}
+                {submitting ? 'Enviando...' : 'Solicitar adesão'}
               </Button>
             </div>
           </form>

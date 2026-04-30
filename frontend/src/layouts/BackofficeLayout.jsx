@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
-  Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket,
+  Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -36,6 +36,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/backoffice/redes', icon: Network, label: 'Redes MMN', testId: 'nav-networks' },
       { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates' },
+      { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments' },
       { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Rel. comissões', testId: 'nav-commissions-report' },
       { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points' },
       { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card' },

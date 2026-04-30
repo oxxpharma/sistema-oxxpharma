@@ -1095,6 +1095,34 @@ async def my_referral(request: Request, user: dict = Depends(get_current_user)):
         {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
     ]).to_list(1)
+    # Historico detalhado de envios para o cartao (D+2)
+    history_pipeline = [
+        {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
+        {"$group": {
+            "_id": {"batch_id": "$card_batch_id", "sent_at": "$sent_to_card_at"},
+            "amount": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"_id.sent_at": -1}},
+        {"$limit": 50},
+    ]
+    raw = await db.commissions.aggregate(history_pipeline).to_list(50)
+    card_history = []
+    for r in raw:
+        sent_at = r["_id"].get("sent_at")
+        if not sent_at:
+            continue
+        try:
+            sent_dt = datetime.fromisoformat(sent_at.replace("Z", "+00:00")) if isinstance(sent_at, str) else sent_at
+            available_dt = sent_dt + timedelta(days=2)
+        except Exception:
+            available_dt = None
+        card_history.append({
+            "sent_at": sent_at,
+            "available_at": available_dt.isoformat() if available_dt else None,
+            "amount": round(r["amount"], 2),
+            "commissions_count": r["count"],
+        })
     return {
         "has_referral_program": has_program,
         "referral_code": user.get("referral_code") if has_program else None,
@@ -1103,7 +1131,11 @@ async def my_referral(request: Request, user: dict = Depends(get_current_user)):
         "stats": stats,
         "account_balance": round((account_agg[0]["total"] if account_agg else 0), 2),
         "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
+        "card_history": card_history,
+        "card_release_days": 2,
         "referral_enrollment": user.get("referral_enrollment"),
+        "referral_enrollment_status": user.get("referral_enrollment_status"),
+        "referral_rejected_reason": user.get("referral_rejected_reason"),
     }
 
 @app.get("/api/users/me/commissions")
@@ -3175,36 +3207,103 @@ async def submit_referral_enrollment(request: Request, user: dict = Depends(get_
     db = request.app.db
     if user.get("referral_program_active") and user.get("referral_code"):
         raise HTTPException(status_code=400, detail="Usuario ja esta no programa de indicacao")
+    if user.get("referral_enrollment_status") == "pending_approval":
+        raise HTTPException(status_code=400, detail="Sua adesão já está em análise pelo administrador")
     body = await request.json()
     cfg = await card_service.get_card_config(db)
     clean = _validate_enrollment_payload(cfg.get("enrollment_fields", []), body or {})
-    # Gera referral_code unico
+    # Cria solicitacao em estado PENDING_APPROVAL (admin precisa aprovar)
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "referral_program_active": False,
+            "referral_enrollment": clean,
+            "referral_enrollment_status": "pending_approval",
+            "referral_enrollment_submitted_at": now_iso(),
+        }, "$unset": {"referral_code": "", "referral_enrolled_at": "", "referral_rejected_reason": ""}},
+    )
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {
+        "ok": True,
+        "status": "pending_approval",
+        "message": "Sua adesão foi enviada e está aguardando aprovação do administrador.",
+        "enrollment": clean,
+        "user": u,
+    }
+
+
+@app.post("/api/admin/users/{user_id}/approve-referral-enrollment")
+async def admin_approve_referral_enrollment(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Admin aprova solicitacao de adesao -> gera referral_code e ativa programa."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if target.get("referral_program_active") and target.get("referral_code"):
+        return {"ok": True, "already_active": True, "referral_code": target.get("referral_code")}
     code = gen_referral_code()
     while await db.users.find_one({"referral_code": code}):
         code = gen_referral_code()
     await db.users.update_one(
-        {"user_id": user["user_id"]},
+        {"user_id": user_id},
         {"$set": {
             "referral_code": code,
             "referral_program_active": True,
-            "referral_enrollment": clean,
+            "referral_enrollment_status": "approved",
             "referral_enrolled_at": now_iso(),
+            "referral_approved_by_admin": user["user_id"],
+            "referral_approved_at": now_iso(),
         }},
     )
-    # Tenta cadastrar beneficiario na API do cartao (best-effort)
+    # best-effort enviar para API do cartao
     try:
-        await card_service.send_enrollment_to_card_api(db, {**user, "referral_code": code}, clean)
+        clean = target.get("referral_enrollment") or {}
+        await card_service.send_enrollment_to_card_api(db, {**target, "referral_code": code}, clean)
     except Exception as e:
         logger.warning(f"Falha enviando enrollment para API cartao: {e}")
-    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    # email de notificacao
     app_url = get_app_url()
-    return {
-        "ok": True,
-        "referral_code": code,
-        "referral_link": f"{app_url}/?ref={code}",
-        "enrollment": clean,
-        "user": u,
-    }
+    asyncio.create_task(email_service.trigger(db, "referral_approved", target.get("email"), {
+        "user": target, "referral_code": code, "referral_link": f"{app_url}/?ref={code}",
+    }))
+    return {"ok": True, "referral_code": code}
+
+
+class _RejectReferralBody(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/admin/users/{user_id}/reject-referral-enrollment")
+async def admin_reject_referral_enrollment(request: Request, user_id: str, body: _RejectReferralBody, user: dict = Depends(require_admin())):
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "referral_program_active": False,
+            "referral_enrollment_status": "rejected",
+            "referral_rejected_reason": body.reason or "Solicitação não aprovada",
+            "referral_rejected_by_admin": user["user_id"],
+            "referral_rejected_at": now_iso(),
+        }, "$unset": {"referral_code": ""}},
+    )
+    asyncio.create_task(email_service.trigger(db, "referral_rejected", target.get("email"), {
+        "user": target, "reason": body.reason or "",
+    }))
+    return {"ok": True}
+
+
+@app.get("/api/admin/referral-enrollments/pending")
+async def admin_list_pending_referral_enrollments(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    cur = db.users.find(
+        {"referral_enrollment_status": "pending_approval"},
+        {"_id": 0, "password_hash": 0},
+    ).sort("referral_enrollment_submitted_at", -1)
+    items = await cur.to_list(length=500)
+    return {"items": items, "count": len(items)}
 
 
 @app.post("/api/admin/users/{user_id}/activate-referral")
@@ -3327,7 +3426,15 @@ async def admin_list_card_logs(request: Request, page: int = 1, limit: int = 50,
 
 @app.get("/api/users/me/card-balance")
 async def my_card_balance(request: Request, user: dict = Depends(get_current_user)):
-    """Saldo 'na conta' (paid ainda nao enviado) + 'enviado para cartao' (historico)."""
+    """Saldo 'na conta' (paid ainda nao enviado) + historico detalhado de envios.
+
+    Retorna:
+      account_balance: total ainda na conta (paid, sent_to_card != True)
+      sent_to_card_total: histórico total enviado
+      pending_commissions: comissões pending (ainda não pagas)
+      card_history: lista de envios agrupados por dia com data de disponibilidade D+2
+        [{ sent_at, amount, available_at, batch_id }]
+    """
     db = request.app.db
     account_agg = await db.commissions.aggregate([
         {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
@@ -3341,10 +3448,44 @@ async def my_card_balance(request: Request, user: dict = Depends(get_current_use
         {"$match": {"user_id": user["user_id"], "status": "pending"}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
     ]).to_list(1)
+
+    # Historico de envios agrupado por batch_id (com data e D+2 de disponibilidade)
+    history_pipeline = [
+        {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
+        {"$group": {
+            "_id": {"batch_id": "$card_batch_id", "sent_at": "$sent_to_card_at"},
+            "amount": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"_id.sent_at": -1}},
+        {"$limit": 100},
+    ]
+    raw = await db.commissions.aggregate(history_pipeline).to_list(100)
+    card_history = []
+    for r in raw:
+        sent_at = r["_id"].get("sent_at")
+        batch_id = r["_id"].get("batch_id")
+        if not sent_at:
+            continue
+        try:
+            sent_dt = datetime.fromisoformat(sent_at.replace("Z", "+00:00")) if isinstance(sent_at, str) else sent_at
+            available_dt = sent_dt + timedelta(days=2)
+        except Exception:
+            available_dt = None
+        card_history.append({
+            "sent_at": sent_at,
+            "available_at": available_dt.isoformat() if available_dt else None,
+            "amount": round(r["amount"], 2),
+            "commissions_count": r["count"],
+            "batch_id": batch_id,
+        })
+
     return {
         "account_balance": round((account_agg[0]["total"] if account_agg else 0), 2),
         "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
         "pending_commissions": round((pending_agg[0]["total"] if pending_agg else 0), 2),
+        "card_history": card_history,
+        "card_release_days": 2,
     }
 
 

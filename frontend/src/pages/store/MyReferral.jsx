@@ -59,11 +59,64 @@ export default function MyReferral() {
     }
   };
 
-  const onEnrollSuccess = async () => {
+  const onEnrollSuccess = async (resp) => {
     setShowForm(false);
-    toast.success('Você agora está no programa! Seu link foi gerado.');
+    if (resp?.status === 'pending_approval') {
+      toast.success('Solicitação enviada! O administrador irá analisar sua adesão.');
+    } else {
+      toast.success('Você agora está no programa! Seu link foi gerado.');
+    }
     await load();
   };
+
+  // ========== ADESÃO PENDENTE DE APROVAÇÃO ==========
+  if (data.referral_enrollment_status === 'pending_approval') {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-12" data-testid="my-referral-pending">
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-8 text-center">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Clock className="w-8 h-8 text-amber-600" />
+          </div>
+          <h1 className="font-heading font-black text-2xl text-amber-900 mb-2">Adesão em análise</h1>
+          <p className="text-amber-800 max-w-md mx-auto">
+            Sua solicitação para participar do <b>programa de indicação</b> foi recebida e está sendo analisada pelo nosso administrador.
+            Você receberá um e-mail assim que houver uma resposta.
+          </p>
+          <div className="text-xs text-amber-700 mt-6 bg-white/60 rounded-lg py-2 px-4 inline-block">
+            Costumamos responder em até 1 dia útil.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== ADESÃO REJEITADA ==========
+  if (data.referral_enrollment_status === 'rejected') {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-12" data-testid="my-referral-rejected">
+        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-8 text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Gift className="w-8 h-8 text-red-600" />
+          </div>
+          <h1 className="font-heading font-black text-2xl text-red-900 mb-2">Adesão não aprovada</h1>
+          {data.referral_rejected_reason && (
+            <p className="text-red-800 mt-2 mb-4 text-sm bg-white/60 rounded-lg py-2 px-4 inline-block">
+              {data.referral_rejected_reason}
+            </p>
+          )}
+          <p className="text-red-800 max-w-md mx-auto mb-6">
+            Você pode entrar em contato com o suporte ou enviar uma nova solicitação.
+          </p>
+          <Button onClick={() => setShowForm(true)} data-testid="reenroll-btn">
+            <Share2 className="w-4 h-4" /> Reenviar solicitação
+          </Button>
+        </div>
+        {showForm && (
+          <ReferralEnrollmentForm onClose={() => setShowForm(false)} onSuccess={onEnrollSuccess} />
+        )}
+      </div>
+    );
+  }
 
   // ========== BANNER DE ADESÃO (usuário ainda não aderiu) ==========
   if (!data.has_referral_program) {
@@ -158,31 +211,68 @@ export default function MyReferral() {
         </div>
       </div>
 
-      {/* Saldos novos: Conta + Cartão */}
+      {/* Saldos novos: Conta + Histórico de envios para o cartão */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-border p-5 relative overflow-hidden" data-testid="balance-account">
           <div className="flex items-start justify-between">
             <div>
               <div className="text-xs uppercase tracking-widest text-txt-secondary font-semibold mb-1">Saldo na conta</div>
               <div className="text-3xl font-heading font-black text-emerald-600">{formatCurrency(data.account_balance)}</div>
-              <div className="text-xs text-txt-secondary mt-1">Aguardando envio para o cartão (hoje às 23:59)</div>
+              <div className="text-xs text-txt-secondary mt-1">Bônus acumulados aguardando envio para o cartão.</div>
             </div>
             <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
               <Wallet className="w-5 h-5 text-emerald-600" />
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-border p-5 relative overflow-hidden" data-testid="balance-sent-card">
-          <div className="flex items-start justify-between">
+        <div className="bg-white rounded-xl border border-border p-5" data-testid="balance-sent-card">
+          <div className="flex items-start justify-between mb-3">
             <div>
-              <div className="text-xs uppercase tracking-widest text-txt-secondary font-semibold mb-1">Enviado para o cartão</div>
-              <div className="text-3xl font-heading font-black text-brand-main">{formatCurrency(data.sent_to_card_total)}</div>
-              <div className="text-xs text-txt-secondary mt-1">Histórico total enviado ao seu cartão de benefícios</div>
+              <div className="text-xs uppercase tracking-widest text-txt-secondary font-semibold mb-1">Envios para o cartão</div>
+              <div className="text-xs text-txt-secondary">Cada bônus enviado fica disponível em até <b>{data.card_release_days || 2} dias úteis</b>.</div>
             </div>
-            <div className="w-10 h-10 bg-brand-light rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-brand-light rounded-lg flex items-center justify-center flex-shrink-0">
               <CreditCard className="w-5 h-5 text-brand-main" />
             </div>
           </div>
+          {(!data.card_history || data.card_history.length === 0) ? (
+            <div className="text-xs text-txt-secondary text-center py-4">
+              Nenhum bônus enviado ao cartão ainda.
+            </div>
+          ) : (
+            <ul className="divide-y divide-border max-h-44 overflow-y-auto -mx-1">
+              {data.card_history.map((h, i) => {
+                const availableDate = h.available_at ? new Date(h.available_at) : null;
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const isAvailable = availableDate && availableDate <= new Date();
+                return (
+                  <li key={i} className="px-1 py-2 flex items-center justify-between gap-3" data-testid={`card-entry-${i}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-bold text-brand-main">{formatCurrency(h.amount)}</div>
+                      <div className="text-[11px] text-txt-secondary">
+                        {isAvailable ? (
+                          <span className="text-emerald-600 font-semibold">Disponível desde {availableDate?.toLocaleDateString('pt-BR')}</span>
+                        ) : availableDate ? (
+                          <>Disponível em <b>{availableDate.toLocaleDateString('pt-BR')}</b></>
+                        ) : 'Data indisponível'}
+                      </div>
+                    </div>
+                    {isAvailable ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {data.sent_to_card_total > 0 && (
+            <div className="mt-3 pt-3 border-t border-border text-xs flex justify-between">
+              <span className="text-txt-secondary">Total enviado</span>
+              <span className="font-bold">{formatCurrency(data.sent_to_card_total)}</span>
+            </div>
+          )}
         </div>
       </div>
 

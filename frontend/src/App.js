@@ -55,6 +55,7 @@ import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import AdminUserCategories from './pages/backoffice/AdminUserCategories';
 import AdminCoupons from './pages/backoffice/AdminCoupons';
+import AdminReferralEnrollments from './pages/backoffice/AdminReferralEnrollments';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -117,6 +118,7 @@ function AppRoutes() {
         <Route path="cupons" element={<AdminCoupons />} />
         <Route path="redes" element={<AdminNetworks />} />
         <Route path="candidatos" element={<AdminCandidates />} />
+        <Route path="adesoes-indicacao" element={<AdminReferralEnrollments />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
         <Route path="cartao" element={<AdminGiftCards />} />
         <Route path="pontos" element={<AdminPoints />} />
