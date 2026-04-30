@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
-import { FileText, Search, Eye, Loader2, Receipt, Download } from 'lucide-react';
-import { toast } from 'sonner';
+import ExportButton from '../../components/ExportButton';
+import { Search, Eye, Loader2, Receipt } from 'lucide-react';
 
 export default function AdminInvoices() {
   const [data, setData] = useState(null);
@@ -22,26 +22,7 @@ export default function AdminInvoices() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const exportCsv = () => {
-    if (!data?.invoices?.length) { toast.error('Nada para exportar'); return; }
-    const headers = ['invoice_number', 'invoice_issued_at', 'order_id', 'customer_name', 'customer_email', 'subtotal', 'shipping_cost', 'total', 'payment_method'];
-    const csv = [
-      headers.join(','),
-      ...data.invoices.map(o => headers.map(h => {
-        const v = o[h];
-        const s = v === null || v === undefined ? '' : String(v).replace(/"/g, '""');
-        return s.includes(',') || s.includes('"') ? `"${s}"` : s;
-      }).join(',')),
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `faturamento_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('CSV exportado');
-  };
+  const exportQuery = search ? `?search=${encodeURIComponent(search)}` : '';
 
   return (
     <div data-testid="admin-invoices">
@@ -50,7 +31,13 @@ export default function AdminInvoices() {
           <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><Receipt className="w-7 h-7 text-brand-main" /> Faturamento</h1>
           <p className="text-sm text-txt-secondary mt-1">Notas emitidas automaticamente quando o pedido é marcado como pago.</p>
         </div>
-        <Button onClick={exportCsv} variant="outline" data-testid="export-invoices-btn"><Download className="w-4 h-4" /> Exportar CSV</Button>
+        <ExportButton
+          csvUrl={`/api/admin/invoices/export.csv${exportQuery}`}
+          xlsxUrl={`/api/admin/invoices/export.xlsx${exportQuery}`}
+          filename="faturamento"
+          label="Exportar"
+          testId="export-invoices-btn"
+        />
       </div>
 
       {/* Totals */}

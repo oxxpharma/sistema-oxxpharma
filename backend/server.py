@@ -1641,6 +1641,57 @@ async def admin_commissions_report(request: Request, status: str = "paid", start
         })
     return {"rows": rows, "status": status, "period": {"start": start, "end": end}}
 
+
+_COMMISSIONS_COLS = [
+    {"key": "user_id", "label": "user_id", "width": 22},
+    {"key": "cpf", "label": "CPF", "width": 16},
+    {"key": "name", "label": "Nome", "width": 28},
+    {"key": "email", "label": "Email", "width": 30},
+    {"key": "pix_key", "label": "Chave PIX", "width": 24},
+    {"key": "amount", "label": "Valor (R$)", "type": "money", "width": 14},
+    {"key": "commissions_count", "label": "Qtd. comissões", "type": "int", "width": 14},
+]
+
+
+async def _commissions_rows(db, status: str, start: Optional[str], end: Optional[str]):
+    match = {"status": status}
+    if start:
+        match.setdefault("created_at", {})["$gte"] = start
+    if end:
+        match.setdefault("created_at", {})["$lte"] = end
+    pipeline = [
+        {"$match": match},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+    ]
+    agg = await db.commissions.aggregate(pipeline).to_list(10000)
+    uids = [a["_id"] for a in agg]
+    users = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "password_hash": 0}).to_list(len(uids))
+    umap = {u["user_id"]: u for u in users}
+    return [{
+        "user_id": a["_id"],
+        "cpf": (umap.get(a["_id"]) or {}).get("cpf"),
+        "name": (umap.get(a["_id"]) or {}).get("name"),
+        "email": (umap.get(a["_id"]) or {}).get("email"),
+        "pix_key": (umap.get(a["_id"]) or {}).get("pix_key"),
+        "amount": round(a["total"], 2),
+        "commissions_count": a["count"],
+    } for a in agg]
+
+
+@app.get("/api/admin/commissions-report/export.csv")
+async def admin_commissions_report_csv(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    import export_utils
+    rows = await _commissions_rows(request.app.db, status, start, end)
+    return export_utils.csv_response(export_utils.make_csv(rows, _COMMISSIONS_COLS), f"comissoes-{status}.csv")
+
+
+@app.get("/api/admin/commissions-report/export.xlsx")
+async def admin_commissions_report_xlsx(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    import export_utils
+    rows = await _commissions_rows(request.app.db, status, start, end)
+    return export_utils.xlsx_response(export_utils.make_xlsx(rows, _COMMISSIONS_COLS, sheet_name="Comissoes"), f"comissoes-{status}.xlsx")
+
 # ==================== INVOICES (FATURAMENTO INTERNO) ====================
 
 async def issue_invoice(db, order: dict):
@@ -1739,6 +1790,45 @@ async def admin_list_invoices(request: Request, search: Optional[str] = None, pa
     ]).to_list(1)
     totals = {"total": round((agg[0]["total"] if agg else 0), 2), "subtotal": round((agg[0]["subtotal"] if agg else 0), 2), "count": total}
     return {"invoices": orders, "total": total, "page": page, "totals": totals}
+
+
+_INVOICE_COLS = [
+    {"key": "invoice_number", "label": "Nº Nota", "width": 16},
+    {"key": "invoice_issued_at", "label": "Emitida em", "width": 22},
+    {"key": "order_id", "label": "Pedido", "width": 22},
+    {"key": "customer_name", "label": "Cliente", "width": 28},
+    {"key": "customer_email", "label": "Email", "width": 30},
+    {"key": "subtotal", "label": "Subtotal", "type": "money", "width": 14},
+    {"key": "shipping_cost", "label": "Frete", "type": "money", "width": 12},
+    {"key": "discount_amount", "label": "Desconto", "type": "money", "width": 12},
+    {"key": "total", "label": "Total", "type": "money", "width": 14},
+    {"key": "payment_method", "label": "Pagamento", "width": 14},
+]
+
+
+async def _invoices_rows(db, search: Optional[str]):
+    q = {"invoice_number": {"$ne": None}}
+    if search:
+        q["$or"] = [
+            {"invoice_number": {"$regex": search, "$options": "i"}},
+            {"customer_name": {"$regex": search, "$options": "i"}},
+            {"customer_email": {"$regex": search, "$options": "i"}},
+        ]
+    return await db.orders.find(q, {"_id": 0}).sort("invoice_issued_at", -1).to_list(10000)
+
+
+@app.get("/api/admin/invoices/export.csv")
+async def admin_invoices_export_csv(request: Request, search: Optional[str] = None, user: dict = Depends(require_admin())):
+    import export_utils
+    rows = await _invoices_rows(request.app.db, search)
+    return export_utils.csv_response(export_utils.make_csv(rows, _INVOICE_COLS), "faturamento.csv")
+
+
+@app.get("/api/admin/invoices/export.xlsx")
+async def admin_invoices_export_xlsx(request: Request, search: Optional[str] = None, user: dict = Depends(require_admin())):
+    import export_utils
+    rows = await _invoices_rows(request.app.db, search)
+    return export_utils.xlsx_response(export_utils.make_xlsx(rows, _INVOICE_COLS, sheet_name="Faturamento"), "faturamento.xlsx")
 
 # ==================== WITHDRAWALS (SAQUES) ====================
 
@@ -1963,6 +2053,76 @@ async def admin_export_withdrawals(request: Request, status: str = "approved", u
         "created_at": w["created_at"],
     } for w in items]
     return {"rows": rows, "status": status, "count": len(rows)}
+
+
+def _withdrawals_rows(items):
+    return [{
+        "withdrawal_id": w["withdrawal_id"],
+        "cpf": w.get("pix_cpf"),
+        "name": w.get("pix_name") or w.get("user_name"),
+        "email": w.get("user_email"),
+        "pix_key_type": w.get("pix_key_type"),
+        "pix_key": w.get("pix_key"),
+        "amount": float(w.get("amount", 0) or 0),
+        "created_at": w["created_at"],
+    } for w in items]
+
+
+@app.get("/api/admin/withdrawals/export.csv")
+async def admin_export_withdrawals_csv(request: Request, status: str = "approved", user: dict = Depends(require_admin())):
+    from fastapi.responses import Response as FastAPIResponse
+    import io as _io
+    import csv as _csv
+    db = request.app.db
+    items = await db.withdrawals.find({"status": status}, {"_id": 0}).sort("created_at", -1).to_list(10000)
+    rows = _withdrawals_rows(items)
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["withdrawal_id", "cpf", "name", "email", "pix_key_type", "pix_key", "amount", "created_at"])
+    for r in rows:
+        w.writerow([r["withdrawal_id"], r["cpf"], r["name"], r["email"], r["pix_key_type"], r["pix_key"], f"{r['amount']:.2f}", r["created_at"]])
+    return FastAPIResponse(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="saques-{status}.csv"'},
+    )
+
+
+@app.get("/api/admin/withdrawals/export.xlsx")
+async def admin_export_withdrawals_xlsx(request: Request, status: str = "approved", user: dict = Depends(require_admin())):
+    from fastapi.responses import Response as FastAPIResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io as _io
+    db = request.app.db
+    items = await db.withdrawals.find({"status": status}, {"_id": 0}).sort("created_at", -1).to_list(10000)
+    rows = _withdrawals_rows(items)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Saques"
+    headers = ["ID", "CPF", "Nome", "Email", "Tipo Chave PIX", "Chave PIX", "Valor (R$)", "Criado em"]
+    ws.append(headers)
+    head_font = Font(bold=True, color="FFFFFF")
+    head_fill = PatternFill("solid", fgColor="E8731A")
+    for col_i in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col_i)
+        c.font = head_font
+        c.fill = head_fill
+        c.alignment = Alignment(horizontal="center")
+    for r in rows:
+        ws.append([r["withdrawal_id"], r["cpf"], r["name"], r["email"], r["pix_key_type"], r["pix_key"], r["amount"], r["created_at"]])
+    widths = [22, 16, 28, 30, 16, 30, 14, 22]
+    for i, wd in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = wd
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return FastAPIResponse(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="saques-{status}.xlsx"'},
+    )
 
 # ==================== EMAIL TEMPLATES (ADMIN) ====================
 
@@ -3139,6 +3299,21 @@ async def admin_export_batch_csv(request: Request, batch_id: str, user: dict = D
         content=csv_bytes,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{batch_id}.csv"'},
+    )
+
+
+@app.get("/api/admin/card-batches/{batch_id}/export.xlsx")
+async def admin_export_batch_xlsx(request: Request, batch_id: str, user: dict = Depends(require_admin())):
+    from fastapi.responses import Response as FastAPIResponse
+    db = request.app.db
+    b = await db.card_batches.find_one({"batch_id": batch_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch nao encontrado")
+    xlsx_bytes = card_service.batch_to_xlsx(b)
+    return FastAPIResponse(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{batch_id}.xlsx"'},
     )
 
 

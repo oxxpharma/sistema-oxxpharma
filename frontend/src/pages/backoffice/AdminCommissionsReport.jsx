@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { api, API_URL } from '../../lib/api';
+import { api } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
-import { FileText, Download, Loader2 } from 'lucide-react';
+import ExportButton from '../../components/ExportButton';
+import { FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AdminCommissionsReport() {
@@ -25,26 +26,12 @@ export default function AdminCommissionsReport() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const exportCsv = () => {
-    if (!data?.rows?.length) { toast.error('Nada para exportar'); return; }
-    const headers = ['user_id', 'cpf', 'name', 'email', 'pix_key', 'amount', 'commissions_count'];
-    const csv = [
-      headers.join(','),
-      ...data.rows.map(r => headers.map(h => {
-        const v = r[h];
-        const s = v === null || v === undefined ? '' : String(v).replace(/"/g, '""');
-        return s.includes(',') || s.includes('"') ? `"${s}"` : s;
-      }).join(','))
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `comissoes_${status}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('CSV exportado');
-  };
+  const exportQuery = (() => {
+    const q = new URLSearchParams({ status });
+    if (start) q.set('start', new Date(start).toISOString());
+    if (end) q.set('end', new Date(end).toISOString());
+    return q.toString();
+  })();
 
   return (
     <div data-testid="admin-commissions-report">
@@ -71,7 +58,14 @@ export default function AdminCommissionsReport() {
           <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" />
         </div>
         <Button onClick={load} variant="outline">Filtrar</Button>
-        <Button onClick={exportCsv} data-testid="export-csv-btn"><Download className="w-4 h-4" /> Exportar CSV</Button>
+        <ExportButton
+          csvUrl={`/api/admin/commissions-report/export.csv?${exportQuery}`}
+          xlsxUrl={`/api/admin/commissions-report/export.xlsx?${exportQuery}`}
+          filename={`comissoes-${status}`}
+          label="Exportar"
+          variant="default"
+          testId="export-commissions-btn"
+        />
       </div>
 
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (

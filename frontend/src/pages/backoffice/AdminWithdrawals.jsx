@@ -3,7 +3,8 @@ import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Wallet, Search, Check, X, DollarSign, Download, Loader2 } from 'lucide-react';
+import { Wallet, Search, Check, X, DollarSign, Loader2 } from 'lucide-react';
+import ExportButton from '../../components/ExportButton';
 import { toast } from 'sonner';
 
 const STATUSES = [
@@ -56,29 +57,7 @@ export default function AdminWithdrawals() {
     } catch (err) { toast.error(err.message); } finally { setBusy(false); }
   };
 
-  const exportCsv = async () => {
-    try {
-      const res = await api.get(`/api/admin/withdrawals/export?status=${status || 'approved'}`);
-      if (!res.rows?.length) { toast.error('Nada para exportar'); return; }
-      const headers = ['withdrawal_id', 'cpf', 'name', 'email', 'pix_key_type', 'pix_key', 'amount', 'created_at'];
-      const csv = [
-        headers.join(','),
-        ...res.rows.map(r => headers.map(h => {
-          const v = r[h];
-          const s = v === null || v === undefined ? '' : String(v).replace(/"/g, '""');
-          return s.includes(',') || s.includes('"') ? `"${s}"` : s;
-        }).join(',')),
-      ].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `saques_${status || 'approved'}_${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success('CSV exportado');
-    } catch (err) { toast.error(err.message); }
-  };
+  const exportStatus = status || 'approved';
 
   const summary = data?.summary || {};
 
@@ -91,7 +70,14 @@ export default function AdminWithdrawals() {
           </h1>
           <p className="text-sm text-txt-secondary mt-1">Gerencie as solicitações de saque dos usuários.</p>
         </div>
-        <Button onClick={exportCsv}><Download className="w-4 h-4" /> Exportar CSV</Button>
+        <ExportButton
+          csvUrl={`/api/admin/withdrawals/export.csv?status=${exportStatus}`}
+          xlsxUrl={`/api/admin/withdrawals/export.xlsx?status=${exportStatus}`}
+          filename={`saques-${exportStatus}`}
+          label="Exportar"
+          variant="default"
+          testId="export-withdrawals-btn"
+        />
       </div>
 
       {/* Summary cards */}

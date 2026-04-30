@@ -259,6 +259,43 @@ def batch_to_csv(batch: Dict) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
+def batch_to_xlsx(batch: Dict) -> bytes:
+    """Mesmas colunas do CSV, mas em XLSX com header em negrito."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io as _io
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Lote"
+
+    headers = ["user_id", "name", "email", "cpf", "phone", "amount", "commissions_count"]
+    ws.append(headers)
+    head_font = Font(bold=True, color="FFFFFF")
+    head_fill = PatternFill("solid", fgColor="E8731A")
+    for col_i in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col_i)
+        c.font = head_font
+        c.fill = head_fill
+        c.alignment = Alignment(horizontal="center")
+
+    for e in batch.get("entries", []):
+        ws.append([
+            e.get("user_id"), e.get("name"), e.get("email"),
+            e.get("cpf"), e.get("phone"),
+            float(e.get("amount", 0) or 0),
+            int(e.get("commissions_count", 0) or 0),
+        ])
+    # ajusta largura
+    widths = [22, 28, 32, 16, 16, 12, 14]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 # ==================== SCHEDULER ====================
 
 _scheduler: Optional[AsyncIOScheduler] = None

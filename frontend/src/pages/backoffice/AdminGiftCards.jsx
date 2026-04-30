@@ -299,16 +299,15 @@ function BatchesTab() {
     } catch { toast.error('Erro'); }
   };
 
-  const download = (id) => {
+  const download = (id, ext = 'csv') => {
     const token = localStorage.getItem('token');
-    const url = `${API_URL}/api/admin/card-batches/${id}/export.csv`;
-    // abre com auth via fetch pra gerar blob, ja que href direto perde o bearer
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    const url = `${API_URL}/api/admin/card-batches/${id}/export.${ext}`;
+    fetch(url, { headers: { Authorization: `Bearer ${token}` }, credentials: 'include' })
       .then(r => r.blob())
       .then(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `${id}.csv`;
+        a.download = `${id}.${ext}`;
         a.click();
       });
   };
@@ -353,8 +352,11 @@ function BatchesTab() {
                   <td className="p-3 text-center"><BatchStatus status={b.status} /></td>
                   <td className="p-3 text-center text-xs">{b.mode || '-'}</td>
                   <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                    <button onClick={() => download(b.batch_id)} className="px-2 py-1 text-xs bg-bg-secondary rounded hover:bg-border inline-flex items-center gap-1" data-testid={`export-${b.batch_id}`}>
+                    <button onClick={() => download(b.batch_id, 'csv')} className="px-2 py-1 text-xs bg-bg-secondary rounded hover:bg-border inline-flex items-center gap-1" data-testid={`export-csv-${b.batch_id}`}>
                       <Download className="w-3 h-3" /> CSV
+                    </button>
+                    <button onClick={() => download(b.batch_id, 'xlsx')} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 inline-flex items-center gap-1" data-testid={`export-xlsx-${b.batch_id}`}>
+                      <Download className="w-3 h-3" /> XLSX
                     </button>
                     {b.status !== 'sent_api' && b.status !== 'sent_manual' && (
                       <button onClick={() => markExported(b.batch_id)} className="px-2 py-1 text-xs bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 inline-flex items-center gap-1" data-testid={`mark-${b.batch_id}`}>
