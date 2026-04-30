@@ -139,6 +139,7 @@ export default function AdminShipping() {
               <Field label="Usuário (login Meu Correios)" value={cfg.correios_user} onChange={(v) => set('correios_user', v)} placeholder="seu_usuario" testId="cfg-user" />
               <Field label="Código de acesso (CWS)" value={cfg.correios_api_code} onChange={(v) => set('correios_api_code', v)} type="password" placeholder="••••••••" testId="cfg-api-code" />
               <Field label="Número do contrato" value={cfg.correios_contract} onChange={(v) => set('correios_contract', v)} placeholder="9999999999" testId="cfg-contract" />
+              <Field label="DR / Superintendência (opcional)" value={cfg.correios_dr} onChange={(v) => set('correios_dr', v)} placeholder="Ex: 10" testId="cfg-dr" hint="Informe apenas se seu contrato exigir. Consulte no seu Cartão Correios Fácil (campo SUP. EST.)." />
               <Field label="CEP de origem" value={cfg.correios_origin_cep} onChange={(v) => set('correios_origin_cep', v)} placeholder="01310-100" testId="cfg-origin-cep" />
             </div>
             <div className="mt-3">
@@ -316,13 +317,14 @@ export default function AdminShipping() {
 
 function Card({ children }) { return <div className="bg-white rounded-xl border border-border p-6">{children}</div>; }
 
-function Field({ label, value, onChange, type = 'text', placeholder, testId, step }) {
+function Field({ label, value, onChange, type = 'text', placeholder, testId, step, hint }) {
   return (
     <div>
       <label className="text-xs font-semibold block mb-1">{label}</label>
       <input type={type} step={step} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
         className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:border-brand-main"
         data-testid={testId} autoComplete="off" />
+      {hint && <div className="text-[11px] text-txt-secondary mt-1">{hint}</div>}
     </div>
   );
 }

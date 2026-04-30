@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
     "correios_user": "",
     "correios_api_code": "",
     "correios_contract": "",
+    "correios_dr": "",  # Superintendencia Estadual - opcional, obrigatorio para alguns contratos
     "correios_origin_cep": "",
     "correios_services": DEFAULT_SERVICES,
     "correios_pickup_enabled": False,
@@ -123,10 +124,23 @@ async def _get_token(db, cfg: Dict) -> str:
     base = _api_base(env)
     url = f"{base}/token/v1/autentica/contrato"
     auth = httpx.BasicAuth(user, code)
-    payload = {"numero": contract}
+    # Payload suporta "dr" opcional (Superintendencia Estadual) - documentacao Correios nov/2025
+    payload: Dict = {"numero": contract}
+    dr = (cfg.get("correios_dr") or "").strip()
+    if dr:
+        try:
+            payload["dr"] = int(dr)
+        except (TypeError, ValueError):
+            pass
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(url, json=payload, auth=auth)
+        if r.status_code == 429:
+            await _log(db, "auth", url, payload, r.status_code, "rate_limit", None, env)
+            raise RuntimeError(
+                "Correios CWS: limite de requisições atingido (HTTP 429). "
+                "Aguarde alguns minutos antes de tentar novamente."
+            )
         if r.status_code >= 400:
             await _log(db, "auth", url, payload, r.status_code, r.text[:500], None, env)
             raise RuntimeError(f"Falha autenticacao Correios CWS {r.status_code}: {r.text[:200]}")
