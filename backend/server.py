@@ -2589,6 +2589,90 @@ async def health():
 
 # ==================== ADMIN USERS - GESTAO COMPLETA ====================
 
+@app.post("/api/admin/users")
+async def admin_create_user(request: Request, user: dict = Depends(require_admin())):
+    """Admin cria usuario manualmente sem senha. Usuario recebe email de primeiro acesso para definir a propria senha."""
+    db = request.app.db
+    body = await request.json() or {}
+
+    email = (body.get("email") or "").strip().lower()
+    name = (body.get("name") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email obrigatorio")
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome obrigatorio")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email ja cadastrado")
+
+    role = body.get("role") or "customer"
+    network_type = body.get("network_type") or NETWORK_CUSTOMER
+
+    # Sponsor por codigo (opcional)
+    sponsor_id = body.get("sponsor_id") or None
+    sponsor_code_norm = None
+    if body.get("sponsor_code"):
+        sp_code = str(body["sponsor_code"]).strip().upper()
+        sp = await db.users.find_one({"referral_code": sp_code})
+        if sp:
+            sponsor_id = sp["user_id"]
+            sponsor_code_norm = sp.get("referral_code")
+
+    # Senha temporaria nao-utilizavel (must_set_password=True força fluxo de primeiro acesso)
+    placeholder_pw = uuid.uuid4().hex + uuid.uuid4().hex
+
+    user_doc = {
+        "user_id": gen_id("user_"),
+        "email": email,
+        "password_hash": hash_pw(placeholder_pw),
+        "must_set_password": True,
+        "name": name,
+        "phone": (body.get("phone") or "").strip() or None,
+        "cpf": (body.get("cpf") or "").strip() or None,
+        "external_id": (body.get("external_id") or "").strip() or None,
+        "role": role,
+        "access_level": 0 if role == "admin" else int(body.get("access_level") or 99),
+        "status": body.get("status") or "active",
+        "addresses": body.get("addresses") or [],
+        "pix_key": body.get("pix_key") or None,
+        "pix_key_type": body.get("pix_key_type") or None,
+        "referral_code": None,
+        "referral_program_active": False,
+        "referral_enrollment": None,
+        "referral_enrolled_at": None,
+        "sponsor_id": sponsor_id,
+        "sponsor_code": sponsor_code_norm or (body.get("sponsor_code") or None),
+        "network_type": network_type,
+        "network_sponsor_id": body.get("network_sponsor_id") or None,
+        "category_ids": list(body.get("category_ids") or []),
+        "created_at": now_iso(),
+        "created_by_admin": user["user_id"],
+    }
+    await db.users.insert_one(user_doc)
+
+    # Dispara fluxo de primeiro acesso (token + email)
+    token = uuid.uuid4().hex + uuid.uuid4().hex
+    expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    await db.password_reset_tokens.insert_one({
+        "token": token,
+        "user_id": user_doc["user_id"],
+        "email": email,
+        "expires_at": expires,
+        "used": False,
+        "type": "first_access",
+        "created_at": now_iso(),
+        "created_by_admin": user["user_id"],
+    })
+    app_url = get_app_url()
+    reset_link = f"{app_url}/primeiro-acesso?token={token}"
+    if body.get("send_first_access", True):
+        asyncio.create_task(email_service.trigger(db, "first_access", email, {
+            "user": user_doc, "reset_link": reset_link,
+        }))
+
+    fresh = await db.users.find_one({"user_id": user_doc["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {"user": fresh, "reset_link": reset_link}
+
+
 @app.put("/api/admin/users/{user_id}")
 async def admin_update_user(request: Request, user_id: str, user: dict = Depends(require_admin())):
     """Atualiza qualquer campo do usuario (exceto password e id)."""

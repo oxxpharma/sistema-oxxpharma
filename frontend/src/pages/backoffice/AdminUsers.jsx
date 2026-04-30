@@ -3,9 +3,10 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil } from 'lucide-react';
+import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import UserEditModal from '../../components/UserEditModal';
+import UserCreateModal from '../../components/UserCreateModal';
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
@@ -13,6 +14,7 @@ export default function AdminUsers() {
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
   const [editingId, setEditingId] = useState(null);
+  const [creating, setCreating] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -45,7 +47,12 @@ export default function AdminUsers() {
 
   return (
     <div data-testid="admin-users">
-      <h1 className="font-heading font-black text-3xl text-txt-primary mb-6">Usuários</h1>
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+        <h1 className="font-heading font-black text-3xl text-txt-primary">Usuários</h1>
+        <Button onClick={() => setCreating(true)} data-testid="create-user-btn">
+          <UserPlus className="w-4 h-4" /> Novo usuário
+        </Button>
+      </div>
 
       <div className="bg-white rounded-xl border border-border p-4 mb-4 flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
@@ -133,6 +140,12 @@ export default function AdminUsers() {
           userId={editingId}
           onClose={() => setEditingId(null)}
           onSaved={() => load()}
+        />
+      )}
+      {creating && (
+        <UserCreateModal
+          onClose={() => setCreating(false)}
+          onCreated={() => load()}
         />
       )}
     </div>
