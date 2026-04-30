@@ -2393,12 +2393,20 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
     db = request.app.db
     settings = await get_settings(db)
     expected = (settings.get("external_webhook_token") or "").strip()
+    # Captura metadados da request para o log detalhado
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    raw_payload = data.model_dump() if hasattr(data, "model_dump") else None
+
     if not expected or not x_webhook_token or x_webhook_token != expected:
-        # Log tentativa
+        # Log tentativa nao autorizada (preserva payload para auditoria)
         await db.webhook_logs.insert_one({
             "log_id": gen_id("whk_"), "source": "network1_sync",
             "authorized": False, "action": data.action,
             "users_count": len(data.users), "created_at": now_iso(),
+            "payload": raw_payload,
+            "client_ip": client_ip, "user_agent": user_agent,
+            "token_provided": bool(x_webhook_token),
         })
         raise HTTPException(status_code=401, detail="Token invalido")
 
@@ -2467,15 +2475,33 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
         "log_id": gen_id("whk_"), "source": "network1_sync",
         "authorized": True, "action": data.action,
         "users_count": len(data.users), "stats": stats, "created_at": now_iso(),
+        "payload": raw_payload,
+        "client_ip": client_ip, "user_agent": user_agent,
+        "id_map": id_map,
     })
     return stats
 
 @app.get("/api/admin/webhook-logs")
 async def list_webhook_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
     db = request.app.db
+    # Lista nao retorna o payload completo (economiza banda) - so resumo
+    logs = await db.webhook_logs.find(
+        {},
+        {"_id": 0, "payload": 0},
+    ).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
     total = await db.webhook_logs.count_documents({})
-    logs = await db.webhook_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"logs": logs, "total": total, "page": page}
+    return {"logs": logs, "total": total, "page": page, "limit": limit}
+
+
+@app.get("/api/admin/webhook-logs/{log_id}")
+async def get_webhook_log_detail(request: Request, log_id: str, user: dict = Depends(require_admin())):
+    """Retorna o log completo com payload, headers e mapeamento de IDs."""
+    db = request.app.db
+    log = await db.webhook_logs.find_one({"log_id": log_id}, {"_id": 0})
+    if not log:
+        raise HTTPException(status_code=404, detail="Log nao encontrado")
+    return log
+
 
 @app.post("/api/admin/webhook-token/regenerate")
 async def regenerate_webhook_token(request: Request, user: dict = Depends(require_admin())):
