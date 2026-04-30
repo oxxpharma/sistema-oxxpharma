@@ -766,6 +766,15 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         raise HTTPException(status_code=400, detail="Nenhum produto valido")
     shipping = 15.90  # Frete fixo MVP
 
+    # Aplica frete grátis se configurado em site_settings
+    fs_settings = await _get_site_settings(db)
+    fs_mode = (fs_settings.get("free_shipping_mode") or "off").lower()
+    fs_min = float(fs_settings.get("free_shipping_min_subtotal") or 0)
+    if fs_mode == "all":
+        shipping = 0.0
+    elif fs_mode == "above" and subtotal >= fs_min and fs_min > 0:
+        shipping = 0.0
+
     # Cupom (opcional)
     discount_amount = 0.0
     coupon_code_applied = None
@@ -2632,6 +2641,35 @@ async def public_calculate_shipping(request: Request):
                 pass
 
     result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
+
+    # Aplica frete grátis se configurado em site_settings
+    settings = await _get_site_settings(db)
+    fs_mode = (settings.get("free_shipping_mode") or "off").lower()
+    fs_min = float(settings.get("free_shipping_min_subtotal") or 0)
+    fs_label = settings.get("free_shipping_label") or "Frete grátis"
+    subtotal = float(body.get("subtotal") or declared_value or 0)
+
+    apply_free = False
+    if fs_mode == "all":
+        apply_free = True
+    elif fs_mode == "above" and subtotal >= fs_min and fs_min > 0:
+        apply_free = True
+
+    if apply_free and isinstance(result, dict):
+        # Zera price em todos os options retornados (e marca como gratis)
+        for opt in (result.get("options") or []):
+            opt["original_price"] = float(opt.get("price") or 0)
+            opt["price"] = 0.0
+            opt["free_shipping"] = True
+            opt["free_shipping_label"] = fs_label
+        result["free_shipping_applied"] = True
+        result["free_shipping_label"] = fs_label
+    else:
+        result["free_shipping_applied"] = False
+        if fs_mode == "above" and fs_min > 0:
+            result["free_shipping_threshold"] = fs_min
+            result["free_shipping_remaining"] = max(0.0, fs_min - subtotal)
+
     return result
 
 
@@ -2726,6 +2764,29 @@ DEFAULT_SITE_SETTINGS = {
     "announcement_bar_text": "",
     "announcement_bar_link": "",
     "announcement_bar_bg_color": "#E8731A",
+    "trust_bar_enabled": True,
+    "trust_items": [
+        {"icon": "Truck", "title": "Entrega rápida", "desc": "Receba em todo Brasil"},
+        {"icon": "ShieldCheck", "title": "Compra segura", "desc": "Dados 100% protegidos"},
+        {"icon": "CreditCard", "title": "Parcele em até 6x", "desc": "Cartão, PIX ou boleto"},
+    ],
+    # ============ Programa de indicação editável ============
+    "referral_program_name": "Cartão de Benefícios",
+    "referral_menu_label": "Indique e ganhe benefícios",
+    "referral_box_badge": "NOVO PROGRAMA",
+    "referral_box_title": "",  # vazio = usa "Cartão de Benefícios {store_name}"
+    "referral_box_description": "Indique amigos e receba suas comissões direto no <b>seu cartão</b>. Adira agora ao programa, gere seu link personalizado e comece a ganhar em cada compra indicada.",
+    "referral_box_cta_label": "Aderir ao programa de indicação",
+    "referral_box_features": [
+        {"icon": "Gift", "title": "Cartão de Benefícios", "desc": "Receba suas comissões em um cartão de benefícios exclusivo."},
+        {"icon": "Rocket", "title": "Link exclusivo", "desc": "Compartilhe seu código nas redes sociais."},
+        {"icon": "Clock", "title": "Envio diário", "desc": "Todo dia às 23:59 (horário de Brasília) seu saldo é enviado pro cartão."},
+    ],
+    # ============ Frete grátis ============
+    # mode: 'off' | 'all' | 'above'
+    "free_shipping_mode": "off",
+    "free_shipping_min_subtotal": 199.0,
+    "free_shipping_label": "Frete grátis",
     "logo_sizes": {
         "store_header":  {"height": 40, "max_width": 180},
         "store_footer":  {"height": 36, "max_width": 160},

@@ -93,7 +93,7 @@ export default function StoreHeader() {
                       <MapPin className="w-4 h-4" /> Endereços
                     </Link>
                     <Link to="/indique-ganhe" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary text-brand-main font-semibold" onClick={() => setMenuOpen(false)} data-testid="referral-link">
-                      <Share2 className="w-4 h-4" /> Indique e ganhe 8%
+                      <Share2 className="w-4 h-4" /> {settings?.referral_menu_label || 'Indique e ganhe benefícios'}
                     </Link>
                     {showMyNetwork && (
                       <Link to="/minha-rede" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="my-network-link">
@@ -156,7 +156,7 @@ export default function StoreHeader() {
               <div className="space-y-1">
                 <Link to="/minha-conta" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha conta</Link>
                 <Link to="/meus-pedidos" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Meus pedidos</Link>
-                <Link to="/indique-ganhe" className="block py-2 text-sm text-brand-main font-semibold" onClick={() => setMobileOpen(false)}>Indique e ganhe 8%</Link>
+                <Link to="/indique-ganhe" className="block py-2 text-sm text-brand-main font-semibold" onClick={() => setMobileOpen(false)}>{settings?.referral_menu_label || 'Indique e ganhe benefícios'}</Link>
                 {showMyNetwork && <Link to="/minha-rede" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha Rede</Link>}
                 {isAdmin && <Link to="/backoffice" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Painel Admin</Link>}
                 <button onClick={async () => { await logout(); setMobileOpen(false); navigate('/'); }} className="block w-full text-left py-2 text-sm text-red-600">Sair</button>

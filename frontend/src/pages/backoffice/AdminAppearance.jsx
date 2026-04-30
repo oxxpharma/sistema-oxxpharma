@@ -2,14 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck } from 'lucide-react';
 import { toast } from 'sonner';
+import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
 const TABS = [
   { key: 'identity', label: 'Identidade', icon: Palette },
   { key: 'logo_sizes', label: 'Logo por local', icon: ImageIcon },
   { key: 'hero', label: 'Banner principal', icon: Layout },
   { key: 'announcement', label: 'Barra de aviso', icon: Megaphone },
+  { key: 'trust_bar', label: 'Barra de benefícios', icon: BadgeCheck },
+  { key: 'referral_box', label: 'Programa de indicação', icon: Gift },
+  { key: 'free_shipping', label: 'Frete grátis', icon: Truck },
   { key: 'footer', label: 'Rodapé', icon: Layout },
 ];
 
@@ -257,6 +261,137 @@ export default function AdminAppearance() {
         </div>
       )}
 
+      {tab === 'trust_bar' && (
+        <div className="space-y-4 max-w-4xl">
+          <Card title="Barra de benefícios (abaixo do rodapé)">
+            <label className="flex items-center gap-2 cursor-pointer text-sm mb-3">
+              <input type="checkbox" checked={s.trust_bar_enabled !== false} onChange={(e) => set('trust_bar_enabled', e.target.checked)} />
+              Mostrar barra de benefícios na loja
+            </label>
+            <p className="text-xs text-txt-secondary mb-3">Até 6 itens (recomendado 3). Cada item tem ícone, título e descrição curta.</p>
+
+            <div className="space-y-3">
+              {(s.trust_items || []).map((item, idx) => (
+                <TrustItemRow
+                  key={idx}
+                  item={item}
+                  onChange={(patch) => {
+                    const next = [...(s.trust_items || [])];
+                    next[idx] = { ...next[idx], ...patch };
+                    set('trust_items', next);
+                  }}
+                  onRemove={() => set('trust_items', (s.trust_items || []).filter((_, i) => i !== idx))}
+                  onMove={(dir) => {
+                    const arr = [...(s.trust_items || [])];
+                    const j = idx + dir;
+                    if (j < 0 || j >= arr.length) return;
+                    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+                    set('trust_items', arr);
+                  }}
+                  canUp={idx > 0}
+                  canDown={idx < (s.trust_items || []).length - 1}
+                />
+              ))}
+            </div>
+            {((s.trust_items || []).length < 6) && (
+              <Button variant="outline" className="mt-3" onClick={() => set('trust_items', [...(s.trust_items || []), { icon: 'Star', title: 'Novo benefício', desc: 'Descrição' }])} data-testid="add-trust-item">
+                <PlusCircle className="w-4 h-4" /> Adicionar benefício
+              </Button>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {tab === 'referral_box' && (
+        <div className="space-y-4 max-w-3xl">
+          <Card title="Nome do programa">
+            <Field label="Nome do programa (ex: Cartão de Benefícios)" value={s.referral_program_name} onChange={(v) => set('referral_program_name', v)} testId="ref-name" />
+            <Field label='Texto do menu no topo do site (ex: "Indique e ganhe benefícios")' value={s.referral_menu_label} onChange={(v) => set('referral_menu_label', v)} testId="ref-menu-label" />
+          </Card>
+
+          <Card title="Caixa de adesão (página /minha-rede quando o usuário ainda não aderiu)">
+            <Field label="Selo (ex: NOVO PROGRAMA)" value={s.referral_box_badge} onChange={(v) => set('referral_box_badge', v)} testId="ref-badge" />
+            <Field label="Título principal (use \\n para quebrar linha)" value={s.referral_box_title} onChange={(v) => set('referral_box_title', v)} placeholder="Cartão de Benefícios&#10;Sua marca" testId="ref-title" multiline rows={2} hint="Deixe vazio para usar o nome do programa + nome da loja." />
+            <Field label="Descrição (aceita HTML básico, ex: <b>texto</b>)" value={s.referral_box_description} onChange={(v) => set('referral_box_description', v)} testId="ref-desc" multiline rows={4} />
+            <Field label="Texto do botão de adesão" value={s.referral_box_cta_label} onChange={(v) => set('referral_box_cta_label', v)} testId="ref-cta" />
+          </Card>
+
+          <Card title="Cards de destaque (até 3)">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">Aparecem abaixo do título da caixa laranja, mostrando os 3 principais benefícios.</p>
+            <div className="space-y-3">
+              {(s.referral_box_features || []).map((item, idx) => (
+                <TrustItemRow
+                  key={idx}
+                  item={item}
+                  onChange={(patch) => {
+                    const next = [...(s.referral_box_features || [])];
+                    next[idx] = { ...next[idx], ...patch };
+                    set('referral_box_features', next);
+                  }}
+                  onRemove={() => set('referral_box_features', (s.referral_box_features || []).filter((_, i) => i !== idx))}
+                  onMove={(dir) => {
+                    const arr = [...(s.referral_box_features || [])];
+                    const j = idx + dir;
+                    if (j < 0 || j >= arr.length) return;
+                    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+                    set('referral_box_features', arr);
+                  }}
+                  canUp={idx > 0}
+                  canDown={idx < (s.referral_box_features || []).length - 1}
+                />
+              ))}
+            </div>
+            {((s.referral_box_features || []).length < 3) && (
+              <Button variant="outline" className="mt-3" onClick={() => set('referral_box_features', [...(s.referral_box_features || []), { icon: 'Star', title: 'Novo benefício', desc: 'Descrição' }])} data-testid="add-ref-feature">
+                <PlusCircle className="w-4 h-4" /> Adicionar destaque
+              </Button>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {tab === 'free_shipping' && (
+        <div className="space-y-4 max-w-2xl">
+          <Card title="Configuração de Frete Grátis">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">Quando ativo, sobrepõe o cálculo dos Correios e zera o frete na vitrine, no carrinho e no checkout.</p>
+            <div className="space-y-3">
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'off' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'off'} onChange={() => set('free_shipping_mode', 'off')} className="mt-1" data-testid="fs-off" />
+                <div>
+                  <div className="font-bold text-sm">Desativado</div>
+                  <div className="text-xs text-txt-secondary">Frete calculado normalmente pelos Correios.</div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'all' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'all'} onChange={() => set('free_shipping_mode', 'all')} className="mt-1" data-testid="fs-all" />
+                <div>
+                  <div className="font-bold text-sm">Frete grátis para tudo</div>
+                  <div className="text-xs text-txt-secondary">Toda compra terá frete zero, independente do valor.</div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'above' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'above'} onChange={() => set('free_shipping_mode', 'above')} className="mt-1" data-testid="fs-above" />
+                <div className="flex-1">
+                  <div className="font-bold text-sm">Frete grátis acima de um valor</div>
+                  <div className="text-xs text-txt-secondary mb-2">Aplica frete zero quando o subtotal atingir o valor mínimo.</div>
+                  {s.free_shipping_mode === 'above' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+                      <div>
+                        <label className="text-xs font-semibold block mb-1">Valor mínimo (R$)</label>
+                        <input type="number" min="0" step="0.01" className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono" value={s.free_shipping_min_subtotal || 0} onChange={(e) => set('free_shipping_min_subtotal', parseFloat(e.target.value) || 0)} data-testid="fs-min" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </label>
+            </div>
+            <div className="mt-4 pt-3 border-t border-border">
+              <Field label="Texto exibido na opção (ex: Frete grátis)" value={s.free_shipping_label} onChange={(v) => set('free_shipping_label', v)} testId="fs-label" />
+            </div>
+          </Card>
+        </div>
+      )}
+
       {tab === 'footer' && (
         <div className="space-y-4 max-w-3xl">
           <Card title="Sobre a empresa">
@@ -301,13 +436,20 @@ function Card({ title, children }) {
     </div>
   );
 }
-function Field({ label, value, onChange, type = 'text', placeholder, testId }) {
+function Field({ label, value, onChange, type = 'text', placeholder, testId, multiline, rows = 3, hint }) {
   return (
     <div>
       <label className="text-xs font-semibold block mb-1">{label}</label>
-      <input type={type} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:border-brand-main"
-        data-testid={testId} />
+      {multiline ? (
+        <textarea rows={rows} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
+          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:border-brand-main resize-y"
+          data-testid={testId} />
+      ) : (
+        <input type={type} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
+          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:border-brand-main"
+          data-testid={testId} />
+      )}
+      {hint && <div className="text-[11px] text-txt-secondary mt-1">{hint}</div>}
     </div>
   );
 }
@@ -339,6 +481,99 @@ function ImageUpload({ label, url, onPick, onClear, testId }) {
         )}
         <Button variant="outline" size="sm" onClick={onPick} data-testid={testId}><Upload className="w-4 h-4" /> {url ? 'Trocar' : 'Enviar imagem'}</Button>
       </div>
+    </div>
+  );
+}
+
+
+function TrustItemRow({ item, onChange, onRemove, onMove, canUp, canDown }) {
+  const Icon = getIcon(item?.icon);
+  return (
+    <div className="border border-border rounded-lg p-4 bg-white grid grid-cols-1 md:grid-cols-[auto_1fr_auto] gap-3 items-start">
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
+          <Icon className="w-6 h-6 text-brand-main" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <IconPicker value={item?.icon || 'Star'} onChange={(v) => onChange({ icon: v })} />
+        <div />
+        <Field label="Título" value={item?.title} onChange={(v) => onChange({ title: v })} />
+        <Field label="Descrição" value={item?.desc} onChange={(v) => onChange({ desc: v })} />
+      </div>
+      <div className="flex md:flex-col gap-1 self-center md:self-start">
+        <button type="button" onClick={() => onMove(-1)} disabled={!canUp} className="px-2 py-1 text-xs border border-border rounded hover:bg-bg-secondary disabled:opacity-40" title="Mover para cima">↑</button>
+        <button type="button" onClick={() => onMove(1)} disabled={!canDown} className="px-2 py-1 text-xs border border-border rounded hover:bg-bg-secondary disabled:opacity-40" title="Mover para baixo">↓</button>
+        <button type="button" onClick={onRemove} className="px-2 py-1 text-xs border border-red-200 text-red-500 rounded hover:bg-red-50" title="Remover">
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IconPicker({ value, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  const CurIcon = getIcon(value);
+  const filtered = ICON_KEYS.filter(k => {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return k.toLowerCase().includes(q) || (ICON_LABELS[k] || '').toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="relative" ref={ref}>
+      <label className="text-xs font-semibold block mb-1">Ícone</label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 border border-border rounded-lg text-sm hover:border-brand-main transition"
+        data-testid="icon-picker-trigger"
+      >
+        <CurIcon className="w-4 h-4 text-brand-main" />
+        <span className="flex-1 text-left truncate">{ICON_LABELS[value] || value || 'Escolher ícone'}</span>
+        <span className="text-xs text-txt-secondary">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 bg-white border border-border rounded-lg shadow-lg w-72 p-2 max-h-72 overflow-y-auto" data-testid="icon-picker-popover">
+          <input
+            autoFocus
+            placeholder="Buscar ícone..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full px-2 py-1.5 border border-border rounded text-xs mb-2 sticky top-0 bg-white"
+          />
+          <div className="grid grid-cols-6 gap-1">
+            {filtered.map(key => {
+              const Icn = ICON_LIBRARY[key];
+              const selected = key === value;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { onChange(key); setOpen(false); setQuery(''); }}
+                  title={ICON_LABELS[key] || key}
+                  className={`aspect-square flex items-center justify-center rounded-lg border transition ${selected ? 'bg-brand-main text-white border-brand-main' : 'border-border hover:bg-bg-secondary text-txt-primary'}`}
+                  data-testid={`icon-option-${key}`}
+                >
+                  <Icn className="w-4 h-4" />
+                </button>
+              );
+            })}
+            {filtered.length === 0 && <div className="col-span-6 text-center text-xs text-txt-secondary py-4">Nenhum ícone</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

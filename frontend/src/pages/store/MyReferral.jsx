@@ -6,12 +6,15 @@ import { Badge } from '../../components/ui/Badge';
 import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet, CreditCard, Send, Gift } from 'lucide-react';
 import { toast } from 'sonner';
 import ReferralEnrollmentForm from '../../components/ReferralEnrollmentForm';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
+import { getIcon } from '../../lib/iconLibrary';
 
 export default function MyReferral() {
   const [data, setData] = useState(null);
   const [commissions, setCommissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const settings = useSiteSettings();
 
   const load = async () => {
     const [ref, comms] = await Promise.all([
@@ -120,6 +123,19 @@ export default function MyReferral() {
 
   // ========== BANNER DE ADESÃO (usuário ainda não aderiu) ==========
   if (!data.has_referral_program) {
+    const programName = settings?.referral_program_name || 'Cartão de Benefícios';
+    const storeName = settings?.store_name || 'OxxPharma';
+    const badge = settings?.referral_box_badge || 'NOVO PROGRAMA';
+    const titleRaw = settings?.referral_box_title || `${programName}\n${storeName}`;
+    const desc = settings?.referral_box_description || `Indique amigos e receba suas comissões direto no <b>seu cartão</b>. Adira agora ao programa, gere seu link personalizado e comece a ganhar em cada compra indicada.`;
+    const ctaLabel = settings?.referral_box_cta_label || 'Aderir ao programa de indicação';
+    const features = (settings?.referral_box_features && settings.referral_box_features.length)
+      ? settings.referral_box_features
+      : [
+        { icon: 'Gift', title: 'Cartão de Benefícios', desc: 'Receba suas comissões em um cartão de benefícios exclusivo.' },
+        { icon: 'Share2', title: 'Link exclusivo', desc: 'Compartilhe seu código nas redes sociais.' },
+        { icon: 'Send', title: 'Envio diário', desc: 'Todo dia às 23:59 seu saldo é enviado pro cartão.' },
+      ];
     return (
       <div className="max-w-4xl mx-auto px-4 py-8" data-testid="my-referral">
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-main via-brand-hover to-orange-700 text-white p-8 md:p-12 shadow-xl">
@@ -127,41 +143,31 @@ export default function MyReferral() {
           <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-white/5 rounded-full blur-3xl" />
           <div className="relative">
             <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur border border-white/20 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest mb-6">
-              <Gift className="w-3.5 h-3.5" /> Novo programa OxxPharma
+              <Gift className="w-3.5 h-3.5" /> {badge}
             </div>
-            <h1 className="font-heading font-black text-3xl md:text-5xl mb-4 leading-tight">
-              Cartão de Benefícios<br />OxxPharma
+            <h1 className="font-heading font-black text-3xl md:text-5xl mb-4 leading-tight whitespace-pre-line">
+              {titleRaw}
             </h1>
-            <p className="text-white/90 text-base md:text-lg max-w-xl mb-6">
-              Indique amigos e receba suas comissões direto no <b>seu cartão</b>.
-              Adira agora ao programa, gere seu link personalizado e comece a ganhar
-              <b> {Math.round(data.commission_rate * 100)}% </b>
-              em cada compra indicada.
-            </p>
+            <p className="text-white/90 text-base md:text-lg max-w-xl mb-6" dangerouslySetInnerHTML={{ __html: desc }} />
             <Button
               size="lg"
               onClick={() => setShowForm(true)}
               className="bg-white text-brand-main hover:bg-white/90 border-white font-bold shadow-lg"
               data-testid="enroll-program-btn"
             >
-              <CreditCard className="w-5 h-5" /> Aderir ao programa de indicação
+              <CreditCard className="w-5 h-5" /> {ctaLabel}
             </Button>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-              <div className="bg-white/10 backdrop-blur rounded-xl p-4 border border-white/15">
-                <Gift className="w-6 h-6 mb-2" />
-                <div className="font-bold mb-1">Cartão de Benefícios</div>
-                <div className="text-xs text-white/80">Receba suas comissões em um cartão de benefícios exclusivo.</div>
-              </div>
-              <div className="bg-white/10 backdrop-blur rounded-xl p-4 border border-white/15">
-                <Share2 className="w-6 h-6 mb-2" />
-                <div className="font-bold mb-1">Link exclusivo</div>
-                <div className="text-xs text-white/80">Compartilhe seu código nas redes sociais.</div>
-              </div>
-              <div className="bg-white/10 backdrop-blur rounded-xl p-4 border border-white/15">
-                <Send className="w-6 h-6 mb-2" />
-                <div className="font-bold mb-1">Envio diário</div>
-                <div className="text-xs text-white/80">Todo dia às 23:59 (horário de Brasília) seu saldo é enviado pro cartão.</div>
-              </div>
+              {features.slice(0, 3).map((f, i) => {
+                const Ic = getIcon(f.icon);
+                return (
+                  <div key={i} className="bg-white/10 backdrop-blur rounded-xl p-4 border border-white/15">
+                    <Ic className="w-6 h-6 mb-2" />
+                    <div className="font-bold mb-1">{f.title}</div>
+                    <div className="text-xs text-white/80">{f.desc}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
