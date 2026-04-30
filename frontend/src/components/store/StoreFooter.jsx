@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, ShieldCheck, Truck, CreditCard, Instagram, Facebook, Youtube, MessageCircle } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
+import BrandLogo from '../branding/BrandLogo';
 
 export default function StoreFooter() {
   const s = useSiteSettings();
@@ -22,16 +23,7 @@ export default function StoreFooter() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 grid grid-cols-1 md:grid-cols-4 gap-8">
         <div>
           <div className="flex items-center gap-2 mb-4">
-            {s?.logo_url ? (
-              <img src={s.logo_url} alt={storeName} className="h-9 max-w-[160px] object-contain" />
-            ) : (
-              <>
-                <div className="w-8 h-8 rounded-lg bg-brand-main flex items-center justify-center">
-                  <span className="text-white font-heading font-black">{storeName[0]}</span>
-                </div>
-                <span className="font-heading font-black text-lg">{storeName}</span>
-              </>
-            )}
+            <BrandLogo slot="store_footer" variant="light" textClassName="font-heading font-black text-lg" />
           </div>
           <p className="text-xs text-txt-secondary leading-relaxed">
             {s?.footer_about || 'Farmácia digital com entrega rápida e segura em todo o Brasil.'}

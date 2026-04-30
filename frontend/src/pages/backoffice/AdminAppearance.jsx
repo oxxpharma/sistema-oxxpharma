@@ -6,10 +6,33 @@ import { toast } from 'sonner';
 
 const TABS = [
   { key: 'identity', label: 'Identidade', icon: Palette },
+  { key: 'logo_sizes', label: 'Logo por local', icon: ImageIcon },
   { key: 'hero', label: 'Banner principal', icon: Layout },
   { key: 'announcement', label: 'Barra de aviso', icon: Megaphone },
   { key: 'footer', label: 'Rodapé', icon: Layout },
 ];
+
+const LOGO_SLOTS = [
+  { key: 'store_header',  label: 'Cabeçalho da loja',         desc: 'Topo de todas as páginas da loja' },
+  { key: 'store_footer',  label: 'Rodapé da loja',            desc: 'Rodapé da loja pública' },
+  { key: 'admin_sidebar', label: 'Menu do Painel Admin',      desc: 'Sidebar escura do /backoffice' },
+  { key: 'admin_topbar',  label: 'Topo mobile do Admin',      desc: 'Barra superior do admin em celular' },
+  { key: 'auth_pages',    label: 'Login e Cadastro',          desc: 'Páginas de autenticação' },
+  { key: 'invoice',       label: 'Nota de faturamento',       desc: 'Documento imprimível do pedido' },
+  { key: 'email_header',  label: 'Topo dos E-mails',          desc: 'Cabeçalho de todos os e-mails enviados' },
+  { key: 'email_footer',  label: 'Rodapé dos E-mails',        desc: 'Parte de baixo dos e-mails' },
+];
+
+const DEFAULT_SIZES = {
+  store_header:  { height: 40, max_width: 180 },
+  store_footer:  { height: 36, max_width: 160 },
+  admin_sidebar: { height: 36, max_width: 160 },
+  admin_topbar:  { height: 28, max_width: 140 },
+  auth_pages:    { height: 48, max_width: 200 },
+  invoice:       { height: 56, max_width: 220 },
+  email_header:  { height: 48, max_width: 200 },
+  email_footer:  { height: 32, max_width: 140 },
+};
 
 export default function AdminAppearance() {
   const [s, setS] = useState(null);
@@ -57,6 +80,23 @@ export default function AdminAppearance() {
   const setFooterPage = (i, patch) => set('footer_pages', s.footer_pages.map((p, idx) => idx === i ? { ...p, ...patch } : p));
   const removeFooterPage = (i) => set('footer_pages', s.footer_pages.filter((_, idx) => idx !== i));
   const addFooterPage = () => set('footer_pages', [...(s.footer_pages || []), { label: '', slug: '' }]);
+
+  const setLogoSize = (slotKey, field, value) => {
+    const sizes = { ...(s.logo_sizes || {}) };
+    const cur = { ...DEFAULT_SIZES[slotKey], ...(sizes[slotKey] || {}) };
+    cur[field] = Math.max(8, parseInt(value || 0, 10) || 0);
+    sizes[slotKey] = cur;
+    set('logo_sizes', sizes);
+  };
+  const resetLogoSize = (slotKey) => {
+    const sizes = { ...(s.logo_sizes || {}) };
+    sizes[slotKey] = { ...DEFAULT_SIZES[slotKey] };
+    set('logo_sizes', sizes);
+  };
+  const getLogoSize = (slotKey) => {
+    const saved = (s.logo_sizes || {})[slotKey];
+    return { ...DEFAULT_SIZES[slotKey], ...(saved || {}) };
+  };
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
   if (!s) return null;
@@ -106,6 +146,78 @@ export default function AdminAppearance() {
             <Field label="YouTube (URL)" value={s.social_youtube} onChange={(v) => set('social_youtube', v)} />
             <Field label="WhatsApp (URL ou número)" value={s.social_whatsapp} onChange={(v) => set('social_whatsapp', v)} placeholder="https://wa.me/5511999999999" />
           </Card>
+        </div>
+      )}
+
+      {tab === 'logo_sizes' && (
+        <div className="space-y-4 max-w-3xl">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+            Ajuste a <b>altura</b> e a <b>largura máxima</b> da logo em cada local. Se a logo não estiver configurada na aba <b>Identidade</b>, o sistema mostra automaticamente o <b>nome da loja</b>.
+          </div>
+          {LOGO_SLOTS.map(slot => {
+            const size = getLogoSize(slot.key);
+            const isDarkBg = slot.key === 'admin_sidebar';
+            return (
+              <Card key={slot.key} title={slot.label}>
+                <p className="text-xs text-txt-secondary -mt-1 mb-3">{slot.desc}</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="text-xs font-semibold block mb-1">Altura (px)</label>
+                    <input
+                      type="number" min="8" max="300" value={size.height}
+                      onChange={(e) => setLogoSize(slot.key, 'height', e.target.value)}
+                      className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                      data-testid={`logosize-${slot.key}-h`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold block mb-1">Largura máx. (px)</label>
+                    <input
+                      type="number" min="20" max="600" value={size.max_width}
+                      onChange={(e) => setLogoSize(slot.key, 'max_width', e.target.value)}
+                      className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                      data-testid={`logosize-${slot.key}-w`}
+                    />
+                  </div>
+                  <div>
+                    <Button variant="outline" size="sm" onClick={() => resetLogoSize(slot.key)} data-testid={`logosize-${slot.key}-reset`}>
+                      Restaurar padrão
+                    </Button>
+                  </div>
+                </div>
+                {/* Preview */}
+                <div className="mt-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-txt-secondary mb-2">Prévia</div>
+                  <div
+                    className={`rounded-lg border border-border p-4 flex items-center ${isDarkBg ? 'bg-[#1F2937]' : 'bg-bg-secondary'}`}
+                  >
+                    {s.logo_url ? (
+                      <img
+                        src={isDarkBg && s.logo_dark_url ? s.logo_dark_url : s.logo_url}
+                        alt="preview"
+                        className="object-contain"
+                        style={{ height: `${size.height}px`, maxWidth: `${size.max_width}px` }}
+                      />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="rounded-lg bg-brand-main flex items-center justify-center"
+                          style={{ width: `${Math.round(size.height * 0.85)}px`, height: `${Math.round(size.height * 0.85)}px` }}
+                        >
+                          <span className="text-white font-heading font-black" style={{ fontSize: `${Math.round(size.height * 0.45)}px` }}>
+                            {(s.store_name || 'O')[0].toUpperCase()}
+                          </span>
+                        </div>
+                        <span className={`font-heading font-black ${isDarkBg ? 'text-white' : ''}`} style={{ fontSize: `${Math.max(14, Math.round(size.height * 0.45))}px` }}>
+                          {s.store_name || 'OxxPharma'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 

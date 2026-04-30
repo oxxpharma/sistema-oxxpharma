@@ -6,6 +6,7 @@ import {
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import BrandLogo from '../components/branding/BrandLogo';
 
 // ====== Menu agrupado em seções ======
 const NAV_GROUPS = [
@@ -96,14 +97,13 @@ export default function BackofficeLayout() {
         {/* Header (logo) - fixo no topo */}
         <div className="p-5 border-b border-white/10 flex-shrink-0">
           <Link to="/backoffice" className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-brand-main flex items-center justify-center">
-              <span className="text-white font-heading font-black text-lg">O</span>
-            </div>
-            <div>
-              <div className="font-heading font-black text-base leading-none">OxxPharma</div>
-              <div className="text-[11px] text-white/60 mt-0.5">Painel Admin</div>
-            </div>
+            <BrandLogo
+              slot="admin_sidebar"
+              variant="dark"
+              textClassName="font-heading font-black text-base leading-none text-white"
+            />
           </Link>
+          <div className="text-[11px] text-white/60 mt-1 ml-1">Painel Admin</div>
         </div>
 
         {/* Nav - SCROLLÁVEL */}
@@ -177,7 +177,7 @@ export default function BackofficeLayout() {
           <button onClick={() => setMobileOpen(true)} className="p-2 hover:bg-bg-secondary rounded-lg" data-testid="mobile-menu-btn">
             <Menu className="w-5 h-5" />
           </button>
-          <span className="font-heading font-black">OxxPharma Admin</span>
+          <BrandLogo slot="admin_topbar" variant="light" textClassName="font-heading font-black" />
           <div className="w-9" />
         </header>
         <main className="flex-1 overflow-x-hidden p-4 md:p-8">

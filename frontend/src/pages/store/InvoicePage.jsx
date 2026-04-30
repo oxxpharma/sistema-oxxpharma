@@ -5,6 +5,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Printer, ArrowLeft, Loader2, FileText } from 'lucide-react';
 import { toast } from 'sonner';
+import BrandLogo from '../../components/branding/BrandLogo';
 
 export default function InvoicePage() {
   const { id } = useParams();
@@ -45,11 +46,8 @@ export default function InvoicePage() {
         {/* Cabeçalho */}
         <div className="flex items-start justify-between pb-6 border-b-2 border-gray-900">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-lg bg-brand-main flex items-center justify-center">
-              <span className="text-white font-heading font-black text-2xl">O</span>
-            </div>
+            <BrandLogo slot="invoice" variant="light" textClassName="font-heading font-black text-2xl leading-tight" />
             <div>
-              <div className="font-heading font-black text-2xl leading-tight">{company.name || 'OxxPharma'}</div>
               {company.cnpj && <div className="text-xs text-txt-secondary">CNPJ: {company.cnpj}</div>}
               {company.address && <div className="text-xs text-txt-secondary">{company.address} {company.city && `· ${company.city}/${company.state}`} {company.zip && `· ${company.zip}`}</div>}
               {(company.phone || company.email) && <div className="text-xs text-txt-secondary">{company.phone} {company.phone && company.email ? '·' : ''} {company.email}</div>}

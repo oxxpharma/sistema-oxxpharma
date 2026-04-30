@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network, Wallet } from 'lucide-react';
+import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { useReferral } from '../../contexts/RefContext';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../ui/Button';
+import BrandLogo from '../branding/BrandLogo';
 
 export default function StoreHeader() {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
@@ -42,16 +43,7 @@ export default function StoreHeader() {
         <div className="flex items-center justify-between h-16 gap-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 flex-shrink-0" data-testid="logo-link">
-            {settings?.logo_url ? (
-              <img src={settings.logo_url} alt={settings?.store_name || 'OxxPharma'} className="h-10 max-w-[180px] object-contain" />
-            ) : (
-              <>
-                <div className="w-9 h-9 rounded-lg bg-brand-main flex items-center justify-center">
-                  <span className="text-white font-heading font-black text-lg">{(settings?.store_name || 'O')[0]}</span>
-                </div>
-                <span className="font-heading font-black text-xl text-txt-primary">{settings?.store_name || 'OxxPharma'}</span>
-              </>
-            )}
+            <BrandLogo slot="store_header" variant="light" textClassName="font-heading font-black text-xl text-txt-primary" />
           </Link>
 
           {/* Search */}

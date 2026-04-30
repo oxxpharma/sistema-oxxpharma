@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { toast } from 'sonner';
 import { ArrowLeft } from 'lucide-react';
+import BrandLogo from '../../components/branding/BrandLogo';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -36,10 +37,7 @@ export default function LoginPage() {
         </Link>
         <div className="bg-white rounded-2xl border border-border p-8 shadow-sm">
           <div className="flex items-center gap-2 mb-6">
-            <div className="w-10 h-10 rounded-lg bg-brand-main flex items-center justify-center">
-              <span className="text-white font-heading font-black">O</span>
-            </div>
-            <span className="font-heading font-black text-xl">OxxPharma</span>
+            <BrandLogo slot="auth_pages" variant="light" textClassName="font-heading font-black text-xl" />
           </div>
           <h1 className="font-heading font-black text-2xl mb-1">Entrar</h1>
           <p className="text-sm text-txt-secondary mb-6">Acesse sua conta</p>

@@ -40,6 +40,73 @@ async def get_template(db, slug: str) -> Optional[Dict]:
     return await db.email_templates.find_one({"slug": slug}, {"_id": 0})
 
 
+async def wrap_email_html(db, inner_html: str) -> str:
+    """Envelopa o HTML do template com um cabecalho (logo topo) e rodape (logo pequena + link loja),
+    lendo configs da loja do site_settings. Se logo nao configurada, usa nome."""
+    from server import _get_site_settings  # evita circular
+    s = await _get_site_settings(db)
+
+    store_name = (s.get("store_name") or "OxxPharma").strip()
+    logo_url = (s.get("logo_url") or "").strip()
+    sizes = s.get("logo_sizes") or {}
+    header_cfg = sizes.get("email_header") or {"height": 48, "max_width": 200}
+    footer_cfg = sizes.get("email_footer") or {"height": 32, "max_width": 140}
+    brand_color = (s.get("brand_primary_color") or "#E8731A").strip()
+    app_url = ""
+    try:
+        import os
+        app_url = os.environ.get("APP_URL") or os.environ.get("BACKEND_URL") or ""
+    except Exception:
+        pass
+    app_url = app_url.rstrip("/") or "#"
+
+    # Topo
+    if logo_url and logo_url.startswith(("http://", "https://")):
+        header_html = (
+            f'<a href="{app_url}" style="text-decoration:none;display:inline-block;">'
+            f'<img src="{logo_url}" alt="{store_name}" '
+            f'style="height:{int(header_cfg.get("height", 48))}px;max-width:{int(header_cfg.get("max_width", 200))}px;object-fit:contain;display:block;" />'
+            f'</a>'
+        )
+    else:
+        header_html = (
+            f'<a href="{app_url}" style="text-decoration:none;display:inline-block;color:{brand_color};'
+            f'font-family:Arial,sans-serif;font-weight:900;font-size:22px;">{store_name}</a>'
+        )
+
+    # Rodape
+    if logo_url and logo_url.startswith(("http://", "https://")):
+        footer_brand = (
+            f'<img src="{logo_url}" alt="{store_name}" '
+            f'style="height:{int(footer_cfg.get("height", 32))}px;max-width:{int(footer_cfg.get("max_width", 140))}px;'
+            f'object-fit:contain;display:inline-block;vertical-align:middle;" />'
+        )
+    else:
+        footer_brand = (
+            f'<span style="color:{brand_color};font-family:Arial,sans-serif;font-weight:800;font-size:14px;">{store_name}</span>'
+        )
+
+    year = datetime.now(timezone.utc).year
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#F5F5F5;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#F5F5F5;padding:24px 8px;">
+<tr><td align="center">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="background:#FFFFFF;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+  <tr><td style="padding:24px 24px 8px 24px;border-bottom:1px solid #EEE;">{header_html}</td></tr>
+  <tr><td>{inner_html}</td></tr>
+  <tr><td style="background:#FAFAFA;padding:20px 24px;border-top:1px solid #EEE;text-align:center;">
+    <div style="margin-bottom:8px;">{footer_brand}</div>
+    <div style="font-family:Arial,sans-serif;font-size:11px;color:#888;">
+      <a href="{app_url}" style="color:#888;text-decoration:underline;">Visitar a loja</a>
+      &nbsp;&middot;&nbsp; &copy; {year} {store_name}. Todos os direitos reservados.
+    </div>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
+
+
 async def send_email(db, to: List[str] | str, subject: str, html: str, text: Optional[str] = None, meta: Optional[Dict] = None) -> Dict:
     """Envia email via Resend. Tolerante a falhas: loga e retorna {sent:false, reason} em caso de erro."""
     from server import get_settings, now_iso  # evita circular
@@ -89,13 +156,16 @@ async def send_email(db, to: List[str] | str, subject: str, html: str, text: Opt
 
 
 async def send_template(db, slug: str, to: List[str] | str, ctx: Dict, override_subject: Optional[str] = None, meta: Optional[Dict] = None):
-    """Renderiza um template salvo no BD e envia. Se template nao existe, abort silencioso."""
+    """Renderiza um template salvo no BD, envelopa com header/footer da marca e envia.
+    Se template nao existe, abort silencioso."""
     tmpl = await get_template(db, slug)
     if not tmpl or not tmpl.get("active", True):
         logger.info(f"Template '{slug}' ausente/inativo; email nao enviado")
         return {"sent": False, "reason": "template_missing"}
     subject = override_subject or render_template(tmpl.get("subject", ""), ctx)
-    html = render_template(tmpl.get("body_html", ""), ctx)
+    inner_html = render_template(tmpl.get("body_html", ""), ctx)
+    # Envelope com logo no topo/rodape (baseado em site_settings)
+    html = await wrap_email_html(db, inner_html)
     text = render_template(tmpl.get("body_text", ""), ctx) if tmpl.get("body_text") else None
     return await send_email(db, to, subject, html, text, meta={"slug": slug, **(meta or {})})
 

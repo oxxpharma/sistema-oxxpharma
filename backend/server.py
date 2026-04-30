@@ -2413,6 +2413,16 @@ DEFAULT_SITE_SETTINGS = {
     "announcement_bar_text": "",
     "announcement_bar_link": "",
     "announcement_bar_bg_color": "#E8731A",
+    "logo_sizes": {
+        "store_header":  {"height": 40, "max_width": 180},
+        "store_footer":  {"height": 36, "max_width": 160},
+        "admin_sidebar": {"height": 36, "max_width": 160},
+        "admin_topbar":  {"height": 28, "max_width": 140},
+        "auth_pages":    {"height": 48, "max_width": 200},
+        "invoice":       {"height": 56, "max_width": 220},
+        "email_header":  {"height": 48, "max_width": 200},
+        "email_footer":  {"height": 32, "max_width": 140},
+    },
 }
 
 
