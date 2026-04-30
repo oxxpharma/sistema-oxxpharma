@@ -63,15 +63,22 @@ export default function CheckoutPage() {
     if (!selectedAddr) { toast.error('Selecione um endereço'); return; }
     setSubmitting(true);
     try {
+      let couponCode;
+      try {
+        const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
+        if (c?.code) couponCode = c.code;
+      } catch { /* noop */ }
       const order = await api.post('/api/checkout', {
         address_id: selectedAddr,
         payment_method: paymentMethod,
         ref_code: refCode || undefined,
+        coupon_code: couponCode,
       });
       // Cria preferencia de pagamento
       const pay = await api.post(`/api/payments/create/${order.order_id}`);
       clear();
       clearRef();
+      try { localStorage.removeItem('oxx_coupon_v1'); } catch { /* noop */ }
       // Se MP ativo e tem URL de pagamento, redireciona pro checkout do MP
       if (pay.provider === 'mercadopago' && pay.payment_url) {
         toast.success('Redirecionando para o pagamento...');
@@ -88,7 +95,13 @@ export default function CheckoutPage() {
   };
 
   const shipping = 15.90;
-  const total = (cart.subtotal || 0) + shipping;
+  const couponDiscount = (() => {
+    try {
+      const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
+      return Number(c?.discount || 0);
+    } catch { return 0; }
+  })();
+  const total = Math.max(0, (cart.subtotal || 0) + shipping - couponDiscount);
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
 
@@ -205,6 +218,9 @@ export default function CheckoutPage() {
             <div className="space-y-1.5 py-3 text-sm">
               <div className="flex justify-between"><span className="text-txt-secondary">Subtotal</span><span>{formatCurrency(cart.subtotal)}</span></div>
               <div className="flex justify-between"><span className="text-txt-secondary">Frete</span><span>{formatCurrency(shipping)}</span></div>
+              {couponDiscount > 0 && (
+                <div className="flex justify-between text-emerald-600"><span>Cupom</span><span className="font-semibold">−{formatCurrency(couponDiscount)}</span></div>
+              )}
             </div>
             <div className="flex justify-between items-baseline pt-3 border-t border-border">
               <span className="font-bold">Total</span>

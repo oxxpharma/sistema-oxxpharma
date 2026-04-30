@@ -53,6 +53,8 @@ import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
 import CmsPageView from './pages/store/CmsPageView';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import AdminUserCategories from './pages/backoffice/AdminUserCategories';
+import AdminCoupons from './pages/backoffice/AdminCoupons';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -111,6 +113,8 @@ function AppRoutes() {
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
         <Route path="usuarios" element={<AdminUsers />} />
+        <Route path="categorias-usuarios" element={<AdminUserCategories />} />
+        <Route path="cupons" element={<AdminCoupons />} />
         <Route path="redes" element={<AdminNetworks />} />
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />

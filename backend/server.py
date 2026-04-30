@@ -26,6 +26,7 @@ import card_service
 import payments_service
 import correios_service
 import maxx_service
+import store_extras
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -218,6 +219,7 @@ class ProductCreate(BaseModel):
     width_cm: Optional[float] = None
     height_cm: Optional[float] = None
     points_value: float = 0  # Pontos atribuidos por unidade comprada (manual pelo admin)
+    pricing_tiers: List[Dict] = []  # [{type:'guest'|'logged'|'category', user_category_id?, price, label?}]
 
 class CategoryCreate(BaseModel):
     name: str
@@ -236,6 +238,7 @@ class CheckoutData(BaseModel):
     payment_method: str = "pix"  # pix | credit_card | boleto (MVP: mock)
     notes: Optional[str] = None
     ref_code: Optional[str] = None  # Codigo de indicacao do afiliado (URL ?ref=XXX)
+    coupon_code: Optional[str] = None  # Cupom aplicado no checkout
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -579,6 +582,8 @@ async def list_products(request: Request, category: Optional[str] = None, search
         q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}, {"brand": {"$regex": search, "$options": "i"}}]
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    user = await get_optional_user(request)
+    products = [store_extras.apply_pricing_to_product(p, user) for p in products]
     return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
 @app.get("/api/products/featured")
@@ -588,6 +593,8 @@ async def featured_products(request: Request, limit: int = 8):
     if len(prods) < limit:
         more = await db.products.find({"active": True, "featured": {"$ne": True}}, {"_id": 0}).limit(limit - len(prods)).to_list(limit - len(prods))
         prods.extend(more)
+    user = await get_optional_user(request)
+    prods = [store_extras.apply_pricing_to_product(p, user) for p in prods]
     return {"products": prods}
 
 @app.get("/api/products/{product_id}")
@@ -597,6 +604,9 @@ async def get_product(request: Request, product_id: str):
     if not p:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
     related = await db.products.find({"category": p.get("category"), "product_id": {"$ne": product_id}, "active": True}, {"_id": 0}).limit(4).to_list(4)
+    user = await get_optional_user(request)
+    p = store_extras.apply_pricing_to_product(p, user)
+    related = [store_extras.apply_pricing_to_product(r, user) for r in related]
     return {"product": p, "related": related}
 
 # ==================== PRODUCTS (ADMIN) ====================
@@ -652,10 +662,12 @@ async def get_cart(request: Request, user: dict = Depends(get_current_user)):
     for item in items:
         prod = await db.products.find_one({"product_id": item["product_id"]}, {"_id": 0})
         if prod:
-            price = prod.get("discount_price") or prod["price"]
+            price_info = store_extras.effective_price(prod, user)
+            price = float(price_info["price"])
+            original = float(price_info["original_price"])
             total = price * item["quantity"]
             subtotal += total
-            enriched.append({**item, "name": prod["name"], "price": price, "original_price": prod["price"], "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0)})
+            enriched.append({**item, "name": prod["name"], "price": price, "original_price": original, "tier_applied": price_info.get("applied_tier"), "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0)})
     return {"items": enriched, "subtotal": round(subtotal, 2), "count": len(enriched)}
 
 @app.post("/api/cart/items")
@@ -734,15 +746,29 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             continue
         if prod.get("stock", 0) < ci["quantity"]:
             raise HTTPException(status_code=400, detail=f"Estoque insuficiente: {prod['name']}")
-        price = prod.get("discount_price") or prod["price"]
+        # preco efetivo considerando pricing_tiers do usuario
+        price_info = store_extras.effective_price(prod, user)
+        price = float(price_info["price"])
         total = round(price * ci["quantity"], 2)
         subtotal += total
-        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0], "points_value": float(prod.get("points_value") or 0)})
+        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0], "points_value": float(prod.get("points_value") or 0), "tier_applied": price_info.get("applied_tier")})
         # Decrement stock
         await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
     if not items:
         raise HTTPException(status_code=400, detail="Nenhum produto valido")
     shipping = 15.90  # Frete fixo MVP
+
+    # Cupom (opcional)
+    discount_amount = 0.0
+    coupon_code_applied = None
+    coupon_id_applied = None
+    if getattr(data, "coupon_code", None):
+        result = await store_extras.validate_coupon(db, data.coupon_code, round(subtotal, 2), user)
+        if not result.get("valid"):
+            raise HTTPException(status_code=400, detail=result.get("reason") or "Cupom inválido")
+        discount_amount = float(result.get("discount") or 0)
+        coupon_code_applied = result["coupon"]["code"]
+        coupon_id_applied = result["coupon"]["coupon_id"]
 
     settings = await get_settings(db)
     affiliate_rate = settings["affiliate_commission_rate"]
@@ -768,7 +794,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "order_id": gen_id("ord_"), "user_id": user["user_id"],
         "customer_name": user.get("name"), "customer_email": user.get("email"),
         "items": items, "subtotal": round(subtotal, 2),
-        "shipping_cost": shipping, "total": round(subtotal + shipping, 2),
+        "shipping_cost": shipping,
+        "discount_amount": round(discount_amount, 2),
+        "coupon_code": coupon_code_applied,
+        "total": round(subtotal + shipping - discount_amount, 2),
         "shipping_address": addr, "payment_method": data.payment_method,
         "payment_status": "pending", "order_status": "pending",
         "payment_provider": "mock",  # Sera "mercadopago" quando integrado
@@ -778,6 +807,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+
+    # Atualiza usage_count do cupom (apos criar a ordem)
+    if coupon_id_applied:
+        await store_extras.increment_coupon_usage(db, coupon_id_applied)
 
     # ============ COMISSOES ============
     commissions_to_insert = []
@@ -3046,3 +3079,69 @@ async def my_card_balance(request: Request, user: dict = Depends(get_current_use
         "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
         "pending_commissions": round((pending_agg[0]["total"] if pending_agg else 0), 2),
     }
+
+
+
+# ==================== USER CATEGORIES (admin) ====================
+
+@app.get("/api/admin/user-categories")
+async def admin_list_user_categories(request: Request, user: dict = Depends(require_admin())):
+    return {"categories": await store_extras.list_user_categories(request.app.db)}
+
+
+@app.post("/api/admin/user-categories")
+async def admin_create_user_category(request: Request, payload: store_extras.UserCategoryIn, user: dict = Depends(require_admin())):
+    return await store_extras.create_user_category(request.app.db, payload)
+
+
+@app.put("/api/admin/user-categories/{category_id}")
+async def admin_update_user_category(request: Request, category_id: str, payload: store_extras.UserCategoryIn, user: dict = Depends(require_admin())):
+    return await store_extras.update_user_category(request.app.db, category_id, payload)
+
+
+@app.delete("/api/admin/user-categories/{category_id}")
+async def admin_delete_user_category(request: Request, category_id: str, user: dict = Depends(require_admin())):
+    return await store_extras.delete_user_category(request.app.db, category_id)
+
+
+class _UserCatsBody(BaseModel):
+    category_ids: List[str] = []
+
+
+@app.put("/api/admin/users/{user_id}/categories")
+async def admin_set_user_categories(request: Request, user_id: str, body: _UserCatsBody, user: dict = Depends(require_admin())):
+    return await store_extras.set_user_categories(request.app.db, user_id, body.category_ids)
+
+
+# ==================== COUPONS ====================
+
+@app.get("/api/admin/coupons")
+async def admin_list_coupons(request: Request, user: dict = Depends(require_admin())):
+    return {"coupons": await store_extras.list_coupons(request.app.db)}
+
+
+@app.post("/api/admin/coupons")
+async def admin_create_coupon(request: Request, payload: store_extras.CouponIn, user: dict = Depends(require_admin())):
+    return await store_extras.create_coupon(request.app.db, payload)
+
+
+@app.put("/api/admin/coupons/{coupon_id}")
+async def admin_update_coupon(request: Request, coupon_id: str, payload: store_extras.CouponIn, user: dict = Depends(require_admin())):
+    return await store_extras.update_coupon(request.app.db, coupon_id, payload)
+
+
+@app.delete("/api/admin/coupons/{coupon_id}")
+async def admin_delete_coupon(request: Request, coupon_id: str, user: dict = Depends(require_admin())):
+    return await store_extras.delete_coupon(request.app.db, coupon_id)
+
+
+class _CouponValidateBody(BaseModel):
+    code: str
+    subtotal: float
+
+
+@app.post("/api/coupons/validate")
+async def public_validate_coupon(request: Request, body: _CouponValidateBody):
+    db = request.app.db
+    user = await get_optional_user(request)
+    return await store_extras.validate_coupon(db, body.code, body.subtotal, user)

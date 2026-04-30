@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
-  Star, Truck, Palette, FileEdit, Repeat, ChevronDown,
+  Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -24,6 +24,7 @@ const NAV_GROUPS = [
     label: 'Vendas',
     items: [
       { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders' },
+      { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons' },
       { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices' },
       { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments' },
       { to: '/backoffice/frete', icon: Truck, label: 'Frete', testId: 'nav-shipping' },
@@ -62,6 +63,7 @@ const NAV_GROUPS = [
     label: 'Sistema',
     items: [
       { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users' },
+      { to: '/backoffice/categorias-usuarios', icon: Tag, label: 'Cat. de usuários', testId: 'nav-user-categories' },
       { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings' },
     ],
   },

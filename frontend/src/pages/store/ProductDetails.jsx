@@ -63,8 +63,10 @@ export default function ProductDetails() {
   if (loading) return <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-brand-main" /></div>;
   if (!product) return <div className="max-w-3xl mx-auto p-10 text-center">Produto não encontrado.</div>;
 
-  const price = product.discount_price || product.price;
-  const hasDiscount = product.discount_price && product.discount_price < product.price;
+  const tierApplied = product.tier_applied;
+  const price = (typeof product.effective_price === 'number') ? product.effective_price : (product.discount_price || product.price);
+  const original = (typeof product.original_price === 'number' && product.original_price > 0) ? product.original_price : (product.discount_price || product.price);
+  const hasDiscount = price < (product.price || 0);
   const img = (product.images && product.images[0]) || PLACEHOLDER;
 
   return (
@@ -86,10 +88,16 @@ export default function ProductDetails() {
           <div className="mt-6 flex items-baseline gap-3">
             <span className="font-heading font-black text-4xl text-txt-primary" data-testid="product-price">{formatCurrency(price)}</span>
             {hasDiscount && <span className="text-base text-txt-secondary line-through">{formatCurrency(product.price)}</span>}
+            {!hasDiscount && tierApplied && original > price && <span className="text-base text-txt-secondary line-through">{formatCurrency(original)}</span>}
           </div>
+          {tierApplied && (
+            <div className="mt-1 inline-block text-[11px] uppercase tracking-wider bg-brand-light text-brand-main rounded-full px-2.5 py-1 font-bold">
+              {tierApplied.label || 'Preço especial para você'}
+            </div>
+          )}
           {hasDiscount && (
             <div className="text-sm text-emerald-600 font-semibold mt-1">
-              Economize {formatCurrency(product.price - price)}
+              Economize {formatCurrency((product.price || 0) - price)}
             </div>
           )}
 

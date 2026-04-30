@@ -12,11 +12,13 @@ const emptyForm = {
   category: '', subcategory: '', images: [], stock: 0,
   active: true, featured: false, brand: '', points_value: 0,
   weight: null, length_cm: null, width_cm: null, height_cm: null,
+  pricing_tiers: [],
 };
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [userCats, setUserCats] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -28,12 +30,14 @@ export default function AdminProducts() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, c] = await Promise.all([
+      const [p, c, uc] = await Promise.all([
         api.get(`/api/admin/products?limit=100${search ? `&search=${encodeURIComponent(search)}` : ''}`),
         api.get('/api/categories'),
+        api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
       ]);
       setProducts(p.products || []);
       setCategories(c.categories || []);
+      setUserCats(uc.categories || []);
       if (!form.category && c.categories?.[0]) {
         setForm(f => ({ ...f, category: f.category || c.categories[0].name }));
       }
@@ -58,6 +62,7 @@ export default function AdminProducts() {
       brand: p.brand || '', points_value: p.points_value || 0,
       weight: p.weight ?? null, length_cm: p.length_cm ?? null,
       width_cm: p.width_cm ?? null, height_cm: p.height_cm ?? null,
+      pricing_tiers: Array.isArray(p.pricing_tiers) ? p.pricing_tiers : [],
     });
     setShowForm(true);
   };
@@ -66,12 +71,17 @@ export default function AdminProducts() {
     e.preventDefault();
     setSaving(true);
     try {
+      const tiers = (form.pricing_tiers || [])
+        .filter(t => t && (t.price > 0))
+        .filter(t => t.type !== 'category' || t.user_category_id)
+        .map(t => ({ type: t.type, user_category_id: t.user_category_id || null, price: parseFloat(t.price) || 0, label: t.label || '' }));
       const payload = {
         ...form,
         price: parseFloat(form.price),
         discount_price: form.discount_price ? parseFloat(form.discount_price) : null,
         stock: parseInt(form.stock, 10) || 0,
         points_value: parseFloat(form.points_value || 0),
+        pricing_tiers: tiers,
       };
       if (editing) await api.put(`/api/admin/products/${editing}`, payload);
       else await api.post('/api/admin/products', payload);
@@ -206,6 +216,53 @@ export default function AdminProducts() {
               <div className="grid grid-cols-1 gap-3">
                 <Input label="Pontos por unidade" type="number" step="0.01" value={form.points_value} onChange={e => setForm({ ...form, points_value: e.target.value })} placeholder="Ex: 10" />
               </div>
+
+              {/* Preços por contexto */}
+              <div className="border border-border rounded-lg p-4 bg-bg-secondary/40">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <div className="font-bold text-sm">Preços por contexto (opcional)</div>
+                    <div className="text-xs text-txt-secondary">Substitui o preço base quando a regra é atendida. Se houver mais de uma regra válida, vale o menor preço.</div>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setForm({ ...form, pricing_tiers: [...(form.pricing_tiers || []), { type: 'logged', user_category_id: null, price: 0, label: '' }] })} data-testid="add-tier-btn">
+                    <Plus className="w-3 h-3" /> Regra
+                  </Button>
+                </div>
+                {(form.pricing_tiers || []).length === 0 && (
+                  <div className="text-xs text-txt-secondary py-2">Nenhuma regra. O preço base se aplica a todos.</div>
+                )}
+                <div className="space-y-2">
+                  {(form.pricing_tiers || []).map((t, idx) => {
+                    const update = (patch) => {
+                      const next = [...form.pricing_tiers];
+                      next[idx] = { ...next[idx], ...patch };
+                      if (patch.type && patch.type !== 'category') next[idx].user_category_id = null;
+                      setForm({ ...form, pricing_tiers: next });
+                    };
+                    const remove = () => setForm({ ...form, pricing_tiers: form.pricing_tiers.filter((_, i) => i !== idx) });
+                    return (
+                      <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white border border-border rounded-lg p-2 items-center">
+                        <select className="md:col-span-3 px-2 py-1.5 border border-border rounded text-sm" value={t.type} onChange={e => update({ type: e.target.value })}>
+                          <option value="guest">Não logado</option>
+                          <option value="logged">Logado (qualquer)</option>
+                          <option value="category">Categoria de usuário</option>
+                        </select>
+                        {t.type === 'category' ? (
+                          <select className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.user_category_id || ''} onChange={e => update({ user_category_id: e.target.value || null })}>
+                            <option value="">Selecione a categoria...</option>
+                            {userCats.map(c => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
+                          </select>
+                        ) : (
+                          <input className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.label || ''} placeholder="Rótulo (opcional)" onChange={e => update({ label: e.target.value })} />
+                        )}
+                        <input type="number" min="0" step="0.01" className="md:col-span-3 px-2 py-1.5 border border-border rounded text-sm" placeholder="Preço (R$)" value={t.price} onChange={e => update({ price: parseFloat(e.target.value) || 0 })} />
+                        <Button type="button" variant="outline" size="sm" onClick={remove} className="md:col-span-2"><Trash2 className="w-3 h-3 text-red-500" /></Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="grid grid-cols-4 gap-3">
                 <Input label="Peso (kg)" type="number" step="0.001" value={form.weight ?? ''} onChange={e => setForm({ ...form, weight: e.target.value ? parseFloat(e.target.value) : null })} placeholder="0.300" data-testid="prod-weight" />
                 <Input label="Comprimento (cm)" type="number" step="0.1" value={form.length_cm ?? ''} onChange={e => setForm({ ...form, length_cm: e.target.value ? parseFloat(e.target.value) : null })} placeholder="16" data-testid="prod-length" />

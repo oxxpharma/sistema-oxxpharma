@@ -31,17 +31,28 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
   const [u, setU] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [allCats, setAllCats] = useState([]);
 
   const load = async () => {
     try {
-      const r = await api.get(`/api/admin/users/${userId}`);
+      const [r, ucs] = await Promise.all([
+        api.get(`/api/admin/users/${userId}`),
+        api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
+      ]);
+      if (!Array.isArray(r.category_ids)) r.category_ids = [];
       setU(r);
+      setAllCats(ucs.categories || []);
     } catch (e) { toast.error(e?.message); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [userId]);
 
   const set = (k, v) => setU(prev => ({ ...prev, [k]: v }));
+  const toggleCat = (cid) => {
+    const cur = new Set(u.category_ids || []);
+    if (cur.has(cid)) cur.delete(cid); else cur.add(cid);
+    setU(prev => ({ ...prev, category_ids: [...cur] }));
+  };
 
   const save = async () => {
     setSaving(true);
@@ -54,6 +65,8 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         access_level: u.role === 'admin' ? 0 : 99,
       };
       const updated = await api.put(`/api/admin/users/${userId}`, payload);
+      // salva categorias separadamente
+      await api.put(`/api/admin/users/${userId}/categories`, { category_ids: u.category_ids || [] });
       toast.success('Usuário atualizado');
       onSaved && onSaved(updated);
       onClose();
@@ -120,6 +133,25 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         <Select label="Perfil" value={u.role || 'customer'} onChange={(v) => set('role', v)} options={ROLE_OPTIONS} testId="edit-role" />
         <Select label="Rede MMN" value={u.network_type || 'customer'} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="edit-network" />
         <Field label="ID do líder na rede MMN (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />
+      </div>
+
+      {/* Categorias do usuário (multi-select) */}
+      <div className="px-5 pb-5">
+        <label className="text-xs font-semibold block mb-2">Categorias do usuário</label>
+        {allCats.length === 0 ? (
+          <div className="text-xs text-txt-secondary">Nenhuma categoria cadastrada. Crie em <span className="font-mono">/backoffice/categorias-usuarios</span>.</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {allCats.map(c => {
+              const sel = (u.category_ids || []).includes(c.category_id);
+              return (
+                <button type="button" key={c.category_id} onClick={() => toggleCat(c.category_id)} className={`text-xs px-3 py-1.5 rounded-full border-2 transition`} style={{ borderColor: c.color, color: sel ? 'white' : c.color, background: sel ? c.color : 'white' }} data-testid={`user-cat-toggle-${c.slug}`}>
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="p-5 border-t border-border bg-bg-secondary/50 space-y-3">

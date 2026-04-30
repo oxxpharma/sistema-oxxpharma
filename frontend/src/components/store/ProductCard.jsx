@@ -10,9 +10,13 @@ const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde8
 export default function ProductCard({ product }) {
   const { addItem } = useCart();
 
-  const price = product.discount_price || product.price;
-  const hasDiscount = product.discount_price && product.discount_price < product.price;
-  const discountPct = hasDiscount ? Math.round((1 - product.discount_price / product.price) * 100) : 0;
+  // Backend ja calcula effective_price baseado em pricing_tiers do usuario.
+  // Fallback para produtos antigos sem o campo decorado.
+  const tierApplied = product.tier_applied;
+  const effective = (typeof product.effective_price === 'number') ? product.effective_price : (product.discount_price || product.price);
+  const original = (typeof product.original_price === 'number' && product.original_price > 0) ? product.original_price : (product.discount_price || product.price);
+  const hasDiscount = effective < (product.price || 0);
+  const discountPct = hasDiscount && product.price ? Math.round((1 - effective / product.price) * 100) : 0;
   const img = (product.images && product.images[0]) || PLACEHOLDER;
 
   const onAdd = async (e) => {
@@ -50,9 +54,17 @@ export default function ProductCard({ product }) {
           <div className="text-[11px] uppercase tracking-wider text-brand-main font-bold mb-1">{product.brand}</div>
         )}
         <h3 className="text-sm font-semibold text-txt-primary line-clamp-2 min-h-[40px]">{product.name}</h3>
+        {tierApplied && (
+          <div className="mt-1 inline-block self-start text-[10px] uppercase tracking-wider bg-brand-light text-brand-main rounded-full px-2 py-0.5 font-bold">
+            {tierApplied.label || 'Preço especial'}
+          </div>
+        )}
         <div className="mt-3 flex items-baseline gap-2">
-          <span className="text-lg font-heading font-black text-txt-primary">{formatCurrency(price)}</span>
+          <span className="text-lg font-heading font-black text-txt-primary">{formatCurrency(effective)}</span>
           {hasDiscount && <span className="text-xs text-txt-secondary line-through">{formatCurrency(product.price)}</span>}
+          {!hasDiscount && tierApplied && original > effective && (
+            <span className="text-xs text-txt-secondary line-through">{formatCurrency(original)}</span>
+          )}
         </div>
         <button
           onClick={onAdd}
