@@ -4,6 +4,7 @@ import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RefProvider } from './contexts/RefContext';
 import { CartProvider } from './contexts/CartContext';
+import BrandHead from './components/branding/BrandHead';
 
 // Layouts
 import StoreLayout from './layouts/StoreLayout';
@@ -139,6 +140,7 @@ export default function App() {
       <AuthProvider>
         <RefProvider>
           <CartProvider>
+            <BrandHead />
             <AppRoutes />
             <Toaster richColors position="top-right" />
           </CartProvider>

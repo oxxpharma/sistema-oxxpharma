@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
 import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload } from 'lucide-react';
 import { toast } from 'sonner';
@@ -54,6 +55,8 @@ export default function AdminAppearance() {
       await api.put('/api/admin/site-settings', payload);
       toast.success('Aparência salva!');
       await load();
+      // invalida cache global do useSiteSettings → favicon, logos e título reagem na hora
+      await refreshSiteSettings();
     } catch (e) { toast.error(e?.message); }
     finally { setSaving(false); }
   };
