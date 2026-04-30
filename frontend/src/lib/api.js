@@ -1,4 +1,20 @@
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+// Se o REACT_APP_BACKEND_URL apontar para um host diferente do navegador
+// (cenário de preview onde cada job tem URL própria), usa o origin atual
+// para evitar problemas de CORS via proxy intermediário (ex: Cloudflare).
+// Em produção real (mesmo domínio), o comportamento não muda.
+function resolveApiBase() {
+  const envUrl = process.env.REACT_APP_BACKEND_URL || '';
+  if (typeof window === 'undefined') return envUrl;
+  try {
+    const env = new URL(envUrl);
+    if (env.host !== window.location.host) {
+      return window.location.origin;
+    }
+  } catch (e) { /* envUrl invalido — cai pro fallback */ }
+  return envUrl;
+}
+
+const API_URL = resolveApiBase();
 
 function getToken() {
   return localStorage.getItem('token');
