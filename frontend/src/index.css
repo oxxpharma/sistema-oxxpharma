@@ -66,3 +66,10 @@ h1, h2, h3, h4, h5, h6 {
 .stagger-3 { animation-delay: 150ms; }
 .stagger-4 { animation-delay: 200ms; }
 .stagger-5 { animation-delay: 250ms; }
+
+/* Scrollbar discreta para o menu admin */
+.admin-nav-scroll::-webkit-scrollbar { width: 6px; }
+.admin-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+.admin-nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+.admin-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+.admin-nav-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
