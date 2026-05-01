@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/Button';
 import AddressForm from '../../components/store/AddressForm';
 import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
 
 const emptyAddr = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true };
 
@@ -94,14 +95,21 @@ export default function CheckoutPage() {
     }
   };
 
-  const shipping = 15.90;
+  const settings = useSiteSettings();
+  const subtotal = cart.subtotal || 0;
+  const fsMode = settings?.free_shipping_mode || 'off';
+  const fsMin = Number(settings?.free_shipping_min_subtotal || 0);
+  const isFreeShipping = subtotal > 0 && (
+    fsMode === 'all' || (fsMode === 'above' && fsMin > 0 && subtotal >= fsMin)
+  );
+  const shipping = isFreeShipping ? 0 : 15.90;
   const couponDiscount = (() => {
     try {
       const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
       return Number(c?.discount || 0);
     } catch { return 0; }
   })();
-  const total = Math.max(0, (cart.subtotal || 0) + shipping - couponDiscount);
+  const total = Math.max(0, subtotal + shipping - couponDiscount);
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
 
@@ -217,7 +225,14 @@ export default function CheckoutPage() {
             </div>
             <div className="space-y-1.5 py-3 text-sm">
               <div className="flex justify-between"><span className="text-txt-secondary">Subtotal</span><span>{formatCurrency(cart.subtotal)}</span></div>
-              <div className="flex justify-between"><span className="text-txt-secondary">Frete</span><span>{formatCurrency(shipping)}</span></div>
+              <div className="flex justify-between">
+                <span className="text-txt-secondary">Frete</span>
+                {isFreeShipping ? (
+                  <span className="font-semibold text-emerald-600">{settings?.free_shipping_label || 'Frete grátis'}</span>
+                ) : (
+                  <span>{formatCurrency(shipping)}</span>
+                )}
+              </div>
               {couponDiscount > 0 && (
                 <div className="flex justify-between text-emerald-600"><span>Cupom</span><span className="font-semibold">−{formatCurrency(couponDiscount)}</span></div>
               )}

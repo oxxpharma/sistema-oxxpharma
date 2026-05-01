@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { api } from '../../lib/api';
 import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
 
 const COUPON_KEY = 'oxx_coupon_v1';
 
@@ -15,6 +16,7 @@ export default function CartPage() {
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [updating, setUpdating] = useState(null);
+  const settings = useSiteSettings();
 
   // Cupom
   const [couponInput, setCouponInput] = useState('');
@@ -24,7 +26,15 @@ export default function CartPage() {
   const [couponLoading, setCouponLoading] = useState(false);
 
   const subtotal = cart.subtotal || 0;
-  const shipping = subtotal > 0 ? 15.90 : 0;
+
+  // Frete grátis baseado no site_settings (espelha lógica do backend)
+  const fsMode = settings?.free_shipping_mode || 'off';
+  const fsMin = Number(settings?.free_shipping_min_subtotal || 0);
+  const isFreeShipping = subtotal > 0 && (
+    fsMode === 'all' || (fsMode === 'above' && fsMin > 0 && subtotal >= fsMin)
+  );
+  const shipping = subtotal === 0 ? 0 : (isFreeShipping ? 0 : 15.90);
+  const remainingForFree = (fsMode === 'above' && fsMin > 0 && subtotal < fsMin) ? (fsMin - subtotal) : 0;
   const discount = coupon?.discount || 0;
   const total = Math.max(0, subtotal + shipping - discount);
 
@@ -195,8 +205,17 @@ export default function CartPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-txt-secondary">Frete</span>
-                <span className="font-semibold">{formatCurrency(shipping)}</span>
+                {isFreeShipping ? (
+                  <span className="font-semibold text-emerald-600">{settings?.free_shipping_label || 'Frete grátis'}</span>
+                ) : (
+                  <span className="font-semibold">{formatCurrency(shipping)}</span>
+                )}
               </div>
+              {remainingForFree > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-[11px] text-amber-800">
+                  Faltam <b>{formatCurrency(remainingForFree)}</b> para você ganhar <b>frete grátis</b> 🚚
+                </div>
+              )}
               {discount > 0 && (
                 <div className="flex justify-between text-emerald-600">
                   <span>Desconto</span>
