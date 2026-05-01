@@ -136,40 +136,57 @@ export default function MyReferral() {
         { icon: 'Share2', title: 'Link exclusivo', desc: 'Compartilhe seu código nas redes sociais.' },
         { icon: 'Send', title: 'Envio diário', desc: 'Todo dia às 23:59 seu saldo é enviado pro cartão.' },
       ];
+    const cardImage = settings?.referral_box_image_url || '';
+    const cardImgWidth = settings?.referral_box_image_width || '320px';
+    const cardImgRotation = String(settings?.referral_box_image_rotation ?? '-8');
     return (
       <div className="max-w-4xl mx-auto px-4 py-8" data-testid="my-referral">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-main via-brand-hover to-orange-700 text-white p-8 md:p-12 shadow-xl">
-          <div className="absolute -top-24 -right-24 w-72 h-72 bg-white/10 rounded-full blur-3xl" />
-          <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-white/5 rounded-full blur-3xl" />
-          <div className="relative">
-            <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur border border-white/20 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest mb-6">
-              <Gift className="w-3.5 h-3.5" /> {badge}
-            </div>
-            <h1 className="font-heading font-black text-3xl md:text-5xl mb-4 leading-tight whitespace-pre-line">
-              {titleRaw}
-            </h1>
-            <p className="text-white/90 text-base md:text-lg max-w-xl mb-6" dangerouslySetInnerHTML={{ __html: desc }} />
-            <Button
-              size="lg"
-              onClick={() => setShowForm(true)}
-              className="bg-white text-brand-main hover:bg-white/90 border-white font-bold shadow-lg"
-              data-testid="enroll-program-btn"
-            >
-              <CreditCard className="w-5 h-5" /> {ctaLabel}
-            </Button>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-              {features.slice(0, 3).map((f, i) => {
-                const Ic = getIcon(f.icon);
-                return (
-                  <div key={i} className="bg-white/10 backdrop-blur rounded-xl p-4 border border-white/15">
-                    <Ic className="w-6 h-6 mb-2" />
-                    <div className="font-bold mb-1">{f.title}</div>
-                    <div className="text-xs text-white/80">{f.desc}</div>
-                  </div>
-                );
-              })}
+        <div className="relative">
+          {/* Caixa laranja: overflow-hidden so para os blurs internos */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-main via-brand-hover to-orange-700 text-white p-8 md:p-12 shadow-xl">
+            <div className="absolute -top-24 -right-24 w-72 h-72 bg-white/10 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-white/5 rounded-full blur-3xl" />
+            <div className="relative">
+              <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur border border-white/20 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest mb-6">
+                <Gift className="w-3.5 h-3.5" /> {badge}
+              </div>
+              <h1 className={`font-heading font-black text-3xl md:text-5xl mb-4 leading-tight whitespace-pre-line ${cardImage ? 'md:max-w-[60%]' : ''}`}>
+                {titleRaw}
+              </h1>
+              <p className={`text-white/90 text-base md:text-lg mb-6 ${cardImage ? 'md:max-w-[60%]' : 'max-w-xl'}`} dangerouslySetInnerHTML={{ __html: desc }} />
+              <Button
+                size="lg"
+                onClick={() => setShowForm(true)}
+                className="bg-white text-brand-main hover:bg-white/90 border-white font-bold shadow-lg"
+                data-testid="enroll-program-btn"
+              >
+                <CreditCard className="w-5 h-5" /> {ctaLabel}
+              </Button>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
+                {features.slice(0, 3).map((f, i) => {
+                  const Ic = getIcon(f.icon);
+                  return (
+                    <div key={i} className="bg-white/10 backdrop-blur rounded-xl p-4 border border-white/15">
+                      <Ic className="w-6 h-6 mb-2" />
+                      <div className="font-bold mb-1">{f.title}</div>
+                      <div className="text-xs text-white/80">{f.desc}</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
+
+          {/* Imagem decorativa (vaza para fora do quadro laranja) */}
+          {cardImage && (
+            <img
+              src={cardImage}
+              alt="Cartão de benefícios"
+              data-testid="referral-box-image"
+              className="hidden md:block pointer-events-none absolute top-1/2 right-0 -translate-y-1/2 translate-x-[12%] drop-shadow-2xl select-none"
+              style={{ width: cardImgWidth, transform: `translate(12%, -50%) rotate(${cardImgRotation}deg)` }}
+            />
+          )}
         </div>
 
         {showForm && (

@@ -316,6 +316,15 @@ export default function AdminAppearance() {
             <Field label="Texto do botão de adesão" value={s.referral_box_cta_label} onChange={(v) => set('referral_box_cta_label', v)} testId="ref-cta" />
           </Card>
 
+          <Card title="Imagem decorativa (cartão / mockup) - opcional">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">Aparece no canto direito da caixa laranja, com leve rotação e podendo "vazar" para fora do quadro. Ideal: PNG transparente do cartão (recomendado 600×400px).</p>
+            <ImageUpload label="Imagem do cartão / mockup" url={s.referral_box_image_url} onPick={() => uploadImage('referral_box_image_url')} onClear={() => set('referral_box_image_url', '')} testId="ref-box-image" />
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Largura na tela (ex: 320px ou 26rem)" value={s.referral_box_image_width} onChange={(v) => set('referral_box_image_width', v)} placeholder="320px" testId="ref-box-image-width" />
+              <Field label="Rotação em graus (ex: -8 ou 12)" value={s.referral_box_image_rotation} onChange={(v) => set('referral_box_image_rotation', v)} placeholder="-8" testId="ref-box-image-rotation" />
+            </div>
+          </Card>
+
           <Card title="Cards de destaque (até 3)">
             <p className="text-xs text-txt-secondary -mt-1 mb-3">Aparecem abaixo do título da caixa laranja, mostrando os 3 principais benefícios.</p>
             <div className="space-y-3">

@@ -2867,6 +2867,9 @@ DEFAULT_SITE_SETTINGS = {
         {"icon": "Rocket", "title": "Link exclusivo", "desc": "Compartilhe seu código nas redes sociais."},
         {"icon": "Clock", "title": "Envio diário", "desc": "Todo dia às 23:59 (horário de Brasília) seu saldo é enviado pro cartão."},
     ],
+    "referral_box_image_url": "",
+    "referral_box_image_width": "320px",
+    "referral_box_image_rotation": "-8",
     # ============ Frete grátis ============
     # mode: 'off' | 'all' | 'above'
     "free_shipping_mode": "off",
