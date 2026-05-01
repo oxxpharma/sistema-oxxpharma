@@ -141,6 +141,7 @@ export default function MyReferral() {
     const cardImgRotation = String(settings?.referral_box_image_rotation ?? '-8');
     const cardImgTx = String(settings?.referral_box_image_translate_x ?? '12');
     const cardImgTy = String(settings?.referral_box_image_translate_y ?? '-50');
+    const cardImgFloat = settings?.referral_box_image_float !== false;
     return (
       <div className="max-w-4xl mx-auto px-4 py-8" data-testid="my-referral">
         <div className="relative">
@@ -185,8 +186,14 @@ export default function MyReferral() {
               src={cardImage}
               alt="Cartão de benefícios"
               data-testid="referral-box-image"
-              className="hidden md:block pointer-events-none absolute top-1/2 right-0 drop-shadow-2xl select-none"
-              style={{ width: cardImgWidth, transform: `translate(${cardImgTx}%, ${cardImgTy}%) rotate(${cardImgRotation}deg)` }}
+              className={`hidden md:block pointer-events-none absolute top-1/2 right-0 drop-shadow-2xl select-none ${cardImgFloat ? 'referral-card-float' : ''}`}
+              style={{
+                width: cardImgWidth,
+                '--tx': `${cardImgTx}%`,
+                '--ty': `${cardImgTy}%`,
+                '--rot': `${cardImgRotation}deg`,
+                transform: `translate(${cardImgTx}%, ${cardImgTy}%) rotate(${cardImgRotation}deg)`,
+              }}
             />
           )}
         </div>

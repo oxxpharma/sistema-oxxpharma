@@ -73,3 +73,19 @@ h1, h2, h3, h4, h5, h6 {
 .admin-nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 .admin-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 .admin-nav-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+
+/* Animação de flutuação do cartão na caixa do programa de indicação.
+   Usa CSS variables --tx, --ty e --rot definidas inline pelo componente,
+   para combinar com translate/rotate configuráveis do admin. */
+@keyframes referralCardFloat {
+  0%, 100% {
+    transform: translate(var(--tx, 12%), var(--ty, -50%)) rotate(var(--rot, -8deg));
+  }
+  50% {
+    transform: translate(var(--tx, 12%), calc(var(--ty, -50%) - 12px)) rotate(calc(var(--rot, -8deg) + 1.5deg));
+  }
+}
+.referral-card-float {
+  animation: referralCardFloat 5s ease-in-out infinite;
+  will-change: transform;
+}

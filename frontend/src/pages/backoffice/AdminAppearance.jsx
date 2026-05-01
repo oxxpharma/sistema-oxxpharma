@@ -325,6 +325,16 @@ export default function AdminAppearance() {
               <Field label="Translate X (% — positivo = direita, negativo = esquerda)" value={s.referral_box_image_translate_x} onChange={(v) => set('referral_box_image_translate_x', v)} placeholder="12" testId="ref-box-image-tx" hint="Quanto a imagem vaza para fora do quadro pela direita." />
               <Field label="Translate Y (% — positivo = baixo, negativo = cima)" value={s.referral_box_image_translate_y} onChange={(v) => set('referral_box_image_translate_y', v)} placeholder="-50" testId="ref-box-image-ty" hint="-50 mantém centralizado verticalmente; reduza para subir." />
             </div>
+            <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={s.referral_box_image_float !== false}
+                onChange={(e) => set('referral_box_image_float', e.target.checked)}
+                data-testid="ref-box-image-float"
+              />
+              <span className="text-sm">Movimento suave de flutuação</span>
+              <span className="text-xs text-txt-secondary">— animação contínua subindo e descendo levemente</span>
+            </label>
           </Card>
 
           <Card title="Cards de destaque (até 3)">
