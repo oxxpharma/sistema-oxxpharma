@@ -2870,6 +2870,8 @@ DEFAULT_SITE_SETTINGS = {
     "referral_box_image_url": "",
     "referral_box_image_width": "320px",
     "referral_box_image_rotation": "-8",
+    "referral_box_image_translate_x": "12",
+    "referral_box_image_translate_y": "-50",
     # ============ Frete grátis ============
     # mode: 'off' | 'all' | 'above'
     "free_shipping_mode": "off",

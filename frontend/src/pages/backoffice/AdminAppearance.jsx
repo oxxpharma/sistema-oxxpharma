@@ -322,6 +322,8 @@ export default function AdminAppearance() {
             <div className="grid grid-cols-2 gap-3 mt-3">
               <Field label="Largura na tela (ex: 320px ou 26rem)" value={s.referral_box_image_width} onChange={(v) => set('referral_box_image_width', v)} placeholder="320px" testId="ref-box-image-width" />
               <Field label="Rotação em graus (ex: -8 ou 12)" value={s.referral_box_image_rotation} onChange={(v) => set('referral_box_image_rotation', v)} placeholder="-8" testId="ref-box-image-rotation" />
+              <Field label="Translate X (% — positivo = direita, negativo = esquerda)" value={s.referral_box_image_translate_x} onChange={(v) => set('referral_box_image_translate_x', v)} placeholder="12" testId="ref-box-image-tx" hint="Quanto a imagem vaza para fora do quadro pela direita." />
+              <Field label="Translate Y (% — positivo = baixo, negativo = cima)" value={s.referral_box_image_translate_y} onChange={(v) => set('referral_box_image_translate_y', v)} placeholder="-50" testId="ref-box-image-ty" hint="-50 mantém centralizado verticalmente; reduza para subir." />
             </div>
           </Card>
 
