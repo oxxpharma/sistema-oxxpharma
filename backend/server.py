@@ -88,6 +88,8 @@ DEFAULT_SETTINGS = {
     "email_trigger_commission_earned": True,
     "email_trigger_admin_new_candidate": True,
     "email_trigger_admin_new_order": True,
+    # Email que recebe a fatura detalhada de cada pedido PAGO (vazio = desabilitado)
+    "order_invoice_email_to": "",
     "email_trigger_welcome": True,
     # Webhook inbound Rede 1
     "external_webhook_token": "",               # gerado no seed
@@ -1085,7 +1087,70 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
         slug = slug_map.get(status)
         if slug:
             asyncio.create_task(email_service.trigger(db, slug, order_user["email"], ctx))
+    # Fatura detalhada para email configurado (apenas quando vira 'paid')
+    if status == "paid" and final and order_user:
+        asyncio.create_task(_send_admin_invoice_if_configured(db, final, order_user))
     return final
+
+async def _send_admin_invoice_if_configured(db, order, order_user):
+    """Envia copia da fatura detalhada para o email configurado em site_settings.
+    Acionado quando order vira 'paid' (status de pagamento confirmado).
+    """
+    try:
+        s = await _get_site_settings(db)
+        to_addr = (s.get("order_invoice_email_to") or "").strip()
+        if not to_addr:
+            return
+        ctx = order_ctx(order, order_user)
+        # Pre-renderiza HTML com items, endereco, totais (o render_template nao suporta loops)
+        items = order.get("items") or []
+        items_rows = []
+        for it in items:
+            qty = int(it.get("quantity") or 1)
+            unit = float(it.get("price") or 0)
+            total = float(it.get("total") or (qty * unit))
+            items_rows.append(
+                f"<tr>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;'>{(it.get('name') or it.get('product_name') or '')[:80]}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:center;'>{qty}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:right;'>R$ {unit:.2f}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:right;font-weight:bold;'>R$ {total:.2f}</td>"
+                f"</tr>"
+            )
+        items_table = (
+            "<table width='100%' cellspacing='0' cellpadding='0' style='border-collapse:collapse;font-size:13px;'>"
+            "<thead><tr style='background:#F7F7F7;'>"
+            "<th style='padding:6px 8px;text-align:left;'>Produto</th>"
+            "<th style='padding:6px 8px;text-align:center;'>Qtd</th>"
+            "<th style='padding:6px 8px;text-align:right;'>Unit.</th>"
+            "<th style='padding:6px 8px;text-align:right;'>Total</th>"
+            "</tr></thead><tbody>" + "".join(items_rows) + "</tbody></table>"
+        )
+        addr = order.get("shipping_address") or {}
+        address_html = (
+            f"{addr.get('name') or order_user.get('name') or ''}<br>"
+            f"{addr.get('street') or ''}, {addr.get('number') or ''} {addr.get('complement') or ''}<br>"
+            f"{addr.get('neighborhood') or ''} - {addr.get('city') or ''}/{addr.get('state') or ''}<br>"
+            f"CEP {addr.get('zip_code') or ''}"
+        )
+        ctx["invoice"] = {
+            "items_table_html": items_table,
+            "address_html": address_html,
+            "subtotal_fmt": f"R$ {float(order.get('subtotal') or 0):.2f}",
+            "shipping_fmt": f"R$ {float(order.get('shipping_cost') or 0):.2f}",
+            "discount_fmt": f"R$ {float(order.get('discount_amount') or 0):.2f}",
+            "total_fmt": f"R$ {float(order.get('total') or 0):.2f}",
+            "shipping_service": order.get("shipping_service_name") or "-",
+            "shipping_carrier": order.get("shipping_carrier") or "-",
+            "payment_method": (order.get("payment_method") or "-").upper(),
+            "paid_at_fmt": (order.get("paid_at") or "")[:19].replace("T", " "),
+            "invoice_number": order.get("invoice_number") or "-",
+            "coupon_code": order.get("coupon_code") or "-",
+        }
+        await email_service.trigger(db, "invoice_admin_paid", to_addr, ctx, meta={"order_id": order.get("order_id")})
+    except Exception as e:
+        logger.warning(f"Falha enviando fatura admin: {e}")
+
 
 @app.delete("/api/admin/orders/{order_id}")
 async def admin_delete_order(
@@ -1555,6 +1620,9 @@ async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, s
     order_user = await db.users.find_one({"user_id": final.get("user_id")}, {"_id": 0, "password_hash": 0}) if final else None
     if final and order_user and order_user.get("email"):
         asyncio.create_task(email_service.trigger(db, "order_paid", order_user["email"], order_ctx(final, order_user)))
+    # Fatura detalhada para email configurado no admin
+    if final and order_user:
+        asyncio.create_task(_send_admin_invoice_if_configured(db, final, order_user))
     return final
 
 
@@ -1668,6 +1736,7 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_a
         "company_state", "company_zip", "company_phone", "company_email",
         "invoice_prefix",
         "email_enabled", "resend_api_key", "email_from", "email_admin_recipients",
+        "order_invoice_email_to",
         "email_trigger_order_created", "email_trigger_order_paid",
         "email_trigger_order_shipped", "email_trigger_order_delivered",
         "email_trigger_commission_earned", "email_trigger_admin_new_candidate",

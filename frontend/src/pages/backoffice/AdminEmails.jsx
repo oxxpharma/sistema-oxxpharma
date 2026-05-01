@@ -76,6 +76,7 @@ function ConfigTab() {
         resend_api_key: settings.resend_api_key || '',
         email_from: settings.email_from || '',
         email_admin_recipients: settings.email_admin_recipients || '',
+        order_invoice_email_to: settings.order_invoice_email_to || '',
       };
       Object.keys(TRIGGER_LABELS).forEach(k => { payload[k] = !!settings[k]; });
       const updated = await api.put('/api/admin/settings', payload);
@@ -112,6 +113,14 @@ function ConfigTab() {
           <Input label="RESEND_API_KEY" type="password" value={settings.resend_api_key || ''} onChange={e => setSettings({ ...settings, resend_api_key: e.target.value })} placeholder="re_xxxxxxxx" data-testid="resend-key" />
           <Input label="Remetente (From)" value={settings.email_from || ''} onChange={e => setSettings({ ...settings, email_from: e.target.value })} placeholder="OxxPharma <no-reply@seudominio.com.br>" hint='Enquanto você não verifica o domínio no Resend, use "onboarding@resend.dev".' data-testid="email-from" />
           <Input label="Emails dos admins (recebem alertas)" value={settings.email_admin_recipients || ''} onChange={e => setSettings({ ...settings, email_admin_recipients: e.target.value })} placeholder="admin@ex.com, outro@ex.com" hint="Separe por vírgula. Se vazio, usa emails de usuários role=admin." />
+          <Input
+            label="E-mail para fatura detalhada de pedidos pagos"
+            value={settings.order_invoice_email_to || ''}
+            onChange={e => setSettings({ ...settings, order_invoice_email_to: e.target.value })}
+            placeholder="financeiro@oxxpharma.com.br"
+            hint="Quando um pedido for marcado como PAGO, uma cópia da fatura detalhada (itens, totais, endereço, pagamento) é enviada automaticamente para este e-mail. Deixe vazio para desabilitar."
+            data-testid="order-invoice-email"
+          />
         </div>
         <div className="flex gap-2 mt-4">
           <Button onClick={save} loading={saving} data-testid="save-email-config">Salvar</Button>

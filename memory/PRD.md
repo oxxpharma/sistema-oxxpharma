@@ -70,6 +70,13 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - `/api/checkout` agora aceita e valida shipping_price/carrier/service_id, com fallback server-side
   - Pricing tiers: 2 novos tipos: `network` (Cliente/Rede 1/Rede 2) e `referral_active` (ativo no Programa de Benefícios)
   - Relatório `/backoffice/programa-aprovados`: lotes por dia, KPIs, lista expandível, export CSV/XLSX por dia ou geral (21 colunas)
+- ✅ Iter 27 (Fev/2026): Fatura detalhada automática para e-mail configurável
+  - Novo campo `site_settings.order_invoice_email_to` (vazio = desabilitado)
+  - Campo configurável em `/backoffice/emails` (aba Credenciais Resend)
+  - Novo template `invoice_admin_paid` com fatura completa: itens (tabela), totais, frete (transportadora + serviço), desconto, cupom, endereço, pagamento, nota fiscal
+  - Trigger disparado quando pedido vira `payment_status=paid` em 2 pontos: admin marcar como pago + webhook de pagamento (MercadoPago)
+  - Itens pré-renderizados como HTML (render_template não suporta loops)
+  - Dispara apenas quando email configurado e pedido realmente pago
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

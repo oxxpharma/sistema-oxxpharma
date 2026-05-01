@@ -316,6 +316,54 @@ DEFAULT_TEMPLATES = [
 </div>""",
         "active": True,
     },
+    {
+        "slug": "invoice_admin_paid",
+        "name": "Fatura detalhada - Admin (pedido pago)",
+        "subject": "Fatura - Pedido #{{order_short_id}} confirmado",
+        "body_html": """
+<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px;color:#222;">
+  <h2 style="margin:0 0 4px 0;color:#10B981;">Pedido pago - Fatura detalhada</h2>
+  <p style="color:#666;font-size:12px;margin:0 0 18px 0;">Pedido #{{order_short_id}} - confirmado em {{invoice.paid_at_fmt}}</p>
+
+  <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;margin-bottom:18px;">
+    <tr>
+      <td style="padding:8px;background:#F7F7F7;font-weight:bold;" width="50%">Cliente</td>
+      <td style="padding:8px;background:#F7F7F7;font-weight:bold;" width="50%">Pagamento</td>
+    </tr>
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #EEE;vertical-align:top;">
+        <strong>{{user.name}}</strong><br>
+        {{user.email}}<br>
+        {{user.phone}}<br>
+        CPF: {{user.cpf}}
+      </td>
+      <td style="padding:8px;border-bottom:1px solid #EEE;vertical-align:top;">
+        Metodo: <strong>{{invoice.payment_method}}</strong><br>
+        Nota: {{invoice.invoice_number}}<br>
+        Cupom: {{invoice.coupon_code}}
+      </td>
+    </tr>
+  </table>
+
+  <h3 style="margin:12px 0 8px 0;font-size:14px;">Itens do pedido</h3>
+  {{invoice.items_table_html}}
+
+  <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;margin-top:18px;">
+    <tr><td style="padding:4px 8px;text-align:right;color:#666;">Subtotal</td><td style="padding:4px 8px;text-align:right;width:140px;">{{invoice.subtotal_fmt}}</td></tr>
+    <tr><td style="padding:4px 8px;text-align:right;color:#666;">Frete ({{invoice.shipping_carrier}} {{invoice.shipping_service}})</td><td style="padding:4px 8px;text-align:right;">{{invoice.shipping_fmt}}</td></tr>
+    <tr><td style="padding:4px 8px;text-align:right;color:#666;">Desconto</td><td style="padding:4px 8px;text-align:right;">-{{invoice.discount_fmt}}</td></tr>
+    <tr><td style="padding:8px;text-align:right;font-weight:bold;font-size:16px;border-top:2px solid #222;">Total</td><td style="padding:8px;text-align:right;font-weight:bold;font-size:16px;border-top:2px solid #222;color:#E8731A;">{{invoice.total_fmt}}</td></tr>
+  </table>
+
+  <h3 style="margin:18px 0 6px 0;font-size:14px;">Endereco de entrega</h3>
+  <div style="background:#F7F7F7;padding:10px;border-radius:6px;font-size:13px;line-height:1.5;">
+    {{invoice.address_html}}
+  </div>
+
+  <p style="margin-top:24px;"><a href="{{order_link}}" style="background:#E8731A;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Abrir pedido no painel</a></p>
+</div>""",
+        "active": True,
+    },
 ]
 
 
