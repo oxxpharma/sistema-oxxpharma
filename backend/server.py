@@ -28,7 +28,6 @@ import payments_service
 import correios_service
 import maxx_service
 import melhorenvio_service
-import melhorenvio_service
 import store_extras
 
 logging.basicConfig(level=logging.INFO)
@@ -243,6 +242,11 @@ class CheckoutData(BaseModel):
     notes: Optional[str] = None
     ref_code: Optional[str] = None  # Codigo de indicacao do afiliado (URL ?ref=XXX)
     coupon_code: Optional[str] = None  # Cupom aplicado no checkout
+    shipping_price: Optional[float] = None   # valor escolhido na cotacao
+    shipping_service_name: Optional[str] = None
+    shipping_carrier: Optional[str] = None
+    shipping_service_id: Optional[str] = None
+    shipping_delivery_days: Optional[int] = None
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -771,15 +775,76 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
     if not items:
         raise HTTPException(status_code=400, detail="Nenhum produto valido")
-    shipping = 15.90  # Frete fixo MVP
+    # ============ Frete ============
+    # Preferir o valor cotado pelo frontend (cliente escolheu uma opção).
+    # Se nao vier, recotar server-side para nao cobrar zero indevidamente.
+    shipping = None
+    shipping_meta = {}
+    if data.shipping_price is not None and data.shipping_price >= 0:
+        shipping = float(data.shipping_price)
+        shipping_meta = {
+            "shipping_service_name": data.shipping_service_name,
+            "shipping_carrier": data.shipping_carrier,
+            "shipping_service_id": data.shipping_service_id,
+            "shipping_delivery_days": data.shipping_delivery_days,
+        }
+    else:
+        # Recotar no provider ativo usando CEP do endereco escolhido
+        cep_dest = (addr.get("zip_code") or "").replace("-", "").replace(".", "").strip()
+        calc_items = []
+        for it in items:
+            prod = await db.products.find_one({"product_id": it["product_id"]}, {"_id": 0})
+            calc_items.append({
+                "weight": prod.get("weight") or 0.3 if prod else 0.3,
+                "length_cm": prod.get("length_cm") if prod else None,
+                "width_cm": prod.get("width_cm") if prod else None,
+                "height_cm": prod.get("height_cm") if prod else None,
+                "quantity": it["quantity"],
+            })
+        fs_settings_tmp = await _get_site_settings(db)
+        provider = (fs_settings_tmp.get("shipping_provider") or "correios").lower()
+        try:
+            if provider == "melhorenvio":
+                me_items = [{
+                    "weight_kg": i.get("weight") or 0.3,
+                    "length_cm": i.get("length_cm"), "width_cm": i.get("width_cm"), "height_cm": i.get("height_cm"),
+                    "quantity": i.get("quantity", 1),
+                    "insurance_value": (subtotal / max(len(calc_items), 1)),
+                } for i in calc_items]
+                calc = await melhorenvio_service.calculate_shipping(db, cep_dest, me_items, insurance_value=subtotal)
+            else:
+                calc = await correios_service.calculate_freight(db, cep_dest, calc_items, subtotal)
+            opts = (calc or {}).get("options") or []
+            if opts:
+                best = min(opts, key=lambda o: float(o.get("price") or 0))
+                shipping = float(best.get("price") or 0)
+                shipping_meta = {
+                    "shipping_service_name": best.get("service_name") or best.get("name"),
+                    "shipping_carrier": best.get("company_name") or best.get("carrier"),
+                    "shipping_service_id": best.get("service_id") or best.get("code"),
+                    "shipping_delivery_days": best.get("delivery_days"),
+                }
+        except Exception:
+            pass
+    if shipping is None:
+        shipping = 0.0  # Em ultimo caso, evita cobrar valor fantasma
 
-    # Aplica frete grátis se configurado em site_settings
+    # Aplica frete grátis se configurado em site_settings (espelha regras publicas)
     fs_settings = await _get_site_settings(db)
     fs_mode = (fs_settings.get("free_shipping_mode") or "off").lower()
     fs_min = float(fs_settings.get("free_shipping_min_subtotal") or 0)
+    fs_audiences = fs_settings.get("free_shipping_audiences") or []
+    user_net = user.get("network_type") or "customer"
+    user_cats = user.get("category_ids") or []
+    matches_audience = (
+        user_net in fs_audiences
+        or any(isinstance(t, str) and t.startswith("cat:") and t[4:] in user_cats for t in fs_audiences)
+    )
     if fs_mode == "all":
         shipping = 0.0
     elif fs_mode == "above" and subtotal >= fs_min and fs_min > 0:
+        shipping = 0.0
+    elif fs_mode == "audiences" and matches_audience and (fs_min <= 0 or subtotal >= fs_min):
         shipping = 0.0
 
     # Cupom (opcional)
@@ -819,6 +884,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "customer_name": user.get("name"), "customer_email": user.get("email"),
         "items": items, "subtotal": round(subtotal, 2),
         "shipping_cost": shipping,
+        **shipping_meta,
         "discount_amount": round(discount_amount, 2),
         "coupon_code": coupon_code_applied,
         "total": round(subtotal + shipping - discount_amount, 2),
@@ -4060,6 +4126,143 @@ async def admin_approve_referral_enrollment(request: Request, user_id: str, user
 
 class _RejectReferralBody(BaseModel):
     reason: str = ""
+
+
+# ============ Relatorio de aprovados no Programa de Beneficios ============
+_REFERRAL_APPROVED_COLS = [
+    {"key": "referral_code", "label": "Código", "type": "str", "width": 12},
+    {"key": "name", "label": "Nome", "type": "str", "width": 28},
+    {"key": "email", "label": "E-mail", "type": "str", "width": 28},
+    {"key": "phone", "label": "Telefone", "type": "str", "width": 16},
+    {"key": "cpf", "label": "CPF", "type": "str", "width": 16},
+    {"key": "rg", "label": "RG", "type": "str", "width": 14},
+    {"key": "birth_date", "label": "Data nascimento", "type": "str", "width": 14},
+    {"key": "mother_name", "label": "Nome da mãe", "type": "str", "width": 28},
+    {"key": "address_zip", "label": "CEP", "type": "str", "width": 10},
+    {"key": "address_street", "label": "Rua", "type": "str", "width": 26},
+    {"key": "address_number", "label": "Número", "type": "str", "width": 8},
+    {"key": "address_complement", "label": "Complemento", "type": "str", "width": 16},
+    {"key": "address_neighborhood", "label": "Bairro", "type": "str", "width": 20},
+    {"key": "address_city", "label": "Cidade", "type": "str", "width": 20},
+    {"key": "address_state", "label": "UF", "type": "str", "width": 4},
+    {"key": "pix_key_type", "label": "Tipo PIX", "type": "str", "width": 10},
+    {"key": "pix_key", "label": "Chave PIX", "type": "str", "width": 26},
+    {"key": "sponsor_name", "label": "Patrocinador", "type": "str", "width": 22},
+    {"key": "sponsor_code", "label": "Código patrocinador", "type": "str", "width": 14},
+    {"key": "approved_at", "label": "Aprovado em", "type": "str", "width": 20},
+    {"key": "approved_by", "label": "Aprovador", "type": "str", "width": 20},
+]
+
+
+def _fmt_cpf(v):
+    s = "".join(ch for ch in str(v or "") if ch.isdigit())
+    return f"{s[:3]}.{s[3:6]}.{s[6:9]}-{s[9:11]}" if len(s) == 11 else (v or "")
+
+
+async def _referral_approved_rows(db, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """Retorna lista de usuarios aprovados no Programa de Beneficios.
+    start_date/end_date em formato YYYY-MM-DD (filtra por data de aprovacao local TZ America/Sao_Paulo)."""
+    q = {"referral_program_active": True, "referral_enrollment_status": "approved"}
+    if start_date:
+        q["referral_approved_at"] = q.get("referral_approved_at", {})
+        q["referral_approved_at"]["$gte"] = f"{start_date}T00:00:00"
+    if end_date:
+        q["referral_approved_at"] = q.get("referral_approved_at", {})
+        # end date inclusivo: usamos end+1 dia na comparacao com string ISO
+        q["referral_approved_at"]["$lte"] = f"{end_date}T23:59:59.999"
+    users = await db.users.find(q, {"_id": 0, "password_hash": 0}).sort("referral_approved_at", -1).to_list(10000)
+    # Enriquecer com sponsor
+    sponsor_ids = list({u.get("sponsor_id") for u in users if u.get("sponsor_id")})
+    sponsors = {}
+    if sponsor_ids:
+        async for sp in db.users.find({"user_id": {"$in": sponsor_ids}}, {"_id": 0, "user_id": 1, "name": 1, "referral_code": 1}):
+            sponsors[sp["user_id"]] = sp
+    # Enriquecer com nomes dos admins aprovadores
+    admin_ids = list({u.get("referral_approved_by_admin") for u in users if u.get("referral_approved_by_admin")})
+    admins = {}
+    if admin_ids:
+        async for ad in db.users.find({"user_id": {"$in": admin_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1}):
+            admins[ad["user_id"]] = ad
+    rows = []
+    for u in users:
+        enr = u.get("referral_enrollment") or {}
+        addr = enr.get("address") or {}
+        pix = enr.get("pix") or {}
+        sp = sponsors.get(u.get("sponsor_id")) or {}
+        ad = admins.get(u.get("referral_approved_by_admin")) or {}
+        rows.append({
+            "user_id": u.get("user_id"),
+            "referral_code": u.get("referral_code") or "",
+            "name": enr.get("full_name") or u.get("name") or "",
+            "email": u.get("email") or "",
+            "phone": enr.get("phone") or u.get("phone") or "",
+            "cpf": _fmt_cpf(enr.get("cpf") or u.get("cpf")),
+            "rg": enr.get("rg") or "",
+            "birth_date": enr.get("birth_date") or "",
+            "mother_name": enr.get("mother_name") or "",
+            "address_zip": addr.get("zip_code") or "",
+            "address_street": addr.get("street") or "",
+            "address_number": addr.get("number") or "",
+            "address_complement": addr.get("complement") or "",
+            "address_neighborhood": addr.get("neighborhood") or "",
+            "address_city": addr.get("city") or "",
+            "address_state": addr.get("state") or "",
+            "pix_key_type": pix.get("key_type") or u.get("pix_key_type") or "",
+            "pix_key": pix.get("key") or u.get("pix_key") or "",
+            "sponsor_name": sp.get("name") or "",
+            "sponsor_code": sp.get("referral_code") or u.get("sponsor_code") or "",
+            "approved_at": u.get("referral_approved_at") or u.get("referral_enrolled_at") or "",
+            "approved_by": ad.get("name") or ad.get("email") or "",
+        })
+    return rows
+
+
+@app.get("/api/admin/referral-approved/batches")
+async def admin_referral_approved_batches(request: Request, user: dict = Depends(require_admin())):
+    """Agrega aprovados agrupados por dia de aprovacao (TZ America/Sao_Paulo).
+    Retorna [{date: 'YYYY-MM-DD', count, total_users_sample: [names...], first_at, last_at}].
+    """
+    db = request.app.db
+    from collections import defaultdict
+    all_rows = await _referral_approved_rows(db)
+    groups = defaultdict(list)
+    for r in all_rows:
+        at = r.get("approved_at") or ""
+        day = at[:10] if at else "sem-data"
+        groups[day].append(r)
+    out = []
+    for day, rows in sorted(groups.items(), reverse=True):
+        out.append({
+            "date": day,
+            "count": len(rows),
+            "first_at": min((r["approved_at"] for r in rows if r.get("approved_at")), default=""),
+            "last_at": max((r["approved_at"] for r in rows if r.get("approved_at")), default=""),
+            "sample_names": [r["name"] for r in rows[:5]],
+        })
+    return {"batches": out, "total_approved": len(all_rows)}
+
+
+@app.get("/api/admin/referral-approved/list")
+async def admin_referral_approved_list(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    """Lista detalhada. Sem filtro = todos os aprovados."""
+    rows = await _referral_approved_rows(request.app.db, start, end)
+    return {"approvals": rows, "total": len(rows)}
+
+
+@app.get("/api/admin/referral-approved/export.csv")
+async def admin_referral_approved_csv(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    import export_utils
+    rows = await _referral_approved_rows(request.app.db, start, end)
+    suffix = f"-{start}_to_{end}" if start or end else ""
+    return export_utils.csv_response(export_utils.make_csv(rows, _REFERRAL_APPROVED_COLS), f"programa-beneficios-aprovados{suffix}.csv")
+
+
+@app.get("/api/admin/referral-approved/export.xlsx")
+async def admin_referral_approved_xlsx(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    import export_utils
+    rows = await _referral_approved_rows(request.app.db, start, end)
+    suffix = f"-{start}_to_{end}" if start or end else ""
+    return export_utils.xlsx_response(export_utils.make_xlsx(rows, _REFERRAL_APPROVED_COLS, sheet_name="Aprovados"), f"programa-beneficios-aprovados{suffix}.xlsx")
 
 
 @app.post("/api/admin/users/{user_id}/reject-referral-enrollment")

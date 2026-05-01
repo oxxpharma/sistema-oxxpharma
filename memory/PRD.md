@@ -61,6 +61,15 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - `POST /api/shipping/calculate` agora roteia dinâmicamente pelo provider configurado
   - Frete grátis: novo modo `audiences` permitindo escolher Cliente/Rede 1/Rede 2 + categorias de usuário (mesmo padrão dos pontos)
   - Collection `melhorenvio_logs` para auditoria das chamadas
+- ✅ Iter 26 (Fev/2026): Calculadora de frete + pricing por rede/programa + relatório de aprovados
+  - Fix crítico: URL base Melhor Envio corrigida de `api.melhorenvio.com.br` para `melhorenvio.com.br`
+  - Escopos OAuth reduzidos para `shipping-calculate shipping-tracking` (read-only, trava dupla contra geração de etiquetas)
+  - Removido frete fixo hardcoded R$15,90 em CartPage, CheckoutPage e `/api/checkout`
+  - Novo componente `ShippingCalculator.jsx` reutilizável (CEP + opções + seleção persistida em localStorage)
+  - Carrinho: calculadora inline; Checkout: auto-cotação ao escolher endereço
+  - `/api/checkout` agora aceita e valida shipping_price/carrier/service_id, com fallback server-side
+  - Pricing tiers: 2 novos tipos: `network` (Cliente/Rede 1/Rede 2) e `referral_active` (ativo no Programa de Benefícios)
+  - Relatório `/backoffice/programa-aprovados`: lotes por dia, KPIs, lista expandível, export CSV/XLSX por dia ou geral (21 colunas)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

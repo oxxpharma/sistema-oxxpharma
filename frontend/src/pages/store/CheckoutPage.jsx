@@ -9,6 +9,7 @@ import AddressForm from '../../components/store/AddressForm';
 import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
+import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
 
 const emptyAddr = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true };
 
@@ -23,6 +24,7 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showNewAddr, setShowNewAddr] = useState(false);
   const [newAddr, setNewAddr] = useState(emptyAddr);
+  const [selectedShipping, setSelectedShipping] = useState(() => loadSelectedShipping());
 
   useEffect(() => {
     (async () => {
@@ -74,12 +76,18 @@ export default function CheckoutPage() {
         payment_method: paymentMethod,
         ref_code: refCode || undefined,
         coupon_code: couponCode,
+        shipping_price: selectedShipping?.free_shipping ? 0 : (selectedShipping ? Number(selectedShipping.price) : undefined),
+        shipping_service_name: selectedShipping?.name,
+        shipping_carrier: selectedShipping?.carrier,
+        shipping_service_id: selectedShipping?.id,
+        shipping_delivery_days: selectedShipping?.delivery_days,
       });
       // Cria preferencia de pagamento
       const pay = await api.post(`/api/payments/create/${order.order_id}`);
       clear();
       clearRef();
       try { localStorage.removeItem('oxx_coupon_v1'); } catch { /* noop */ }
+      try { saveSelectedShipping(null); } catch { /* noop */ }
       // Se MP ativo e tem URL de pagamento, redireciona pro checkout do MP
       if (pay.provider === 'mercadopago' && pay.payment_url) {
         toast.success('Redirecionando para o pagamento...');
@@ -99,10 +107,12 @@ export default function CheckoutPage() {
   const subtotal = cart.subtotal || 0;
   const fsMode = settings?.free_shipping_mode || 'off';
   const fsMin = Number(settings?.free_shipping_min_subtotal || 0);
-  const isFreeShipping = subtotal > 0 && (
+  const isFreeShippingByRule = subtotal > 0 && (
     fsMode === 'all' || (fsMode === 'above' && fsMin > 0 && subtotal >= fsMin)
   );
-  const shipping = isFreeShipping ? 0 : 15.90;
+  const shipping = isFreeShippingByRule
+    ? 0
+    : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
   const couponDiscount = (() => {
     try {
       const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
@@ -110,6 +120,10 @@ export default function CheckoutPage() {
     } catch { return 0; }
   })();
   const total = Math.max(0, subtotal + shipping - couponDiscount);
+
+  // CEP do endereço selecionado (para auto-cotação ao entrar no checkout / trocar endereço)
+  const selectedAddrObj = addresses.find(a => a.address_id === selectedAddr);
+  const selectedAddrCep = selectedAddrObj?.zip_code || '';
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
 
@@ -225,12 +239,34 @@ export default function CheckoutPage() {
             </div>
             <div className="space-y-1.5 py-3 text-sm">
               <div className="flex justify-between"><span className="text-txt-secondary">Subtotal</span><span>{formatCurrency(cart.subtotal)}</span></div>
+
+              {/* Calculadora de frete (auto-calcula pelo CEP do endereço selecionado) */}
+              {!isFreeShippingByRule && selectedAddr && (
+                <div className="pt-2 pb-2">
+                  <ShippingCalculator
+                    items={cart.items}
+                    subtotal={subtotal}
+                    initialCep={selectedAddrCep}
+                    readOnlyCep
+                    autoCalculate
+                    onSelect={(opt) => setSelectedShipping(opt)}
+                  />
+                </div>
+              )}
+
               <div className="flex justify-between">
                 <span className="text-txt-secondary">Frete</span>
-                {isFreeShipping ? (
+                {isFreeShippingByRule ? (
                   <span className="font-semibold text-emerald-600">{settings?.free_shipping_label || 'Frete grátis'}</span>
+                ) : selectedShipping ? (
+                  <span>
+                    {selectedShipping.free_shipping ? (
+                      <span className="text-emerald-600 font-semibold">{selectedShipping.free_shipping_label || 'Grátis'}</span>
+                    ) : formatCurrency(shipping)}
+                    <span className="text-[11px] text-txt-secondary ml-1">({selectedShipping.name})</span>
+                  </span>
                 ) : (
-                  <span>{formatCurrency(shipping)}</span>
+                  <span className="text-xs text-txt-secondary">selecione uma opção</span>
                 )}
               </div>
               {couponDiscount > 0 && (
@@ -241,7 +277,7 @@ export default function CheckoutPage() {
               <span className="font-bold">Total</span>
               <span className="font-heading font-black text-2xl text-brand-main">{formatCurrency(total)}</span>
             </div>
-            <Button onClick={submit} loading={submitting} className="w-full mt-5" size="lg" data-testid="confirm-order-btn" disabled={!selectedAddr}>
+            <Button onClick={submit} loading={submitting} className="w-full mt-5" size="lg" data-testid="confirm-order-btn" disabled={!selectedAddr || (!isFreeShippingByRule && !selectedShipping)}>
               Confirmar pedido
             </Button>
             <Link to="/carrinho" className="block text-center mt-3 text-xs text-txt-secondary">Voltar ao carrinho</Link>

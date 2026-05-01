@@ -52,6 +52,7 @@ import AdminShipping from './pages/backoffice/AdminShipping';
 import AdminMaxx from './pages/backoffice/AdminMaxx';
 import AdminMaxxPending from './pages/backoffice/AdminMaxxPending';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
+import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
 import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
 import CmsPageView from './pages/store/CmsPageView';
@@ -133,6 +134,7 @@ function AppRoutes() {
         <Route path="maxx" element={<AdminMaxx />} />
         <Route path="maxx-pendentes" element={<AdminMaxxPending />} />
         <Route path="melhor-envio" element={<AdminMelhorEnvio />} />
+        <Route path="programa-aprovados" element={<AdminReferralApproved />} />
         <Route path="aparencia" element={<AdminAppearance />} />
         <Route path="paginas" element={<AdminPagesList />} />
         <Route path="paginas/:id" element={<AdminPageEditor />} />

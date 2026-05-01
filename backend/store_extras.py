@@ -170,6 +170,8 @@ def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> 
 
     is_logged = bool(user)
     user_cat_ids = set(user.get("category_ids") or []) if user else set()
+    user_network = (user.get("network_type") or "customer") if user else None  # None para guest
+    user_has_referral = bool(user and user.get("referral_program_active"))
     candidates: List[Dict[str, Any]] = []
 
     for t in tiers:
@@ -186,6 +188,10 @@ def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> 
             candidates.append({**t, "price": tprice})
         elif ttype == "category" and is_logged and t.get("user_category_id") in user_cat_ids:
             candidates.append({**t, "price": tprice})
+        elif ttype == "network" and is_logged and t.get("network_type") == user_network:
+            candidates.append({**t, "price": tprice})
+        elif ttype == "referral_active" and user_has_referral:
+            candidates.append({**t, "price": tprice})
 
     if not candidates:
         return {"price": base_effective, "original_price": base_effective, "applied_tier": None}
@@ -198,6 +204,7 @@ def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> 
         "applied_tier": {
             "type": best.get("type"),
             "user_category_id": best.get("user_category_id"),
+            "network_type": best.get("network_type"),
             "label": best.get("label") or "",
             "price": best["price"],
         },

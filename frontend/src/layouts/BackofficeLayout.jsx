@@ -37,6 +37,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/redes', icon: Network, label: 'Redes MMN', testId: 'nav-networks' },
       { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates' },
       { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments' },
+      { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved' },
       { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Rel. comissões', testId: 'nav-commissions-report' },
       { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points' },
       { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card' },

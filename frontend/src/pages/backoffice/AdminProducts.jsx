@@ -74,7 +74,8 @@ export default function AdminProducts() {
       const tiers = (form.pricing_tiers || [])
         .filter(t => t && (t.price > 0))
         .filter(t => t.type !== 'category' || t.user_category_id)
-        .map(t => ({ type: t.type, user_category_id: t.user_category_id || null, price: parseFloat(t.price) || 0, label: t.label || '' }));
+        .filter(t => t.type !== 'network' || t.network_type)
+        .map(t => ({ type: t.type, user_category_id: t.user_category_id || null, network_type: t.network_type || null, price: parseFloat(t.price) || 0, label: t.label || '' }));
       const payload = {
         ...form,
         price: parseFloat(form.price),
@@ -237,6 +238,7 @@ export default function AdminProducts() {
                       const next = [...form.pricing_tiers];
                       next[idx] = { ...next[idx], ...patch };
                       if (patch.type && patch.type !== 'category') next[idx].user_category_id = null;
+                      if (patch.type && patch.type !== 'network') next[idx].network_type = null;
                       setForm({ ...form, pricing_tiers: next });
                     };
                     const remove = () => setForm({ ...form, pricing_tiers: form.pricing_tiers.filter((_, i) => i !== idx) });
@@ -246,11 +248,20 @@ export default function AdminProducts() {
                           <option value="guest">Não logado</option>
                           <option value="logged">Logado (qualquer)</option>
                           <option value="category">Categoria de usuário</option>
+                          <option value="network">Rede do usuário</option>
+                          <option value="referral_active">Ativo no Programa de Benefícios</option>
                         </select>
                         {t.type === 'category' ? (
                           <select className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.user_category_id || ''} onChange={e => update({ user_category_id: e.target.value || null })}>
                             <option value="">Selecione a categoria...</option>
                             {userCats.map(c => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
+                          </select>
+                        ) : t.type === 'network' ? (
+                          <select className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.network_type || ''} onChange={e => update({ network_type: e.target.value || null })}>
+                            <option value="">Selecione a rede...</option>
+                            <option value="customer">Consumidor</option>
+                            <option value="network_1">Rede 1 (Corporativa)</option>
+                            <option value="network_2">Rede 2 (Propagandista)</option>
                           </select>
                         ) : (
                           <input className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.label || ''} placeholder="Rótulo (opcional)" onChange={e => update({ label: e.target.value })} />
