@@ -24,7 +24,15 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
 - ✅ Iter 18: Gestão admin de usuários + relatórios XLSX
 - ✅ Iter 19: Pacote `/app/deploy/` Linux Ubuntu (install/deploy/update + Nginx/Supervisor) + DEPLOY.md
 - ✅ Iter 20: Maxx MMN API + GrapesJS CMS (AdminPages, AdminAppearance, AdminMaxx, CmsPageView)
-- ✅ Iter 21 (atual): Validação final de `requirements.txt` + `package.json` + scripts de deploy
+- ✅ Iter 21: Validação final de `requirements.txt` + `package.json` + scripts de deploy
+- ✅ Iter 22 (Fev/2026): Fix do mapeamento `leader_external_id` → `network_sponsor_id` na Sync Externa.
+  - Helper `resolve_leader_links()` centralizado em `server.py`
+  - Persistência de `leader_external_id` em cada doc do user (mesmo se o líder ainda não existir)
+  - Resolução em cascata: ao criar/atualizar A, todos os usuários pendentes que tinham `leader_external_id == A.external_id` são auto-vinculados
+  - Auto-resolução no PUT admin: editar `leader_external_id` recalcula `network_sponsor_id`
+  - Modal admin (`UserEditModal.jsx`) agora exibe o campo `leader_external_id`
+  - Stats expandidos no log: `sponsors_mapped`, `sponsors_pending`, `leader_external_persisted`
+  - Testes de regressão: `/app/backend/tests/test_leader_external_id_sync.py` (3 cenários, 100% passing)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

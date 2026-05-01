@@ -330,6 +330,7 @@ async def lifespan(app: FastAPI):
     await app.db.users.create_index("network_type")
     await app.db.users.create_index("network_sponsor_id")
     await app.db.users.create_index("external_id", sparse=True)
+    await app.db.users.create_index("leader_external_id", sparse=True)
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
@@ -1661,6 +1662,85 @@ class Network1ImportPayload(BaseModel):
     rows: List[Network1ImportRow]
     default_password: Optional[str] = "oxx@pharma"
 
+async def resolve_leader_links(db, rows, id_map: dict) -> dict:
+    """Resolve leader_external_id -> network_sponsor_id para os usuarios processados
+    e tambem para qualquer usuario ja persistido com leader_external_id pendente.
+
+    Retorna stats: {sponsors_mapped, sponsors_pending, leader_external_persisted}.
+
+    Cada `row` deve ter atributos `external_id` e `leader_external_id` (Pydantic ou dict-like).
+    `id_map` mapeia external_id -> user_id (usuario sendo sincronizado neste batch).
+    """
+    sponsors_mapped = 0
+    sponsors_pending = 0
+    persisted = 0
+
+    def _attr(r, name):
+        if isinstance(r, dict):
+            return r.get(name)
+        return getattr(r, name, None)
+
+    # Passo A: persistir leader_external_id em CADA usuario processado (mesmo sem resolver),
+    # para podermos resolve-lo depois quando o lider for importado.
+    for row in rows:
+        ext_id = _attr(row, "external_id")
+        leader_ext = _attr(row, "leader_external_id")
+        uid = id_map.get(ext_id)
+        if not uid:
+            continue
+        # Sempre persistir o leader_external_id (mesmo se vazio: limpa link antigo)
+        await db.users.update_one(
+            {"user_id": uid},
+            {"$set": {"leader_external_id": leader_ext or None}},
+        )
+        persisted += 1
+
+    # Passo B: tentar resolver para os usuarios deste batch
+    for row in rows:
+        ext_id = _attr(row, "external_id")
+        leader_ext = _attr(row, "leader_external_id")
+        uid = id_map.get(ext_id)
+        if not uid or not leader_ext:
+            continue
+        leader_uid = id_map.get(leader_ext)
+        if not leader_uid:
+            leader_doc = await db.users.find_one({"external_id": leader_ext}, {"_id": 0, "user_id": 1})
+            if leader_doc:
+                leader_uid = leader_doc["user_id"]
+        if leader_uid:
+            await db.users.update_one(
+                {"user_id": uid},
+                {"$set": {"network_sponsor_id": leader_uid}},
+            )
+            sponsors_mapped += 1
+        else:
+            sponsors_pending += 1
+
+    # Passo C: para CADA novo external_id criado/atualizado neste batch,
+    # tentar resolver outros usuarios na base que estavam aguardando este lider.
+    for ext_id, uid in id_map.items():
+        if not ext_id:
+            continue
+        result = await db.users.update_many(
+            {
+                "leader_external_id": ext_id,
+                "$or": [
+                    {"network_sponsor_id": None},
+                    {"network_sponsor_id": {"$exists": False}},
+                    {"network_sponsor_id": ""},
+                ],
+            },
+            {"$set": {"network_sponsor_id": uid}},
+        )
+        sponsors_mapped += (result.modified_count or 0)
+
+    return {
+        "sponsors_mapped": sponsors_mapped,
+        "sponsors_pending": sponsors_pending,
+        "leader_external_persisted": persisted,
+    }
+
+
 @app.post("/api/admin/network1/import")
 async def import_network1(request: Request, data: Network1ImportPayload, user: dict = Depends(require_admin())):
     """Importa/atualiza usuarios da Rede 1 a partir de uma lista (vinda de upload Excel/CSV).
@@ -1699,6 +1779,7 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
                     "network_type": NETWORK_1,
                     "network_sponsor_id": None,
                     "external_id": row.external_id,
+                    "leader_external_id": row.leader_external_id or None,
                     "must_set_password": True,
                     "referral_program_active": False,
                     "created_at": now_iso(),
@@ -1708,23 +1789,9 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
         except Exception as e:
             stats["errors"].append({"external_id": row.external_id, "error": str(e)})
 
-    # Passo 2: resolver lideres
-    sponsors_set = 0
-    for row in data.rows:
-        if row.leader_external_id and row.external_id in id_map:
-            leader_uid = id_map.get(row.leader_external_id)
-            if not leader_uid:
-                # Tentar buscar no banco
-                leader_doc = await db.users.find_one({"external_id": row.leader_external_id}, {"_id": 0})
-                if leader_doc:
-                    leader_uid = leader_doc["user_id"]
-            if leader_uid:
-                await db.users.update_one(
-                    {"user_id": id_map[row.external_id]},
-                    {"$set": {"network_sponsor_id": leader_uid}},
-                )
-                sponsors_set += 1
-    stats["sponsors_mapped"] = sponsors_set
+    # Passo 2: resolver lideres (helper centralizado)
+    link_stats = await resolve_leader_links(db, data.rows, id_map)
+    stats.update(link_stats)
     return stats
 
 # ==================== ADMIN: COMMISSIONS REPORT (BENEFIT CARD) ====================
@@ -2438,6 +2505,7 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                         "network_type": NETWORK_1,
                         "network_sponsor_id": None,
                         "external_id": row.external_id,
+                        "leader_external_id": row.leader_external_id or None,
                         "must_set_password": True,  # primeiro acesso obriga a definir senha
                         "referral_program_active": False,
                         "created_at": now_iso(),
@@ -2446,19 +2514,10 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                     stats["created"] += 1
             except Exception as e:
                 stats["errors"].append({"external_id": row.external_id, "error": str(e)})
-        # Resolver lideres
-        for row in data.users:
-            if row.leader_external_id and row.external_id in id_map:
-                leader_uid = id_map.get(row.leader_external_id)
-                if not leader_uid:
-                    leader_doc = await db.users.find_one({"external_id": row.leader_external_id}, {"_id": 0})
-                    if leader_doc:
-                        leader_uid = leader_doc["user_id"]
-                if leader_uid:
-                    await db.users.update_one(
-                        {"user_id": id_map[row.external_id]},
-                        {"$set": {"network_sponsor_id": leader_uid}},
-                    )
+        # Resolver lideres (helper centralizado: persiste leader_external_id +
+        # tenta resolver para este batch e tambem para usuarios pendentes na base)
+        link_stats = await resolve_leader_links(db, data.users, id_map)
+        stats.update(link_stats)
     elif data.action == "delete":
         for row in data.users:
             existing = await db.users.find_one({"external_id": row.external_id})
@@ -3052,7 +3111,7 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     allowed = {
         "name", "email", "phone", "cpf", "status", "role", "access_level",
         "network_type", "network_sponsor_id", "sponsor_id", "sponsor_code",
-        "external_id", "addresses", "pix_key", "pix_key_type",
+        "external_id", "leader_external_id", "addresses", "pix_key", "pix_key_type",
         "referral_program_active", "must_set_password",
     }
     update = {}
@@ -3071,6 +3130,16 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
         if sp:
             update["sponsor_id"] = sp["user_id"]
             update["sponsor_code"] = sp.get("referral_code")
+    # Se o leader_external_id mudou e network_sponsor_id nao foi enviado explicitamente,
+    # tentar resolver automaticamente para o user_id correspondente.
+    if "leader_external_id" in update and "network_sponsor_id" not in update:
+        leader_ext = (update.get("leader_external_id") or "").strip() if isinstance(update.get("leader_external_id"), str) else update.get("leader_external_id")
+        update["leader_external_id"] = leader_ext or None
+        if leader_ext:
+            leader_doc = await db.users.find_one({"external_id": leader_ext}, {"_id": 0, "user_id": 1})
+            update["network_sponsor_id"] = leader_doc["user_id"] if leader_doc else None
+        else:
+            update["network_sponsor_id"] = None
     update["updated_at"] = now_iso()
     await db.users.update_one({"user_id": user_id}, {"$set": update})
     fresh = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})

@@ -29,6 +29,7 @@ const STATUS_OPTIONS = [
 
 export default function UserEditModal({ userId, onClose, onSaved }) {
   const [u, setU] = useState(null);
+  const [original, setOriginal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [allCats, setAllCats] = useState([]);
@@ -41,6 +42,7 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
       ]);
       if (!Array.isArray(r.category_ids)) r.category_ids = [];
       setU(r);
+      setOriginal(r);
       setAllCats(ucs.categories || []);
     } catch (e) { toast.error(e?.message); }
     finally { setLoading(false); }
@@ -60,10 +62,17 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
       const payload = {
         name: u.name, email: u.email, phone: u.phone, cpf: u.cpf,
         external_id: u.external_id, sponsor_code: u.sponsor_code,
+        leader_external_id: u.leader_external_id || null,
         status: u.status, role: u.role, network_type: u.network_type,
-        network_sponsor_id: u.network_sponsor_id,
         access_level: u.role === 'admin' ? 0 : 99,
       };
+      // Se o admin alterou leader_external_id mas NAO tocou no network_sponsor_id,
+      // omitir network_sponsor_id para o backend auto-resolver via external_id.
+      const leaderChanged = (original?.leader_external_id || null) !== (u.leader_external_id || null);
+      const sponsorChanged = (original?.network_sponsor_id || null) !== (u.network_sponsor_id || null);
+      if (!(leaderChanged && !sponsorChanged)) {
+        payload.network_sponsor_id = u.network_sponsor_id || null;
+      }
       const updated = await api.put(`/api/admin/users/${userId}`, payload);
       // salva categorias separadamente
       await api.put(`/api/admin/users/${userId}/categories`, { category_ids: u.category_ids || [] });
@@ -132,6 +141,7 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         <Select label="Status" value={u.status || 'active'} onChange={(v) => set('status', v)} options={STATUS_OPTIONS} testId="edit-status" />
         <Select label="Perfil" value={u.role || 'customer'} onChange={(v) => set('role', v)} options={ROLE_OPTIONS} testId="edit-role" />
         <Select label="Rede MMN" value={u.network_type || 'customer'} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="edit-network" />
+        <Field label="ID externo do líder (leader_external_id)" value={u.leader_external_id} onChange={(v) => set('leader_external_id', v || null)} testId="edit-leader-external-id" />
         <Field label="ID do líder na rede MMN (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />
       </div>
 
