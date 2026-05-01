@@ -52,6 +52,15 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Página admin `/backoffice/maxx-pendentes` com tabela e botão "Enviar pontos" por usuário
   - Endpoint público `GET /api/users/me/points` retorna histórico + totais (sent/pending) sem mencionar "Maxx"
   - Página loja `/meus-pontos` (link no menu user) com 3 cards (total/enviado/pendente) + tabela completa
+- ✅ Iter 25 (Fev/2026): Integração Melhor Envio + Frete grátis por audiências
+  - Novo módulo `melhorenvio_service.py` com OAuth2 completo (build URL + exchange code + auto-refresh do token)
+  - Tokens persistidos em `db.app_credentials` (não em .env — permite rotação sem redeploy)
+  - Endpoints admin: GET/PUT config, authorize-url, callback OAuth (RedirectResponse), disconnect, refresh manual, test-calculate, logs
+  - Página `/backoffice/melhor-envio` com tutorial, credenciais, CEP origem, sandbox toggle, botão conectar, teste rápido de cotação com tabela de resultados
+  - Provider switcher: `site_settings.shipping_provider` (correios | melhorenvio) com opção de fallback automático
+  - `POST /api/shipping/calculate` agora roteia dinâmicamente pelo provider configurado
+  - Frete grátis: novo modo `audiences` permitindo escolher Cliente/Rede 1/Rede 2 + categorias de usuário (mesmo padrão dos pontos)
+  - Collection `melhorenvio_logs` para auditoria das chamadas
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

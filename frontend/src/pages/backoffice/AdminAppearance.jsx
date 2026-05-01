@@ -414,9 +414,68 @@ export default function AdminAppearance() {
                   )}
                 </div>
               </label>
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'audiences' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'audiences'} onChange={() => set('free_shipping_mode', 'audiences')} className="mt-1" data-testid="fs-audiences" />
+                <div className="flex-1">
+                  <div className="font-bold text-sm">Frete grátis para públicos selecionados</div>
+                  <div className="text-xs text-txt-secondary mb-2">Escolha redes MMN e/ou categorias de usuário que receberão frete grátis.</div>
+                  {s.free_shipping_mode === 'audiences' && (
+                    <div className="mt-2 space-y-3">
+                      <AudienceGroup
+                        title="Por tipo de conta"
+                        options={[
+                          { token: 'customer', label: 'Cliente (customer)' },
+                          { token: 'network_1', label: 'Rede 1 (Corporativa)' },
+                          { token: 'network_2', label: 'Rede 2 (Propagandista)' },
+                        ]}
+                        selected={s.free_shipping_audiences || []}
+                        onToggle={(token) => toggleFsAudience(s, set, token)}
+                      />
+                      <AudienceGroup
+                        title="Por categoria de usuário"
+                        options={userCategories.map(c => ({ token: `cat:${c.category_id}`, label: c.name, color: c.color }))}
+                        selected={s.free_shipping_audiences || []}
+                        onToggle={(token) => toggleFsAudience(s, set, token)}
+                        emptyText={<>Nenhuma categoria cadastrada. Crie em <span className="font-mono">/backoffice/categorias-usuarios</span>.</>}
+                      />
+                      <div>
+                        <label className="text-xs font-semibold block mb-1">Valor mínimo (R$) - opcional</label>
+                        <input type="number" min="0" step="0.01" className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono" value={s.free_shipping_min_subtotal || 0} onChange={(e) => set('free_shipping_min_subtotal', parseFloat(e.target.value) || 0)} data-testid="fs-aud-min" />
+                        <p className="text-xs text-txt-secondary mt-1">Deixe 0 para liberar frete grátis em qualquer compra do público selecionado.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </label>
             </div>
             <div className="mt-4 pt-3 border-t border-border">
               <Field label="Texto exibido na opção (ex: Frete grátis)" value={s.free_shipping_label} onChange={(v) => set('free_shipping_label', v)} testId="fs-label" />
+            </div>
+          </Card>
+
+          <Card title="Provedor de cálculo de frete">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">Define qual serviço será consultado para calcular o frete na vitrine, carrinho e checkout.</p>
+            <div className="space-y-2">
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${(s.shipping_provider || 'correios') === 'correios' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="sp" checked={(s.shipping_provider || 'correios') === 'correios'} onChange={() => set('shipping_provider', 'correios')} className="mt-1" data-testid="sp-correios" />
+                <div>
+                  <div className="font-bold text-sm">Correios (API CWS)</div>
+                  <div className="text-xs text-txt-secondary">Requer contrato direto com os Correios e token CWS configurado.</div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.shipping_provider === 'melhorenvio' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="sp" checked={s.shipping_provider === 'melhorenvio'} onChange={() => set('shipping_provider', 'melhorenvio')} className="mt-1" data-testid="sp-me" />
+                <div className="flex-1">
+                  <div className="font-bold text-sm">Melhor Envio (multi-transportadora)</div>
+                  <div className="text-xs text-txt-secondary">Correios PAC/SEDEX, JadLog, Loggi, Buslog, etc. Sem contrato direto. <a href="/backoffice/melhor-envio" className="text-brand-main underline">Configurar credenciais →</a></div>
+                  {s.shipping_provider === 'melhorenvio' && (
+                    <label className="flex items-center gap-2 mt-2 text-xs">
+                      <input type="checkbox" checked={s.shipping_fallback_to_correios || false} onChange={(e) => set('shipping_fallback_to_correios', e.target.checked)} data-testid="sp-fallback" />
+                      Usar Correios como fallback se o Melhor Envio falhar
+                    </label>
+                  )}
+                </div>
+              </label>
             </div>
           </Card>
         </div>
@@ -520,6 +579,12 @@ function toggleAudience(s, set, token) {
   const cur = new Set(s.points_visibility_audiences || []);
   if (cur.has(token)) cur.delete(token); else cur.add(token);
   set('points_visibility_audiences', [...cur]);
+}
+
+function toggleFsAudience(s, set, token) {
+  const cur = new Set(s.free_shipping_audiences || []);
+  if (cur.has(token)) cur.delete(token); else cur.add(token);
+  set('free_shipping_audiences', [...cur]);
 }
 
 function AudienceGroup({ title, options, selected, onToggle, emptyText }) {

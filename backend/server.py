@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, BackgroundTasks, Header
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -26,6 +27,8 @@ import card_service
 import payments_service
 import correios_service
 import maxx_service
+import melhorenvio_service
+import melhorenvio_service
 import store_extras
 
 logging.basicConfig(level=logging.INFO)
@@ -2881,6 +2884,148 @@ async def admin_correios_logs(request: Request, page: int = 1, limit: int = 50, 
     return {"logs": logs, "total": total, "page": page}
 
 
+# ============ Melhor Envio ============
+@app.get("/api/admin/melhorenvio/config")
+async def me_admin_get_config(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    cfg = await melhorenvio_service.get_config(db)
+    connected = await melhorenvio_service.is_connected(db)
+    tokens = await melhorenvio_service.get_tokens(db)
+    # Nao retornar o client_secret integral
+    masked_secret = ""
+    if cfg.get("client_secret"):
+        s = cfg["client_secret"]
+        masked_secret = (s[:4] + "•" * max(len(s) - 8, 4) + s[-4:]) if len(s) >= 8 else "••••"
+    frontend_origin = request.headers.get("origin") or ""
+    # URL de callback derivada do Host atual (funciona em preview + produção)
+    host = request.headers.get("host", "")
+    scheme = request.headers.get("x-forwarded-proto", "https")
+    default_callback = f"{scheme}://{host}/api/admin/melhorenvio/callback" if host else "/api/admin/melhorenvio/callback"
+    callback_url = cfg.get("redirect_uri") or default_callback
+    return {
+        **cfg,
+        "client_secret": masked_secret,
+        "has_client_secret": bool(cfg.get("client_secret")),
+        "connected": connected,
+        "token_expires_at": tokens.get("expires_at"),
+        "token_last_refresh_at": tokens.get("last_refresh_at"),
+        "suggested_callback_url": callback_url,
+        "frontend_origin": frontend_origin,
+    }
+
+
+@app.put("/api/admin/melhorenvio/config")
+async def me_admin_put_config(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    body = await request.json() or {}
+    # Client secret vazio/mascarado nao deve sobrescrever - proteger
+    if not body.get("client_secret") or "•" in str(body.get("client_secret")):
+        body.pop("client_secret", None)
+    cfg = await melhorenvio_service.update_config(db, body)
+    # Mascarar no retorno
+    s = cfg.get("client_secret") or ""
+    cfg["client_secret"] = (s[:4] + "•" * max(len(s) - 8, 4) + s[-4:]) if len(s) >= 8 else ("••••" if s else "")
+    cfg["has_client_secret"] = bool(s)
+    return cfg
+
+
+@app.post("/api/admin/melhorenvio/authorize-url")
+async def me_admin_authorize_url(request: Request, user: dict = Depends(require_admin())):
+    """Gera URL para o admin autorizar a integracao."""
+    db = request.app.db
+    cfg = await melhorenvio_service.get_config(db)
+    if not cfg.get("client_id") or not cfg.get("redirect_uri"):
+        raise HTTPException(status_code=400, detail="Configure client_id e redirect_uri primeiro")
+    state = gen_id("state_")
+    # Salvar state para validar no callback
+    await db.app_credentials.update_one(
+        {"_id": "melhorenvio_oauth_state"},
+        {"$set": {"state": state, "created_at": now_iso(), "created_by": user["user_id"]}},
+        upsert=True,
+    )
+    url = melhorenvio_service.build_authorize_url(cfg, state)
+    return {"authorize_url": url, "state": state}
+
+
+@app.get("/api/admin/melhorenvio/callback")
+async def me_admin_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, error_description: Optional[str] = None):
+    """Callback OAuth2. O usuario chega aqui vindo do Melhor Envio.
+    Como o admin pode estar autenticado via JWT no browser, redirecionamos para a tela
+    de admin com os resultados como query params.
+    """
+    db = request.app.db
+    frontend_url = request.headers.get("referer") or os.environ.get("FRONTEND_URL", "")
+    # Tentar derivar frontend URL do Origin/Host
+    if not frontend_url:
+        host = request.headers.get("host", "")
+        scheme = request.headers.get("x-forwarded-proto", "https")
+        frontend_url = f"{scheme}://{host}"
+    redirect_back = f"{frontend_url.rstrip('/')}/backoffice/melhor-envio"
+
+    if error:
+        return RedirectResponse(url=f"{redirect_back}?me_error={error}&me_desc={(error_description or '')[:200]}")
+
+    # Validar state
+    state_doc = await db.app_credentials.find_one({"_id": "melhorenvio_oauth_state"}) or {}
+    if not code or not state or state != state_doc.get("state"):
+        return RedirectResponse(url=f"{redirect_back}?me_error=invalid_state")
+
+    try:
+        await melhorenvio_service.exchange_code(db, code)
+        await db.app_credentials.delete_one({"_id": "melhorenvio_oauth_state"})
+        return RedirectResponse(url=f"{redirect_back}?me_success=1")
+    except Exception as e:
+        logger.exception("me callback exchange falhou")
+        return RedirectResponse(url=f"{redirect_back}?me_error=exchange_failed&me_desc={str(e)[:200]}")
+
+
+@app.post("/api/admin/melhorenvio/disconnect")
+async def me_admin_disconnect(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    await melhorenvio_service.clear_tokens(db)
+    return {"success": True}
+
+
+@app.post("/api/admin/melhorenvio/refresh")
+async def me_admin_refresh(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    try:
+        await melhorenvio_service.refresh_access_token(db)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/melhorenvio/test-calculate")
+async def me_admin_test(request: Request, user: dict = Depends(require_admin())):
+    """Teste rapido: {cep_origin, cep_destination, weight_kg, length_cm, width_cm, height_cm, insurance_value}."""
+    db = request.app.db
+    body = await request.json() or {}
+    items = [{
+        "weight_kg": float(body.get("weight_kg") or 0.5),
+        "length_cm": float(body.get("length_cm") or 16),
+        "width_cm": float(body.get("width_cm") or 11),
+        "height_cm": float(body.get("height_cm") or 2),
+        "insurance_value": float(body.get("insurance_value") or 50),
+        "quantity": 1,
+    }]
+    return await melhorenvio_service.calculate_shipping(
+        db,
+        cep_destination=body.get("cep_destination") or "",
+        items=items,
+        cep_origin=body.get("cep_origin"),
+        insurance_value=float(body.get("insurance_value") or 0),
+    )
+
+
+@app.get("/api/admin/melhorenvio/logs")
+async def me_admin_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    total = await db.melhorenvio_logs.count_documents({})
+    logs = await db.melhorenvio_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"logs": logs, "total": total, "page": page}
+
+
 @app.post("/api/shipping/calculate")
 async def public_calculate_shipping(request: Request):
     """Endpoint publico para calcular frete: {cep_destination, items:[{product_id,quantity}]}.
@@ -2938,20 +3083,69 @@ async def public_calculate_shipping(request: Request):
             except Exception:
                 pass
 
-    result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
+    result = None
+    settings = await _get_site_settings(db)
+    provider = (settings.get("shipping_provider") or "correios").lower()
+
+    # Roteamento por provider
+    if provider == "melhorenvio":
+        me_items = [{
+            "weight_kg": it.get("weight") or 0.3,
+            "length_cm": it.get("length_cm"),
+            "width_cm": it.get("width_cm"),
+            "height_cm": it.get("height_cm"),
+            "quantity": it.get("quantity", 1),
+            "insurance_value": (declared_value / max(len(full_items), 1)) if declared_value else 0,
+        } for it in full_items]
+        result = await melhorenvio_service.calculate_shipping(db, cep, me_items, insurance_value=declared_value)
+        # Fallback para correios se Melhor Envio falhar
+        if result.get("error") or not result.get("options"):
+            if settings.get("shipping_fallback_to_correios"):
+                result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
+    else:
+        result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
 
     # Aplica frete grátis se configurado em site_settings
-    settings = await _get_site_settings(db)
     fs_mode = (settings.get("free_shipping_mode") or "off").lower()
     fs_min = float(settings.get("free_shipping_min_subtotal") or 0)
     fs_label = settings.get("free_shipping_label") or "Frete grátis"
+    fs_audiences = settings.get("free_shipping_audiences") or []
     subtotal = float(body.get("subtotal") or declared_value or 0)
+
+    # Descobrir user logado (se houver) para checar audiencia
+    current_user_doc = None
+    _tok = request.headers.get("authorization", "").replace("Bearer ", "")
+    if _tok:
+        try:
+            payload = jwt.decode(_tok, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            current_user_doc = await db.users.find_one({"user_id": payload.get("sub")}, {"_id": 0, "network_type": 1, "category_ids": 1})
+        except Exception:
+            pass
+
+    def _user_matches_audiences(u, audiences):
+        if not audiences:
+            return False
+        if not u:
+            return False
+        ntype = u.get("network_type") or "customer"
+        if ntype in audiences:
+            return True
+        user_cats = u.get("category_ids") or []
+        for tok in audiences:
+            if isinstance(tok, str) and tok.startswith("cat:") and tok[4:] in user_cats:
+                return True
+        return False
 
     apply_free = False
     if fs_mode == "all":
         apply_free = True
     elif fs_mode == "above" and subtotal >= fs_min and fs_min > 0:
         apply_free = True
+    elif fs_mode == "audiences":
+        # Somente para audiencias selecionadas
+        if _user_matches_audiences(current_user_doc, fs_audiences):
+            # Se fs_min > 0, exige minimo; senao libera direto
+            apply_free = (fs_min <= 0) or (subtotal >= fs_min)
 
     if apply_free and isinstance(result, dict):
         # Zera price em todos os options retornados (e marca como gratis)
@@ -3210,10 +3404,16 @@ DEFAULT_SITE_SETTINGS = {
     "referral_box_image_translate_y": "-50",
     "referral_box_image_float": True,
     # ============ Frete grátis ============
-    # mode: 'off' | 'all' | 'above'
+    # mode: 'off' | 'all' | 'above' | 'audiences'
     "free_shipping_mode": "off",
     "free_shipping_min_subtotal": 199.0,
     "free_shipping_label": "Frete grátis",
+    # tokens aceitos: 'customer' | 'network_1' | 'network_2' | 'cat:{category_id}'
+    "free_shipping_audiences": [],
+    # ============ Provider de envio ============
+    # 'correios' (CWS API - padrao atual) | 'melhorenvio' (multi-transportadora OAuth2)
+    "shipping_provider": "correios",
+    "shipping_fallback_to_correios": False,
     # ============ Exibição de pontos por produto na loja ============
     # mode: 'none' (ninguém) | 'all' (todos incluindo visitantes) | 'selected'
     # quando 'selected', usa points_visibility_audiences:
