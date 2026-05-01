@@ -49,6 +49,7 @@ export const api = {
   post: (path, body) => request(path, { method: 'POST', body }),
   put: (path, body) => request(path, { method: 'PUT', body }),
   del: (path) => request(path, { method: 'DELETE' }),
+  delete: (path) => request(path, { method: 'DELETE' }),
 };
 
 export { API_URL };
