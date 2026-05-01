@@ -16,18 +16,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SCOPES = (
-    "cart-read cart-write companies-read coupons-read "
-    "notifications-read orders-read products-read products-write "
-    "purchases-read shipping-calculate shipping-cancel shipping-checkout "
-    "shipping-companies shipping-generate shipping-preview shipping-print "
-    "shipping-share shipping-tracking ecommerce-shipping"
-)
+DEFAULT_SCOPES = "shipping-calculate shipping-tracking"
 
 PRODUCT_HOST = "https://melhorenvio.com.br"
-PRODUCT_API_HOST = "https://api.melhorenvio.com.br"
+PRODUCT_API_HOST = "https://melhorenvio.com.br"
 SANDBOX_HOST = "https://sandbox.melhorenvio.com.br"
-SANDBOX_API_HOST = "https://sandbox.melhorenvio.com.br"  # No sandbox, tudo na mesma URL
+SANDBOX_API_HOST = "https://sandbox.melhorenvio.com.br"
 
 USER_AGENT = "OxxPharma Shipping Integration (contato@oxxpharma.com.br)"
 
