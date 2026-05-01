@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
@@ -14,6 +14,7 @@ const TABS = [
   { key: 'trust_bar', label: 'Barra de benefícios', icon: BadgeCheck },
   { key: 'referral_box', label: 'Programa de indicação', icon: Gift },
   { key: 'free_shipping', label: 'Frete grátis', icon: Truck },
+  { key: 'points', label: 'Pontos', icon: Award },
   { key: 'footer', label: 'Rodapé', icon: Layout },
 ];
 
@@ -44,9 +45,17 @@ export default function AdminAppearance() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('identity');
+  const [userCategories, setUserCategories] = useState([]);
 
   const load = async () => {
-    try { setS(await api.get('/api/site-settings')); } finally { setLoading(false); }
+    try {
+      const [settings, ucs] = await Promise.all([
+        api.get('/api/site-settings'),
+        api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
+      ]);
+      setS(settings);
+      setUserCategories(ucs.categories || []);
+    } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
@@ -413,6 +422,63 @@ export default function AdminAppearance() {
         </div>
       )}
 
+      {tab === 'points' && (
+        <div className="space-y-4 max-w-3xl">
+          <Card title="Exibição de pontos por produto na loja">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">
+              Controla para quem aparece o texto "Ganhe X pontos" embaixo do preço de cada produto. O valor em pontos é configurado individualmente em <span className="font-mono">Produtos → Pontos por unidade</span>.
+            </p>
+            <div className="space-y-2.5">
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.points_visibility_mode === 'none' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="pv_mode" checked={(s.points_visibility_mode || 'none') === 'none'} onChange={() => set('points_visibility_mode', 'none')} className="mt-1" data-testid="pv-none" />
+                <div>
+                  <div className="text-sm font-semibold">Não exibir para ninguém</div>
+                  <div className="text-xs text-txt-secondary">Os pontos ficam ocultos na loja pública.</div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.points_visibility_mode === 'all' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="pv_mode" checked={s.points_visibility_mode === 'all'} onChange={() => set('points_visibility_mode', 'all')} className="mt-1" data-testid="pv-all" />
+                <div>
+                  <div className="text-sm font-semibold">Exibir para todos</div>
+                  <div className="text-xs text-txt-secondary">Inclusive visitantes não logados.</div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.points_visibility_mode === 'selected' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
+                <input type="radio" name="pv_mode" checked={s.points_visibility_mode === 'selected'} onChange={() => set('points_visibility_mode', 'selected')} className="mt-1" data-testid="pv-selected" />
+                <div className="flex-1">
+                  <div className="text-sm font-semibold">Exibir apenas para públicos selecionados</div>
+                  <div className="text-xs text-txt-secondary mb-2">Escolha abaixo por tipo de rede ou por categoria de usuário.</div>
+                  {s.points_visibility_mode === 'selected' && (
+                    <div className="mt-2 space-y-3">
+                      <AudienceGroup
+                        title="Por tipo de conta"
+                        options={[
+                          { token: 'customer', label: 'Cliente (customer)' },
+                          { token: 'network_1', label: 'Rede 1 (Corporativa)' },
+                          { token: 'network_2', label: 'Rede 2 (Propagandista)' },
+                        ]}
+                        selected={s.points_visibility_audiences || []}
+                        onToggle={(token) => toggleAudience(s, set, token)}
+                      />
+                      <AudienceGroup
+                        title="Por categoria de usuário"
+                        options={userCategories.map(c => ({ token: `cat:${c.category_id}`, label: c.name, color: c.color }))}
+                        selected={s.points_visibility_audiences || []}
+                        onToggle={(token) => toggleAudience(s, set, token)}
+                        emptyText={<>Nenhuma categoria cadastrada. Crie em <span className="font-mono">/backoffice/categorias-usuarios</span>.</>}
+                      />
+                    </div>
+                  )}
+                </div>
+              </label>
+            </div>
+            <div className="mt-4 pt-3 border-t border-border">
+              <Field label="Palavra exibida ao lado do número (ex: pontos, pts, OXX$)" value={s.points_visibility_label} onChange={(v) => set('points_visibility_label', v)} placeholder="pontos" testId="pv-label" />
+            </div>
+          </Card>
+        </div>
+      )}
+
       {tab === 'footer' && (
         <div className="space-y-4 max-w-3xl">
           <Card title="Sobre a empresa">
@@ -448,6 +514,48 @@ export default function AdminAppearance() {
     </div>
   );
 }
+
+
+function toggleAudience(s, set, token) {
+  const cur = new Set(s.points_visibility_audiences || []);
+  if (cur.has(token)) cur.delete(token); else cur.add(token);
+  set('points_visibility_audiences', [...cur]);
+}
+
+function AudienceGroup({ title, options, selected, onToggle, emptyText }) {
+  if (!options.length) {
+    return (
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wider text-txt-secondary mb-1.5">{title}</div>
+        <div className="text-xs text-txt-secondary bg-bg-secondary rounded-md px-3 py-2">{emptyText || 'Nenhuma opção disponível.'}</div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="text-[11px] font-bold uppercase tracking-wider text-txt-secondary mb-1.5">{title}</div>
+      <div className="flex flex-wrap gap-2">
+        {options.map(opt => {
+          const isSel = selected.includes(opt.token);
+          const color = opt.color || '#E8731A';
+          return (
+            <button
+              type="button"
+              key={opt.token}
+              onClick={() => onToggle(opt.token)}
+              className="text-xs px-3 py-1.5 rounded-full border-2 transition font-semibold"
+              style={{ borderColor: color, color: isSel ? 'white' : color, background: isSel ? color : 'white' }}
+              data-testid={`pv-aud-${opt.token}`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 
 function Card({ title, children }) {
   return (

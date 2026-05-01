@@ -3017,6 +3017,13 @@ DEFAULT_SITE_SETTINGS = {
     "free_shipping_mode": "off",
     "free_shipping_min_subtotal": 199.0,
     "free_shipping_label": "Frete grátis",
+    # ============ Exibição de pontos por produto na loja ============
+    # mode: 'none' (ninguém) | 'all' (todos incluindo visitantes) | 'selected'
+    # quando 'selected', usa points_visibility_audiences:
+    #   tokens aceitos: 'customer', 'network_1', 'network_2', 'cat:{category_id}'
+    "points_visibility_mode": "none",
+    "points_visibility_audiences": [],
+    "points_visibility_label": "pontos",
     "logo_sizes": {
         "store_header":  {"height": 40, "max_width": 180},
         "store_footer":  {"height": 36, "max_width": 160},

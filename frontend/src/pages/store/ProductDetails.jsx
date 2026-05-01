@@ -6,7 +6,10 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import ProductCard from '../../components/store/ProductCard';
 import { useCart } from '../../contexts/CartContext';
-import { ShoppingCart, Truck, ShieldCheck, Minus, Plus, Loader2, ArrowLeft } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
+import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
+import { ShoppingCart, Truck, ShieldCheck, Minus, Plus, Loader2, ArrowLeft, Award } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=800';
@@ -15,6 +18,8 @@ export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { addItem } = useCart();
+  const { user } = useAuth();
+  const settings = useSiteSettings();
   const [product, setProduct] = useState(null);
   const [related, setRelated] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +103,12 @@ export default function ProductDetails() {
           {hasDiscount && (
             <div className="text-sm text-emerald-600 font-semibold mt-1">
               Economize {formatCurrency((product.price || 0) - price)}
+            </div>
+          )}
+          {canSeeProductPoints(user, settings) && product.points_value > 0 && (
+            <div className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg" data-testid="product-points">
+              <Award className="w-4 h-4" />
+              Ganhe {formatPointsLabel(product.points_value, settings?.points_visibility_label || 'pontos')} nesta compra
             </div>
           )}
 

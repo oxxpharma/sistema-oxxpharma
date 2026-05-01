@@ -1,14 +1,19 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Tag } from 'lucide-react';
+import { ShoppingCart, Tag, Award } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 import { useCart } from '../../contexts/CartContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
+import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 import { toast } from 'sonner';
 
 const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400';
 
 export default function ProductCard({ product }) {
   const { addItem } = useCart();
+  const { user } = useAuth();
+  const settings = useSiteSettings();
 
   // Backend ja calcula effective_price baseado em pricing_tiers do usuario.
   // Fallback para produtos antigos sem o campo decorado.
@@ -66,6 +71,12 @@ export default function ProductCard({ product }) {
             <span className="text-xs text-txt-secondary line-through">{formatCurrency(original)}</span>
           )}
         </div>
+        {canSeeProductPoints(user, settings) && product.points_value > 0 && (
+          <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-700" data-testid={`product-points-${product.product_id}`}>
+            <Award className="w-3 h-3" />
+            Ganhe {formatPointsLabel(product.points_value, settings?.points_visibility_label || 'pontos')}
+          </div>
+        )}
         <button
           onClick={onAdd}
           className="mt-3 w-full h-10 rounded-lg bg-brand-main hover:bg-brand-hover text-white text-sm font-semibold flex items-center justify-center gap-2 transition active:scale-[0.98]"
