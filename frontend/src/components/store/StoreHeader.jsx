@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network } from 'lucide-react';
+import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network, Award } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { useReferral } from '../../contexts/RefContext';
@@ -88,6 +88,9 @@ export default function StoreHeader() {
                     </Link>
                     <Link to="/meus-pedidos" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="my-orders-link">
                       <Package className="w-4 h-4" /> Meus pedidos
+                    </Link>
+                    <Link to="/meus-pontos" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="my-points-link">
+                      <Award className="w-4 h-4" /> Meus {settings?.points_visibility_label || 'pontos'}
                     </Link>
                     <Link to="/meus-enderecos" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)}>
                       <MapPin className="w-4 h-4" /> Endereços

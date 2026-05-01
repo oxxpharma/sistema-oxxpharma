@@ -185,6 +185,7 @@ class AuthRegister(BaseModel):
     password: str
     name: str
     phone: Optional[str] = None
+    cpf: Optional[str] = None
     sponsor_code: Optional[str] = None  # Codigo de indicacao (referral do afiliado)
 
 class AuthLogin(BaseModel):
@@ -331,6 +332,7 @@ async def lifespan(app: FastAPI):
     await app.db.users.create_index("network_sponsor_id")
     await app.db.users.create_index("external_id", sparse=True)
     await app.db.users.create_index("leader_external_id", sparse=True)
+    await app.db.users.create_index("cpf_digits", sparse=True)
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
@@ -415,7 +417,8 @@ async def register(request: Request, response: Response, data: AuthRegister):
     user = {
         "user_id": gen_id("user_"), "email": data.email.lower(),
         "password_hash": hash_pw(data.password), "name": data.name,
-        "phone": data.phone, "role": "customer", "access_level": 99,
+        "phone": data.phone, "cpf": data.cpf, "cpf_digits": _clean_cpf(data.cpf),
+        "role": "customer", "access_level": 99,
         "status": "active", "addresses": [],
         "referral_code": None,
         "referral_program_active": False,
@@ -1796,10 +1799,43 @@ class Network1ImportRow(BaseModel):
     email: EmailStr
     leader_external_id: Optional[str] = None
     phone: Optional[str] = None
+    cpf: Optional[str] = None
 
 class Network1ImportPayload(BaseModel):
     rows: List[Network1ImportRow]
     default_password: Optional[str] = "oxx@pharma"
+
+
+def _clean_cpf(cpf: Optional[str]) -> Optional[str]:
+    """Normaliza CPF removendo tudo que nao for digito."""
+    if not cpf:
+        return None
+    digits = "".join(ch for ch in str(cpf) if ch.isdigit())
+    return digits or None
+
+
+async def find_existing_user_for_sync(db, external_id: Optional[str], email: Optional[str], cpf: Optional[str]) -> Optional[Dict]:
+    """Prioriza match por external_id (ja vinculado) -> CPF normalizado -> email.
+    Isso permite vincular automaticamente usuarios que se cadastraram antes da integracao Maxx.
+    """
+    if external_id:
+        doc = await db.users.find_one({"external_id": external_id})
+        if doc:
+            return doc
+    clean = _clean_cpf(cpf)
+    if clean:
+        # Match tentando variar formato: digits puros OU com mascara
+        doc = await db.users.find_one({"$or": [{"cpf": clean}, {"cpf_digits": clean}]})
+        if doc:
+            return doc
+        # Fallback: varre docs que contenham os digitos (usuarios antigos podem ter CPF com mascara)
+        import re
+        doc = await db.users.find_one({"cpf": {"$regex": re.escape(clean)}})
+        if doc:
+            return doc
+    if email:
+        return await db.users.find_one({"email": str(email).lower()})
+    return None
 
 async def resolve_leader_links(db, rows, id_map: dict) -> dict:
     """Resolve leader_external_id -> network_sponsor_id para os usuarios processados
@@ -1892,23 +1928,40 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
     pw_hash = hash_pw(default_password)
 
     # Passo 1: upsert usuarios
-    stats = {"created": 0, "updated": 0, "total": len(data.rows), "errors": []}
+    stats = {"created": 0, "updated": 0, "linked_by_cpf": 0, "total": len(data.rows), "errors": []}
     id_map = {}  # external_id -> user_id
     for row in data.rows:
         try:
-            existing = await db.users.find_one({"external_id": row.external_id}) or await db.users.find_one({"email": row.email.lower()})
+            existing = await find_existing_user_for_sync(db, row.external_id, str(row.email), row.cpf)
             if existing:
+                match_cpf = _clean_cpf(row.cpf)
+                existing_ext = existing.get("external_id")
+                linked_by_cpf_flag = bool(match_cpf and not existing_ext and match_cpf == _clean_cpf(existing.get("cpf")))
+                update_fields = {
+                    "external_id": row.external_id,
+                    "name": row.name,
+                    "phone": row.phone,
+                    "network_type": NETWORK_1,
+                    "leader_external_id": row.leader_external_id or None,
+                }
+                if row.cpf:
+                    update_fields["cpf"] = row.cpf
+                    if match_cpf:
+                        update_fields["cpf_digits"] = match_cpf
+                # Atualiza email SOMENTE se o existente nao tem email (ou se eh o mesmo) - evita sobrescrever login do usuario
+                if not existing.get("email") or existing.get("email") == str(row.email).lower():
+                    update_fields["email"] = str(row.email).lower()
                 await db.users.update_one(
                     {"user_id": existing["user_id"]},
-                    {"$set": {
-                        "external_id": row.external_id, "name": row.name,
-                        "phone": row.phone, "network_type": NETWORK_1,
-                    }},
+                    {"$set": update_fields},
                 )
                 id_map[row.external_id] = existing["user_id"]
                 stats["updated"] += 1
+                if linked_by_cpf_flag:
+                    stats["linked_by_cpf"] += 1
             else:
                 uid = gen_id("user_")
+                cpf_clean = _clean_cpf(row.cpf)
                 await db.users.insert_one({
                     "user_id": uid, "email": row.email.lower(),
                     "password_hash": pw_hash, "name": row.name,
@@ -1919,6 +1972,8 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
                     "network_sponsor_id": None,
                     "external_id": row.external_id,
                     "leader_external_id": row.leader_external_id or None,
+                    "cpf": row.cpf or None,
+                    "cpf_digits": cpf_clean,
                     "must_set_password": True,
                     "referral_program_active": False,
                     "created_at": now_iso(),
@@ -2583,6 +2638,7 @@ class ExternalSyncUser(BaseModel):
     email: EmailStr
     leader_external_id: Optional[str] = None
     phone: Optional[str] = None
+    cpf: Optional[str] = None
 
 class ExternalSyncPayload(BaseModel):
     action: str = "upsert"   # "upsert" | "delete"
@@ -2616,25 +2672,41 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
         })
         raise HTTPException(status_code=401, detail="Token invalido")
 
-    stats = {"created": 0, "updated": 0, "deleted": 0, "errors": []}
+    stats = {"created": 0, "updated": 0, "deleted": 0, "linked_by_cpf": 0, "errors": []}
     id_map = {}
     if data.action == "upsert":
         pw_hash = hash_pw(data.default_password or "oxx@pharma")
         for row in data.users:
             try:
-                existing = await db.users.find_one({"external_id": row.external_id}) or await db.users.find_one({"email": row.email.lower()})
+                existing = await find_existing_user_for_sync(db, row.external_id, str(row.email), row.cpf)
                 if existing:
+                    match_cpf = _clean_cpf(row.cpf)
+                    existing_ext = existing.get("external_id")
+                    linked_by_cpf_flag = bool(match_cpf and not existing_ext and match_cpf == _clean_cpf(existing.get("cpf")))
+                    update_fields = {
+                        "external_id": row.external_id,
+                        "name": row.name,
+                        "phone": row.phone,
+                        "network_type": NETWORK_1,
+                        "leader_external_id": row.leader_external_id or None,
+                    }
+                    if row.cpf:
+                        update_fields["cpf"] = row.cpf
+                        if match_cpf:
+                            update_fields["cpf_digits"] = match_cpf
+                    if not existing.get("email") or existing.get("email") == str(row.email).lower():
+                        update_fields["email"] = str(row.email).lower()
                     await db.users.update_one(
                         {"user_id": existing["user_id"]},
-                        {"$set": {
-                            "external_id": row.external_id, "name": row.name,
-                            "phone": row.phone, "network_type": NETWORK_1,
-                        }},
+                        {"$set": update_fields},
                     )
                     id_map[row.external_id] = existing["user_id"]
                     stats["updated"] += 1
+                    if linked_by_cpf_flag:
+                        stats["linked_by_cpf"] += 1
                 else:
                     uid = gen_id("user_")
+                    cpf_clean = _clean_cpf(row.cpf)
                     await db.users.insert_one({
                         "user_id": uid, "email": row.email.lower(),
                         "password_hash": pw_hash, "name": row.name,
@@ -2645,6 +2717,8 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                         "network_sponsor_id": None,
                         "external_id": row.external_id,
                         "leader_external_id": row.leader_external_id or None,
+                        "cpf": row.cpf or None,
+                        "cpf_digits": cpf_clean,
                         "must_set_password": True,  # primeiro acesso obriga a definir senha
                         "referral_program_active": False,
                         "created_at": now_iso(),
@@ -2947,6 +3021,129 @@ async def admin_maxx_sync_one(request: Request, log_id: str, user: dict = Depend
     return await maxx_service.send_points(db, [p], kind="manual")
 
 
+@app.get("/api/admin/maxx-pending-by-user")
+async def admin_maxx_pending_by_user(request: Request, user: dict = Depends(require_admin())):
+    """Agrega points_log pendentes (sent_to_maxx=false AND applied_externally=false)
+    por usuario. Usado para o admin enviar em massa por pessoa usuarios que foram
+    vinculados via sync CPF apos ja terem gerado pontos."""
+    db = request.app.db
+    pipeline = [
+        {"$match": {
+            "$and": [
+                {"$or": [{"sent_to_maxx": {"$ne": True}}, {"sent_to_maxx": {"$exists": False}}]},
+                {"$or": [{"applied_externally": {"$ne": True}}, {"applied_externally": {"$exists": False}}]},
+            ]
+        }},
+        {"$group": {
+            "_id": "$user_id",
+            "user_name": {"$first": "$user_name"},
+            "user_email": {"$first": "$user_email"},
+            "user_external_id": {"$first": "$user_external_id"},
+            "points_total": {"$sum": "$points_total"},
+            "records_count": {"$sum": 1},
+            "oldest_at": {"$min": "$registered_at"},
+            "latest_at": {"$max": "$registered_at"},
+        }},
+        {"$sort": {"latest_at": -1}},
+    ]
+    rows = await db.points_log.aggregate(pipeline).to_list(5000)
+    out = []
+    for r in rows:
+        uid = r.pop("_id", None)
+        has_external = bool(r.get("user_external_id"))
+        # Buscar dados frescos do user (pode ter sido vinculado depois)
+        udoc = await db.users.find_one({"user_id": uid}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "cpf": 1, "network_type": 1}) or {}
+        out.append({
+            "user_id": uid,
+            "user_name": udoc.get("name") or r.get("user_name"),
+            "user_email": udoc.get("email") or r.get("user_email"),
+            "user_external_id": udoc.get("external_id"),
+            "cpf": udoc.get("cpf"),
+            "network_type": udoc.get("network_type"),
+            "linked": bool(udoc.get("external_id")),
+            "previous_external_id_on_log": has_external,
+            "points_total": round(float(r.get("points_total") or 0), 2),
+            "records_count": r.get("records_count") or 0,
+            "oldest_at": r.get("oldest_at"),
+            "latest_at": r.get("latest_at"),
+        })
+    return {"users": out, "total": len(out)}
+
+
+@app.post("/api/admin/maxx-sync-user/{user_id}")
+async def admin_maxx_sync_user(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Envia ao Maxx todos os points_log pendentes de um unico usuario.
+    Antes de enviar, atualiza user_external_id/user_name/user_email nos logs
+    com os dados atuais do user (uteis para users vinculados depois via CPF)."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if not target.get("external_id"):
+        raise HTTPException(status_code=400, detail="Usuario sem external_id. Vincule primeiro (sync Maxx ou edicao manual).")
+
+    # Atualiza os points_log com os dados mais recentes do user antes de enviar
+    await db.points_log.update_many(
+        {"user_id": user_id, "sent_to_maxx": {"$ne": True}},
+        {"$set": {
+            "user_external_id": target.get("external_id"),
+            "user_name": target.get("name"),
+            "user_email": target.get("email"),
+        }},
+    )
+
+    pending = await db.points_log.find(
+        {"user_id": user_id,
+         "$or": [{"sent_to_maxx": {"$ne": True}}, {"sent_to_maxx": {"$exists": False}}],
+         "applied_externally": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(10000)
+    if not pending:
+        return {"success": True, "sent_count": 0, "skipped": True, "reason": "sem pontos pendentes"}
+    return await maxx_service.send_points(db, pending, kind="manual_by_user")
+
+
+@app.get("/api/users/me/points")
+async def my_points_history(request: Request, user: dict = Depends(get_current_user)):
+    """Historico de pontos do usuario logado, com totais e status (pendente vs enviado).
+    NAO menciona o nome 'Maxx' - expoe apenas 'Pendente' / 'Enviado ao programa'."""
+    db = request.app.db
+    uid = user["user_id"]
+    logs = await db.points_log.find({"user_id": uid}, {
+        "_id": 0,
+        "log_id": 1, "registered_at": 1, "order_id": 1,
+        "product_name": 1, "quantity": 1, "points_unit": 1, "points_total": 1,
+        "sent_to_maxx": 1, "sent_to_maxx_at": 1,
+        "applied_externally": 1, "applied_at": 1,
+    }).sort("registered_at", -1).to_list(1000)
+
+    sent_total = 0.0
+    pending_total = 0.0
+    for l in logs:
+        is_sent = bool(l.get("sent_to_maxx") or l.get("applied_externally"))
+        l["status"] = "sent" if is_sent else "pending"
+        l["status_label"] = "Enviado ao programa" if is_sent else "Pendente"
+        # Data efetiva de envio (qualquer que seja a fonte do 'applied')
+        l["effective_sent_at"] = l.get("sent_to_maxx_at") or l.get("applied_at")
+        pts = float(l.get("points_total") or 0)
+        if is_sent:
+            sent_total += pts
+        else:
+            pending_total += pts
+        # Remove flags tecnicas do retorno publico
+        l.pop("sent_to_maxx", None)
+        l.pop("applied_externally", None)
+
+    return {
+        "total_points": round(sent_total + pending_total, 2),
+        "sent_total": round(sent_total, 2),
+        "pending_total": round(pending_total, 2),
+        "records_count": len(logs),
+        "logs": logs,
+    }
+
+
+
 @app.get("/api/admin/maxx-logs")
 async def admin_maxx_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
     db = request.app.db
@@ -3206,6 +3403,7 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         "name": name,
         "phone": (body.get("phone") or "").strip() or None,
         "cpf": (body.get("cpf") or "").strip() or None,
+        "cpf_digits": _clean_cpf(body.get("cpf")),
         "external_id": (body.get("external_id") or "").strip() or None,
         "role": role,
         "access_level": 0 if role == "admin" else int(body.get("access_level") or 99),
@@ -3292,6 +3490,9 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
             update["network_sponsor_id"] = leader_doc["user_id"] if leader_doc else None
         else:
             update["network_sponsor_id"] = None
+    # Se o CPF foi alterado, recalcula cpf_digits para manter o indice de match correto
+    if "cpf" in update:
+        update["cpf_digits"] = _clean_cpf(update.get("cpf"))
     update["updated_at"] = now_iso()
     await db.users.update_one({"user_id": user_id}, {"$set": update})
     fresh = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})

@@ -41,6 +41,17 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Botão "Detalhes" ao lado de "Editar" na lista de usuários (modal de edição preservado)
   - Frete + correção de `api.delete()` que faltava em `lib/api.js`
   - Caixa do programa MMN: imagem decorativa configurável (URL, largura, rotação, translate X/Y, animação flutuante)
+- ✅ Iter 24 (Fev/2026): Match por CPF na sync Maxx + visualização pública de pontos
+  - Sync API Maxx (`POST /api/external/network1/sync` e `POST /api/admin/network1/import`) agora aceita campo `cpf` e prioriza match: external_id → CPF normalizado → email
+  - Quando CPF bate com user já cadastrado direto pela loja, vincula sem duplicar e atualiza external_id/leader_external_id/name/phone
+  - Stats expandidos: `linked_by_cpf` no retorno
+  - Cadastro público (`/cadastrar`) agora pede CPF (campo opcional mas recomendado)
+  - Novo índice `users.cpf_digits` (somente dígitos, sparse)
+  - Endpoint admin `GET /api/admin/maxx-pending-by-user` lista users com pontos pendentes agrupado
+  - Endpoint admin `POST /api/admin/maxx-sync-user/{user_id}` envia em massa pendentes de um único usuário (atualiza external_id nos logs antes do envio)
+  - Página admin `/backoffice/maxx-pendentes` com tabela e botão "Enviar pontos" por usuário
+  - Endpoint público `GET /api/users/me/points` retorna histórico + totais (sent/pending) sem mencionar "Maxx"
+  - Página loja `/meus-pontos` (link no menu user) com 3 cards (total/enviado/pendente) + tabela completa
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

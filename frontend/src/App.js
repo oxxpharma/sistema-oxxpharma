@@ -23,6 +23,7 @@ import MyReferral from './pages/store/MyReferral';
 import MyNetwork from './pages/store/MyNetwork';
 import MyWithdrawals from './pages/store/MyWithdrawals';
 import MyAccount from './pages/store/MyAccount';
+import MyPoints from './pages/store/MyPoints';
 import SearchPage from './pages/store/SearchPage';
 
 // Auth
@@ -49,6 +50,7 @@ import AdminPoints from './pages/backoffice/AdminPoints';
 import AdminPayments from './pages/backoffice/AdminPayments';
 import AdminShipping from './pages/backoffice/AdminShipping';
 import AdminMaxx from './pages/backoffice/AdminMaxx';
+import AdminMaxxPending from './pages/backoffice/AdminMaxxPending';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
 import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
 import CmsPageView from './pages/store/CmsPageView';
@@ -94,6 +96,7 @@ function AppRoutes() {
         <Route path="/minha-rede" element={<Guard requireAuth><MyNetwork /></Guard>} />
         <Route path="/meus-saques" element={<Guard requireAuth><MyWithdrawals /></Guard>} />
         <Route path="/minha-conta" element={<Guard requireAuth><MyAccount /></Guard>} />
+        <Route path="/meus-pontos" element={<Guard requireAuth><MyPoints /></Guard>} />
         <Route path="/p/:slug" element={<CmsPageView />} />
       </Route>
 
@@ -127,6 +130,7 @@ function AppRoutes() {
         <Route path="pagamentos" element={<AdminPayments />} />
         <Route path="frete" element={<AdminShipping />} />
         <Route path="maxx" element={<AdminMaxx />} />
+        <Route path="maxx-pendentes" element={<AdminMaxxPending />} />
         <Route path="aparencia" element={<AdminAppearance />} />
         <Route path="paginas" element={<AdminPagesList />} />
         <Route path="paginas/:id" element={<AdminPageEditor />} />
