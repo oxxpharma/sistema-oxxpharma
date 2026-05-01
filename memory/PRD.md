@@ -33,6 +33,14 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Modal admin (`UserEditModal.jsx`) agora exibe o campo `leader_external_id`
   - Stats expandidos no log: `sponsors_mapped`, `sponsors_pending`, `leader_external_persisted`
   - Testes de regressão: `/app/backend/tests/test_leader_external_id_sync.py` (3 cenários, 100% passing)
+- ✅ Iter 23 (Fev/2026): Painel admin detalhado por usuário (`/backoffice/usuarios/:user_id`)
+  - Endpoint agregador `GET /api/admin/users/{user_id}/details` retorna user + KPIs + listas
+  - Página `AdminUserDetails.jsx` com 6 abas: Visão Geral, Comissões, Pedidos, Rede MMN, Cartão de Benefícios, Pontos
+  - KPIs: saldo disponível/quarentena/pendente, total ganho/sacado/gasto, # pedidos, total cartão, pontos, downline/indicados, última compra
+  - Listas paginadas (até 200 comissões/pontos, 100 pedidos/downline, batches do cartão)
+  - Botão "Detalhes" ao lado de "Editar" na lista de usuários (modal de edição preservado)
+  - Frete + correção de `api.delete()` que faltava em `lib/api.js`
+  - Caixa do programa MMN: imagem decorativa configurável (URL, largura, rotação, translate X/Y, animação flutuante)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

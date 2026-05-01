@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus } from 'lucide-react';
+import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import UserEditModal from '../../components/UserEditModal';
 import UserCreateModal from '../../components/UserCreateModal';
@@ -123,9 +124,14 @@ export default function AdminUsers() {
                       {u.role === 'admin' ? <Badge variant="brand">Admin</Badge> : <Badge>Cliente</Badge>}
                     </td>
                     <td className="p-3 text-right">
-                      <button onClick={() => setEditingId(u.user_id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-brand-main text-white rounded hover:bg-brand-hover" data-testid={`edit-user-${u.user_id}`}>
-                        <Pencil className="w-3 h-3" /> Editar
-                      </button>
+                      <div className="inline-flex items-center gap-1.5">
+                        <Link to={`/backoffice/usuarios/${u.user_id}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-bg-secondary text-txt-primary rounded hover:bg-border" data-testid={`details-user-${u.user_id}`}>
+                          <Eye className="w-3 h-3" /> Detalhes
+                        </Link>
+                        <button onClick={() => setEditingId(u.user_id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-brand-main text-white rounded hover:bg-brand-hover" data-testid={`edit-user-${u.user_id}`}>
+                          <Pencil className="w-3 h-3" /> Editar
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

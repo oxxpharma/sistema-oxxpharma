@@ -1119,6 +1119,145 @@ async def admin_get_user(request: Request, user_id: str, user: dict = Depends(re
     u["total_orders"] = order_count
     return u
 
+
+@app.get("/api/admin/users/{user_id}/details")
+async def admin_user_details(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Painel agregador: retorna user + KPIs + listas (commissions, orders, network,
+    card balance/logs, points). Usado por /backoffice/usuarios/:id."""
+    db = request.app.db
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+
+    settings = await get_settings(db)
+    release_days = int(settings.get("withdrawal_release_days") or 0)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=release_days)).isoformat()
+
+    # ---- KPIs / Saldos ----
+    available_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid", "withdrawal_id": {"$in": [None, ""]}, "paid_at": {"$lte": cutoff}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    quarantine_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid", "withdrawal_id": {"$in": [None, ""]}, "paid_at": {"$gt": cutoff}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    pending_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "pending"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    earned_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": {"$in": ["paid", "pending"]}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    withdrawn_agg = await db.withdrawals.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid_out"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    spent_agg = await db.orders.aggregate([
+        {"$match": {"user_id": user_id, "payment_status": "paid"}},
+        {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    total_orders = await db.orders.count_documents({"user_id": user_id})
+    last_order = await db.orders.find_one({"user_id": user_id}, {"_id": 0}, sort=[("created_at", -1)])
+
+    # Cartao de beneficios: somar batches enviados deste user
+    card_sent_agg = await db.card_batches.aggregate([
+        {"$unwind": "$lines"},
+        {"$match": {"lines.user_id": user_id}},
+        {"$group": {"_id": None, "total": {"$sum": "$lines.amount"}}}
+    ]).to_list(1)
+    card_total = round(card_sent_agg[0]["total"] if card_sent_agg else 0, 2)
+
+    # Pontos totais
+    points_agg = await db.points_log.aggregate([
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": None, "total": {"$sum": "$points_total"}}}
+    ]).to_list(1)
+    points_total = int(points_agg[0]["total"] if points_agg else 0)
+
+    # Downline direto (1a geracao)
+    direct_downline = await db.users.count_documents({"network_sponsor_id": user_id})
+    direct_referrals = await db.users.count_documents({"sponsor_id": user_id})
+
+    kpis = {
+        "available": round(available_agg[0]["total"] if available_agg else 0, 2),
+        "quarantine": round(quarantine_agg[0]["total"] if quarantine_agg else 0, 2),
+        "pending_commissions": round(pending_agg[0]["total"] if pending_agg else 0, 2),
+        "total_earned": round(earned_agg[0]["total"] if earned_agg else 0, 2),
+        "total_withdrawn": round(withdrawn_agg[0]["total"] if withdrawn_agg else 0, 2),
+        "total_spent": round(spent_agg[0]["total"] if spent_agg else 0, 2),
+        "total_orders": total_orders,
+        "paid_orders": int(spent_agg[0]["count"] if spent_agg else 0),
+        "card_total_sent": card_total,
+        "points_total": points_total,
+        "direct_downline": direct_downline,
+        "direct_referrals": direct_referrals,
+        "last_order_at": last_order.get("created_at") if last_order else None,
+    }
+
+    # ---- Comissoes (ate 200 mais recentes) ----
+    commissions = await db.commissions.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+
+    # ---- Pedidos (ate 100 mais recentes) ----
+    orders = await db.orders.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
+
+    # ---- Rede MMN ----
+    sponsor = None
+    if u.get("sponsor_id"):
+        sp = await db.users.find_one({"user_id": u["sponsor_id"]}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "referral_code": 1})
+        if sp:
+            sponsor = sp
+    network_sponsor = None
+    if u.get("network_sponsor_id"):
+        nsp = await db.users.find_one({"user_id": u["network_sponsor_id"]}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "network_type": 1})
+        if nsp:
+            network_sponsor = nsp
+    referrals = await db.users.find({"sponsor_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "created_at": 1, "referral_program_active": 1}).sort("created_at", -1).limit(100).to_list(100)
+    network_downline = await db.users.find({"network_sponsor_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "network_type": 1, "created_at": 1}).sort("created_at", -1).limit(100).to_list(100)
+
+    # ---- Cartao: batches/lines deste user ----
+    card_lines = await db.card_batches.aggregate([
+        {"$unwind": "$lines"},
+        {"$match": {"lines.user_id": user_id}},
+        {"$project": {
+            "_id": 0,
+            "batch_id": "$batch_id",
+            "batch_created_at": "$created_at",
+            "batch_status": "$status",
+            "amount": "$lines.amount",
+            "commissions_count": "$lines.commissions_count",
+            "sent_at": "$exported_at",
+        }},
+        {"$sort": {"batch_created_at": -1}},
+        {"$limit": 100},
+    ]).to_list(100)
+
+    # ---- Pontos: ultimos 200 ----
+    points_logs = await db.points_log.find({"user_id": user_id}, {"_id": 0}).sort("registered_at", -1).limit(200).to_list(200)
+
+    return {
+        "user": u,
+        "kpis": kpis,
+        "commissions": commissions,
+        "orders": orders,
+        "network": {
+            "sponsor": sponsor,
+            "network_sponsor": network_sponsor,
+            "referrals": referrals,
+            "downline": network_downline,
+        },
+        "card": {
+            "total_sent": card_total,
+            "lines": card_lines,
+        },
+        "points": {
+            "total": points_total,
+            "logs": points_logs,
+        },
+    }
+
+
 # ==================== ADMIN DASHBOARD ====================
 
 @app.get("/api/admin/dashboard")

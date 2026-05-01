@@ -35,6 +35,7 @@ import AdminProducts from './pages/backoffice/AdminProducts';
 import AdminCategories from './pages/backoffice/AdminCategories';
 import AdminOrders from './pages/backoffice/AdminOrders';
 import AdminUsers from './pages/backoffice/AdminUsers';
+import AdminUserDetails from './pages/backoffice/AdminUserDetails';
 import AdminSettings from './pages/backoffice/AdminSettings';
 import AdminNetworks from './pages/backoffice/AdminNetworks';
 import AdminCandidates from './pages/backoffice/AdminCandidates';
@@ -114,6 +115,7 @@ function AppRoutes() {
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
         <Route path="usuarios" element={<AdminUsers />} />
+        <Route path="usuarios/:user_id" element={<AdminUserDetails />} />
         <Route path="categorias-usuarios" element={<AdminUserCategories />} />
         <Route path="cupons" element={<AdminCoupons />} />
         <Route path="redes" element={<AdminNetworks />} />
