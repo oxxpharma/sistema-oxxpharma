@@ -1425,6 +1425,15 @@ async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Dep
     update_set["updated_at"] = now_iso()
     update_set["merged_from_user_ids"] = (keep.get("merged_from_user_ids") or []) + [data.drop_user_id]
 
+    # Antes de aplicar o update no keep, precisamos liberar campos com indice unico
+    # (email, cpf_digits, external_id) que possam estar sendo "transferidos" do drop.
+    unset_on_drop = {}
+    for f in ("email", "cpf_digits", "external_id"):
+        if f in update_set and update_set.get(f) and drop.get(f) == update_set.get(f):
+            unset_on_drop[f] = ""
+    if unset_on_drop:
+        await db.users.update_one({"user_id": data.drop_user_id}, {"$unset": unset_on_drop})
+
     await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
 
     # 2. Migrar relacionamentos (compras, pontos, comissoes, saques, batches do cartao,
@@ -1460,11 +1469,36 @@ async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Dep
     except Exception as e:
         moved["card_batches.lines"] = f"err: {e}"
 
-    # 5. Deletar o drop
+    # 5. Audit log da fusao (rastreabilidade)
+    try:
+        await db.merge_audit_log.insert_one({
+            "merge_id": str(uuid.uuid4()),
+            "kept_user_id": data.keep_user_id,
+            "deleted_user_id": data.drop_user_id,
+            "performed_by_user_id": user.get("user_id"),
+            "performed_by_email": user.get("email"),
+            "performed_at": now_iso(),
+            "kept_snapshot_before": {k: keep.get(k) for k in overwrite_fields if keep.get(k)},
+            "drop_snapshot": {k: drop.get(k) for k in overwrite_fields if drop.get(k)},
+            "fields_overwritten": list(update_set.keys()),
+            "moved_counts": {k: v for k, v in moved.items() if isinstance(v, int)},
+        })
+    except Exception as e:
+        logger.warning(f"merge_audit_log insert failed: {e}")
+
+    # 6. Deletar o drop
     await db.users.delete_one({"user_id": data.drop_user_id})
 
     fresh = await db.users.find_one({"user_id": data.keep_user_id}, {"_id": 0, "password_hash": 0})
     return {"success": True, "kept": fresh, "deleted_user_id": data.drop_user_id, "moved": moved}
+
+
+@app.get("/api/admin/merge-audit-log")
+async def admin_merge_audit_log(request: Request, limit: int = 100, user: dict = Depends(require_admin())):
+    """Historico de fusoes manuais de contas (auditoria)."""
+    db = request.app.db
+    rows = await db.merge_audit_log.find({}, {"_id": 0}).sort("performed_at", -1).limit(int(limit)).to_list(int(limit))
+    return {"items": rows, "total": len(rows)}
 
 
 @app.get("/api/admin/users/{user_id}/details")
@@ -2017,10 +2051,23 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
             for s in comm_agg:
                 stats[s["_id"] or "pending"] = round(s["total"], 2)
                 stats["count"] += s["count"]
+            # Lista resumida dos membros para exibir nominalmente
+            members_list = [
+                {
+                    "user_id": m.get("user_id"),
+                    "name": m.get("name"),
+                    "email": m.get("email"),
+                    "external_id": m.get("external_id"),
+                    "created_at": m.get("created_at"),
+                    "referral_program_active": bool(m.get("referral_program_active")),
+                }
+                for m in level_users
+            ]
             generations.append({
                 "generation": gen,
                 "rate_pct": gens_pct[gen - 1] if gen - 1 < len(gens_pct) else 0,
                 "members_count": len(level_users),
+                "members": members_list,
                 "pending": stats.get("pending", 0),
                 "paid": stats.get("paid", 0),
                 "total_commissions": stats.get("count", 0),
@@ -2031,7 +2078,7 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                 for g in range(gen + 1, 7):
                     generations.append({
                         "generation": g, "rate_pct": gens_pct[g - 1] if g - 1 < len(gens_pct) else 0,
-                        "members_count": 0, "pending": 0, "paid": 0, "total_commissions": 0,
+                        "members_count": 0, "members": [], "pending": 0, "paid": 0, "total_commissions": 0,
                     })
                 break
 

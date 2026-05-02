@@ -2,10 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Network, Users, DollarSign, Clock, Loader2, Award, TrendingUp, Share2, Wallet } from 'lucide-react';
+import {
+  Network, Users, DollarSign, Clock, Loader2, Award, TrendingUp, Share2,
+  ChevronDown, ChevronRight,
+} from 'lucide-react';
 
 const NETWORK_LABELS = {
   customer: { label: 'Indicador', color: 'default' },
@@ -14,9 +17,10 @@ const NETWORK_LABELS = {
 };
 
 export default function MyNetwork() {
-  const { user } = useAuth();
+  const { user } = useAuth(); // eslint-disable-line no-unused-vars
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -34,8 +38,6 @@ export default function MyNetwork() {
 
   const isCustomer = data.network_type === 'customer';
   const label = NETWORK_LABELS[data.network_type] || NETWORK_LABELS.customer;
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const referralLink = `${origin}/?ref=${data.referral_code}`;
 
   // Total de membros em toda a rede
   const totalMembers = data.generations.reduce((acc, g) => acc + (g.members_count || 0), 0);
@@ -99,46 +101,76 @@ export default function MyNetwork() {
         </div>
       </div>
 
-      {/* Tabela de geracoes */}
+      {/* Gerações com lista nominal */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <div className="p-6 border-b border-border">
           <h2 className="font-heading font-black text-xl">Minhas gerações (até 6 níveis)</h2>
           <p className="text-xs text-txt-secondary mt-1">
-            Comissões recebidas por geração. Taxa de afiliado 1ª compra: {Math.round(data.commission_rate_affiliate * 100)}%.
+            Clique em cada geração para ver quem está nela. Comissões e taxas calculadas conforme a configuração da rede.
           </p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
-              <tr>
-                <th className="text-left p-3">Geração</th>
-                <th className="text-right p-3">Taxa</th>
-                <th className="text-right p-3">Membros</th>
-                <th className="text-right p-3">Nº de comissões</th>
-                <th className="text-right p-3">Pendente</th>
-                <th className="text-right p-3">Recebido</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.generations.map(g => (
-                <tr key={g.generation} className="border-t border-border">
-                  <td className="p-3">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${g.generation === 1 ? 'bg-brand-main text-white' : 'bg-bg-secondary'}`}>
-                        {g.generation}
-                      </div>
-                      <span className="font-semibold">{g.generation}ª geração</span>
+
+        <div className="divide-y divide-border">
+          {data.generations.map(g => {
+            const isExp = !!expanded[g.generation];
+            const isEmpty = (g.members_count || 0) === 0;
+            return (
+              <div key={g.generation} data-testid={`gen-row-${g.generation}`}>
+                <button
+                  type="button"
+                  disabled={isEmpty}
+                  onClick={() => !isEmpty && setExpanded({ ...expanded, [g.generation]: !isExp })}
+                  className={`w-full flex items-center gap-3 p-4 text-left transition ${isEmpty ? 'opacity-60 cursor-default' : 'hover:bg-bg-secondary/40'}`}
+                  data-testid={`gen-toggle-${g.generation}`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-heading font-black text-sm shrink-0 ${g.generation === 1 ? 'bg-brand-main text-white' : 'bg-brand-light text-brand-main'}`}>
+                    {g.generation}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm">{g.generation}ª geração</div>
+                    <div className="text-xs text-txt-secondary">
+                      {g.members_count} {g.members_count === 1 ? 'membro' : 'membros'} · taxa <span className="font-semibold">{g.rate_pct}%</span>
                     </div>
-                  </td>
-                  <td className="p-3 text-right font-semibold">{g.rate_pct}%</td>
-                  <td className="p-3 text-right">{g.members_count}</td>
-                  <td className="p-3 text-right text-txt-secondary">{g.total_commissions}</td>
-                  <td className="p-3 text-right text-amber-600 font-semibold">{formatCurrency(g.pending)}</td>
-                  <td className="p-3 text-right text-emerald-600 font-semibold">{formatCurrency(g.paid)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <div className="hidden sm:block text-right text-xs">
+                    <div className="text-amber-600 font-semibold">Pendente: {formatCurrency(g.pending)}</div>
+                    <div className="text-emerald-600 font-semibold">Recebido: {formatCurrency(g.paid)}</div>
+                  </div>
+                  {!isEmpty && (
+                    isExp
+                      ? <ChevronDown className="w-4 h-4 text-brand-main shrink-0" />
+                      : <ChevronRight className="w-4 h-4 text-txt-secondary shrink-0" />
+                  )}
+                </button>
+                {isExp && !isEmpty && (
+                  <div className="bg-bg-secondary/40 px-4 pb-4 pt-1">
+                    <ul className="bg-white border border-border rounded-lg divide-y divide-border">
+                      {(g.members || []).map(m => (
+                        <li key={m.user_id} className="flex items-center justify-between gap-3 p-3 text-sm" data-testid={`gen-${g.generation}-member-${m.user_id}`}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-brand-light text-brand-main font-bold text-xs flex items-center justify-center shrink-0">
+                              {m.name?.[0]?.toUpperCase() || '?'}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold truncate">{m.name || '(sem nome)'}</div>
+                              <div className="text-xs text-txt-secondary truncate">
+                                {m.email || '—'}
+                                {m.created_at && <> · entrou em {formatDateTime(m.created_at).split(' ')[0]}</>}
+                              </div>
+                            </div>
+                          </div>
+                          {m.referral_program_active && <Badge variant="success">Programa ativo</Badge>}
+                        </li>
+                      ))}
+                      {(g.members || []).length === 0 && (
+                        <li className="p-3 text-xs text-txt-secondary">Nenhum membro detalhado disponível.</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

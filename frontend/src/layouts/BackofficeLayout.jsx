@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
+  GitMerge,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -67,6 +68,7 @@ const NAV_GROUPS = [
     label: 'Sistema',
     items: [
       { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users' },
+      { to: '/backoffice/usuarios/duplicados', icon: GitMerge, label: 'Fundir duplicatas', testId: 'nav-merge-users' },
       { to: '/backoffice/categorias-usuarios', icon: Tag, label: 'Cat. de usuários', testId: 'nav-user-categories' },
       { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings' },
     ],

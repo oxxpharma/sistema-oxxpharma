@@ -4,7 +4,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus, Eye } from 'lucide-react';
+import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus, Eye, GitMerge } from 'lucide-react';
 import { toast } from 'sonner';
 import UserEditModal from '../../components/UserEditModal';
 import UserCreateModal from '../../components/UserCreateModal';
@@ -50,9 +50,16 @@ export default function AdminUsers() {
     <div data-testid="admin-users">
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <h1 className="font-heading font-black text-3xl text-txt-primary">Usuários</h1>
-        <Button onClick={() => setCreating(true)} data-testid="create-user-btn">
-          <UserPlus className="w-4 h-4" /> Novo usuário
-        </Button>
+        <div className="flex gap-2">
+          <Link to="/backoffice/usuarios/duplicados">
+            <Button variant="outline" data-testid="open-merge-tool-btn">
+              <GitMerge className="w-4 h-4" /> Fundir duplicatas
+            </Button>
+          </Link>
+          <Button onClick={() => setCreating(true)} data-testid="create-user-btn">
+            <UserPlus className="w-4 h-4" /> Novo usuário
+          </Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-border p-4 mb-4 flex gap-3 flex-wrap">
