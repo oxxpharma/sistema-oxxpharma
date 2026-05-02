@@ -93,6 +93,14 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Detecção de erro no body:** teste considera `{"error":"1", "error_msg":"..."}` como falha mesmo com HTTP 200 (era o caso da Ozoxx)
   - Resposta do teste expõe `maxx_auth_value_length` e `_configured` para o UI dar feedback visual
   - Mascaramento melhorado: `Bearer XXXXXX` → `Bearer XXX••••XXX` (preserva prefixo de schema)
+- ✅ Iter 30 (Fev/2026): Fusão de contas duplicadas + listagem nominal das 6 gerações
+  - **Detecção:** `GET /api/admin/duplicate-users` cruza `cpf_digits`, `email` e `phone_digits` (com migration lazy de `phone_digits` para users antigos), ordena com sugestão `suggested_keep` (quem tem orders/points + maior antiguidade)
+  - **Fusão:** `POST /api/admin/merge-users` body `{keep_user_id, drop_user_id}` — sobrescreve no keep apenas campos cadastrais preenchidos do drop (`name, email, phone, cpf, external_id, leader_external_id, network_type, rg, birth_date, mother_name`); preserva pix_key, addresses (deduplica por zip+number+street); migra `orders, commissions (user_id+from_user_id), withdrawals, points_log, payment_webhook_logs, addresses, card_batches.lines`; redireciona `sponsor_id`/`network_sponsor_id` de outros users; faz `$unset` nos campos com unique index do drop antes do `$set` no keep para evitar DuplicateKey; deleta drop ao final
+  - **Auditoria:** nova collection `merge_audit_log` com `merge_id, kept/deleted user_id, performed_by, snapshots, fields_overwritten, moved_counts`
+  - **Histórico:** `GET /api/admin/merge-audit-log?limit=N`
+  - **UI Admin:** `/backoffice/usuarios/duplicados` com banner de regras, tabs Duplicatas/Histórico, seleção radio (Manter) + checkbox (Fundir) por linha, dialog de confirmação irreversível, botão atalho em `/backoffice/usuarios`, item no menu lateral
+  - **6 gerações nominais:** `/api/users/me/network` agora retorna `members` array (name/email/external_id/created_at/referral_program_active) por geração; `MyNetwork.jsx` reescrito com accordion expandível por geração mostrando os nomes; `AdminUserDetails.jsx` já tinha `network.downline_by_generation` exibindo até 6 gerações
+  - Testes pytest: 14/14 passing (`test_merge_users.py` 4 + `test_merge_users_edgecases.py` 10)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

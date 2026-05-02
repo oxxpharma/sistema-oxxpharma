@@ -1471,6 +1471,9 @@ async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Dep
 
     # 5. Audit log da fusao (rastreabilidade)
     try:
+        # Filtra so campos cadastrais reais para o log (descarta updated_at, merged_from_user_ids etc)
+        cadastral_fields_set = set(overwrite_fields) | {"addresses", "pix_key", "pix_key_type", "referral_program_active", "referral_code", "referral_enrollment"}
+        fields_overwritten = sorted([k for k in update_set.keys() if k in cadastral_fields_set])
         await db.merge_audit_log.insert_one({
             "merge_id": str(uuid.uuid4()),
             "kept_user_id": data.keep_user_id,
@@ -1480,7 +1483,7 @@ async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Dep
             "performed_at": now_iso(),
             "kept_snapshot_before": {k: keep.get(k) for k in overwrite_fields if keep.get(k)},
             "drop_snapshot": {k: drop.get(k) for k in overwrite_fields if drop.get(k)},
-            "fields_overwritten": list(update_set.keys()),
+            "fields_overwritten": fields_overwritten,
             "moved_counts": {k: v for k, v in moved.items() if isinstance(v, int)},
         })
     except Exception as e:
