@@ -3319,9 +3319,22 @@ async def admin_correios_test_auth(request: Request, user: dict = Depends(requir
 
 # ==================== MAXX MMN INTEGRATION ====================
 
+def _mask_secret(v: str) -> str:
+    if not v: return ""
+    s = str(v)
+    if len(s) <= 6: return "•" * len(s)
+    return f"{s[:3]}{'•' * (len(s) - 6)}{s[-3:]}"
+
+
 @app.get("/api/admin/maxx-config")
 async def admin_maxx_config(request: Request, user: dict = Depends(require_admin())):
-    return await maxx_service.get_config(request.app.db)
+    cfg = await maxx_service.get_config(request.app.db)
+    # Mascara segredo para nao vazar em screenshots/print
+    raw = cfg.get("maxx_auth_value") or ""
+    cfg["maxx_auth_value"] = _mask_secret(raw)
+    cfg["maxx_auth_value_length"] = len(raw)
+    cfg["maxx_auth_value_configured"] = bool(raw)
+    return cfg
 
 
 @app.put("/api/admin/maxx-config")
@@ -3331,6 +3344,11 @@ async def admin_update_maxx_config(request: Request, user: dict = Depends(requir
         cfg = await maxx_service.update_config(request.app.db, body)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Retorna mascarado tambem no PUT para UX consistente
+    raw = cfg.get("maxx_auth_value") or ""
+    cfg["maxx_auth_value"] = _mask_secret(raw)
+    cfg["maxx_auth_value_length"] = len(raw)
+    cfg["maxx_auth_value_configured"] = bool(raw)
     return cfg
 
 

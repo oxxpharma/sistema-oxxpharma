@@ -29,7 +29,16 @@ export default function AdminMaxx() {
   const [testResult, setTestResult] = useState(null);
 
   const load = async () => {
-    try { setCfg(await api.get('/api/admin/maxx-config')); } finally { setLoading(false); }
+    try {
+      const fresh = await api.get('/api/admin/maxx-config');
+      // Nao trazer o token mascarado ao input - deixar vazio e usar placeholder
+      // indicando que ha um valor salvo. Assim o admin SEMPRE digita de novo ou
+      // deixa em branco para manter o valor atual.
+      fresh._auth_value_configured = !!fresh.maxx_auth_value_configured;
+      fresh._auth_value_length = fresh.maxx_auth_value_length || 0;
+      fresh.maxx_auth_value = '';
+      setCfg(fresh);
+    } finally { setLoading(false); }
   };
   const loadLogs = async () => {
     try { const r = await api.get('/api/admin/maxx-logs'); setLogs(r.logs || []); } catch (e) { toast.error(e?.message); }
@@ -71,7 +80,15 @@ export default function AdminMaxx() {
   const save = async () => {
     setSaving(true);
     try {
-      const payload = { ...cfg }; delete payload.updated_at;
+      const payload = { ...cfg };
+      delete payload.updated_at;
+      delete payload._auth_value_configured;
+      delete payload._auth_value_length;
+      delete payload.maxx_auth_value_configured;
+      delete payload.maxx_auth_value_length;
+      // Se o campo ficou em branco e ja existe um valor salvo, NAO enviar
+      // (para nao apagar o token real)
+      if (!payload.maxx_auth_value) delete payload.maxx_auth_value;
       await api.put('/api/admin/maxx-config', payload);
       toast.success('Configuração salva');
       await load();
@@ -154,7 +171,17 @@ export default function AdminMaxx() {
             <h3 className="font-heading font-bold mb-3">Autenticação</h3>
             <div className="grid grid-cols-2 gap-3">
               <Select label="Tipo" value={cfg.maxx_auth_type} onChange={(v) => set('maxx_auth_type', v)} options={['webhook_token', 'apikey', 'bearer', 'basic', 'none']} testId="maxx-auth-type" />
-              <Field label="Valor (token / chave / user:pass)" value={cfg.maxx_auth_value} onChange={(v) => set('maxx_auth_value', v)} type="password" placeholder="••••••••" testId="maxx-auth-value" />
+              <Field
+                label="Valor (token / chave / user:pass)"
+                value={cfg.maxx_auth_value || ''}
+                onChange={(v) => set('maxx_auth_value', v)}
+                type="password"
+                placeholder={cfg._auth_value_configured ? `Já salvo (${cfg._auth_value_length} caracteres). Deixe vazio para manter.` : 'Cole o token aqui'}
+                testId="maxx-auth-value"
+              />
+              {cfg._auth_value_configured && (
+                <p className="text-[11px] text-emerald-600 mt-1">✓ Token já configurado ({cfg._auth_value_length} caracteres). Se digitar algo novo, ele será substituído.</p>
+              )}
             </div>
             {(cfg.maxx_auth_type === 'apikey' || cfg.maxx_auth_type === 'webhook_token') && (
               <div className="mt-3">

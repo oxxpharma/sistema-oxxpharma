@@ -85,6 +85,14 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Endpoint admin `GET /api/admin/maxx-test-users?q=&limit=` para autocompletar (busca em name/email/cpf/external_id)
   - Aba "Teste de envio" no `/backoffice/maxx`: busca usuário com debounce, alerta visível se sem `external_id`, mostra request/headers/payload/response da Maxx para debug
   - Header `Authorization` mascarado no retorno do teste (segurança ao printar/screenshot)
+- ✅ Iter 29 (Fev/2026): Maxx — proteção contra apagar token + detecção de erro no body
+  - **Bug fix crítico:** GET config agora retorna token mascarado (`C9E••••••••••D0E` — preserva tamanho). Antes retornava texto cru, causando risco de vazamento em print.
+  - **Bug fix crítico:** Save sem redigitar o token **não apaga mais** o valor salvo (antes: se o input ficasse mascarado e usuário clicasse Save, o PUT sobrescrevia o token real pela máscara — causando "Token Inválido" nas próximas chamadas)
+  - Proteção tripla em `update_config`: ignora valores vazios, só com `•/*`, ou não fornecidos
+  - Frontend: campo do token vem SEMPRE vazio no GET; placeholder mostra "Já salvo (X caracteres). Deixe vazio para manter."
+  - **Detecção de erro no body:** teste considera `{"error":"1", "error_msg":"..."}` como falha mesmo com HTTP 200 (era o caso da Ozoxx)
+  - Resposta do teste expõe `maxx_auth_value_length` e `_configured` para o UI dar feedback visual
+  - Mascaramento melhorado: `Bearer XXXXXX` → `Bearer XXX••••XXX` (preserva prefixo de schema)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

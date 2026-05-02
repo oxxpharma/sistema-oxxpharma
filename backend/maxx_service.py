@@ -59,6 +59,14 @@ async def update_config(db, updates: Dict) -> Dict:
         raise ValueError("maxx_mode deve ser 'realtime', 'batch' ou 'manual'")
     if "maxx_auth_type" in set_doc and set_doc["maxx_auth_type"] not in ("none", "bearer", "apikey", "basic", "webhook_token"):
         raise ValueError("maxx_auth_type invalido")
+    # PROTECAO: nunca sobrescrever token com valor mascarado vindo do frontend
+    # (o GET mascara o token para nao vazar em screenshots; se o admin salvar sem
+    # redigitar, o PUT chegaria com mascara e apagaria o segredo real)
+    av = set_doc.get("maxx_auth_value")
+    if isinstance(av, str):
+        stripped = av.strip()
+        if (not stripped) or all(ch in "•*·. " for ch in stripped):
+            set_doc.pop("maxx_auth_value", None)
     if set_doc:
         set_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.settings.update_one({"_id": "global"}, {"$set": set_doc}, upsert=True)
@@ -260,15 +268,47 @@ async def send_test_for_user(db, user_id: str, points_value: float = 1.0, produc
         logger.exception(f"Erro no teste de envio Maxx: {e}")
 
     success = bool(response_status and 200 <= response_status < 300)
+    # Detectar falha no CORPO mesmo com HTTP 200 (ex: Maxx retorna {"error":"1","error_msg":"Token Invalido"})
+    body_error = None
+    if success and response_text:
+        try:
+            import json as _json
+            parsed = _json.loads(response_text)
+            if isinstance(parsed, dict):
+                # Maxx usa error:"1" como string, nao boolean
+                err_flag = parsed.get("error")
+                if err_flag in (True, 1, "1", "true"):
+                    body_error = parsed.get("error_msg") or parsed.get("message") or "Erro retornado pela API"
+                    success = False
+        except Exception:
+            pass
     # Logamos mas SEM mexer no points_log
-    await _log(db, "test", url, payload, response_status, response_text, error, [], success)
+    await _log(db, "test", url, payload, response_status, response_text, error or body_error, [], success)
+
+    # Helper local para mascarar token no retorno (preserva tamanho para diagnostico)
+    def _mask(v):
+        if not v: return ""
+        s = str(v)
+        if len(s) <= 6: return "•" * len(s)
+        return f"{s[:3]}{'•' * (len(s) - 6)}{s[-3:]}"
+    masked_headers = {}
+    for k, v in headers.items():
+        if k.lower() in ("authorization", "x-webhook-token", "x-api-key"):
+            # Se Authorization: Bearer XXX, mascara so o XXX
+            parts = str(v).split(" ", 1)
+            if len(parts) == 2:
+                masked_headers[k] = f"{parts[0]} {_mask(parts[1])}"
+            else:
+                masked_headers[k] = _mask(v)
+        else:
+            masked_headers[k] = v
     return {
         "success": success,
         "status_code": response_status,
         "response": response_text,
-        "error": error,
+        "error": error or body_error,
         "request_url": url,
-        "request_headers": {k: ("***" if k.lower() in ("authorization", "x-webhook-token", "x-api-key") else v) for k, v in headers.items()},
+        "request_headers": masked_headers,
         "request_payload": payload,
         "user": {
             "user_id": user.get("user_id"),
