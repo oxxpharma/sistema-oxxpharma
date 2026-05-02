@@ -77,6 +77,14 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Trigger disparado quando pedido vira `payment_status=paid` em 2 pontos: admin marcar como pago + webhook de pagamento (MercadoPago)
   - Itens pré-renderizados como HTML (render_template não suporta loops)
   - Dispara apenas quando email configurado e pedido realmente pago
+- ✅ Iter 28 (Fev/2026): Maxx — auth `webhook_token` + função de envio de teste por usuário
+  - Novo tipo de auth `webhook_token` (default: header `X-Webhook-Token`) — alinhado com a doc Ozoxx/Maxx
+  - Nome do header configurável em ambos `webhook_token` e `apikey`
+  - Helper `send_test_for_user(db, user_id, points_value, product_name)` — envia 1 ponto sintético sem persistir no `points_log`
+  - Endpoint admin `POST /api/admin/maxx-test-send` (body `{user_id, points_value?, product_name?}`)
+  - Endpoint admin `GET /api/admin/maxx-test-users?q=&limit=` para autocompletar (busca em name/email/cpf/external_id)
+  - Aba "Teste de envio" no `/backoffice/maxx`: busca usuário com debounce, alerta visível se sem `external_id`, mostra request/headers/payload/response da Maxx para debug
+  - Header `Authorization` mascarado no retorno do teste (segurança ao printar/screenshot)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

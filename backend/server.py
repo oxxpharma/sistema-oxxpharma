@@ -3340,6 +3340,39 @@ async def admin_maxx_sync(request: Request, user: dict = Depends(require_admin()
     return await maxx_service.send_pending_batch(request.app.db, kind="manual")
 
 
+@app.post("/api/admin/maxx-test-send")
+async def admin_maxx_test_send(request: Request, user: dict = Depends(require_admin())):
+    """Envia um ponto de TESTE para a API Maxx referenciando um usuario real,
+    SEM persistir no points_log. Body: {user_id, points_value?, product_name?}.
+    """
+    db = request.app.db
+    body = await request.json() or {}
+    uid = (body.get("user_id") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="user_id e obrigatorio")
+    return await maxx_service.send_test_for_user(
+        db, uid,
+        points_value=float(body.get("points_value") or 1.0),
+        product_name=str(body.get("product_name") or "[TESTE] Integracao API"),
+    )
+
+
+@app.get("/api/admin/maxx-test-users")
+async def admin_maxx_test_users(request: Request, q: str = "", limit: int = 30, user: dict = Depends(require_admin())):
+    """Busca usuarios para o seletor do teste Maxx. Filtra por nome/email/cpf/external_id."""
+    db = request.app.db
+    query = {}
+    if q:
+        import re
+        rx = re.compile(re.escape(q), re.IGNORECASE)
+        query = {"$or": [{"name": rx}, {"email": rx}, {"cpf": rx}, {"external_id": rx}]}
+    users = await db.users.find(
+        query,
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "network_type": 1, "cpf": 1},
+    ).sort("name", 1).limit(min(limit, 100)).to_list(min(limit, 100))
+    return {"users": users}
+
+
 @app.post("/api/admin/maxx-sync-points/{log_id}")
 async def admin_maxx_sync_one(request: Request, log_id: str, user: dict = Depends(require_admin())):
     """Reenviar um registro especifico."""

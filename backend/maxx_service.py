@@ -30,9 +30,10 @@ DEFAULT_CONFIG = {
     "maxx_enabled": False,
     "maxx_api_url": "",
     "maxx_api_method": "POST",
-    "maxx_auth_type": "none",          # none | bearer | apikey | basic
+    # webhook_token (Ozoxx/Maxx) | none | bearer | apikey | basic
+    "maxx_auth_type": "webhook_token",
     "maxx_auth_value": "",
-    "maxx_auth_header_name": "X-API-Key",
+    "maxx_auth_header_name": "X-Webhook-Token",
     "maxx_extra_headers": "",          # JSON
     "maxx_payload_template": "",       # se vazio, usa default {points: [...]}
     "maxx_mode": "manual",             # realtime | batch | manual
@@ -56,7 +57,7 @@ async def update_config(db, updates: Dict) -> Dict:
     set_doc = {k: v for k, v in updates.items() if k in allowed}
     if "maxx_mode" in set_doc and set_doc["maxx_mode"] not in ("realtime", "batch", "manual"):
         raise ValueError("maxx_mode deve ser 'realtime', 'batch' ou 'manual'")
-    if "maxx_auth_type" in set_doc and set_doc["maxx_auth_type"] not in ("none", "bearer", "apikey", "basic"):
+    if "maxx_auth_type" in set_doc and set_doc["maxx_auth_type"] not in ("none", "bearer", "apikey", "basic", "webhook_token"):
         raise ValueError("maxx_auth_type invalido")
     if set_doc:
         set_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -70,8 +71,9 @@ def _build_headers(cfg: Dict) -> Dict[str, str]:
     val = (cfg.get("maxx_auth_value") or "").strip()
     if auth == "bearer" and val:
         headers["Authorization"] = f"Bearer {val}"
-    elif auth == "apikey" and val:
-        hk = (cfg.get("maxx_auth_header_name") or "X-API-Key").strip() or "X-API-Key"
+    elif auth in ("apikey", "webhook_token") and val:
+        default_hk = "X-Webhook-Token" if auth == "webhook_token" else "X-API-Key"
+        hk = (cfg.get("maxx_auth_header_name") or default_hk).strip() or default_hk
         headers[hk] = val
     elif auth == "basic" and val:
         import base64
@@ -204,3 +206,75 @@ async def send_pending_batch(db, kind: str = "batch") -> Dict:
     if not pending:
         return {"success": True, "sent_count": 0, "skipped": True, "reason": "no_pending"}
     return await send_points(db, pending, kind=kind)
+
+
+async def send_test_for_user(db, user_id: str, points_value: float = 1.0, product_name: str = "[TESTE] Integração API") -> Dict:
+    """Envia um payload de TESTE para o Maxx referenciando um usuario real,
+    mas SEM persistir nada no points_log (nao polui historico).
+
+    Util para validar credenciais e mapeamento de external_id antes de enviar
+    pontos reais.
+    """
+    cfg = await get_config(db)
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        return {"success": False, "error": "Usuario nao encontrado"}
+
+    url = (cfg.get("maxx_api_url") or "").strip()
+    if not url:
+        return {"success": False, "error": "maxx_api_url nao configurada"}
+
+    test_log = {
+        "log_id": "test_" + os.urandom(4).hex(),
+        "user_id": user.get("user_id"),
+        "user_external_id": user.get("external_id"),
+        "user_name": user.get("name"),
+        "user_email": user.get("email"),
+        "points_total": float(points_value),
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "order_id": "test_order_" + os.urandom(3).hex(),
+        "product_name": product_name,
+        "quantity": 1,
+    }
+
+    headers = _build_headers(cfg)
+    payload = _build_payload(cfg, [test_log])
+    # Marca o payload como teste para nao confundir o lado deles
+    payload["test_mode"] = True
+    method = (cfg.get("maxx_api_method") or "POST").upper()
+    timeout = int(cfg.get("maxx_timeout_seconds") or 30)
+
+    response_status = None
+    response_text = None
+    error = None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if method == "PUT":
+                r = await client.put(url, json=payload, headers=headers)
+            else:
+                r = await client.post(url, json=payload, headers=headers)
+        response_status = r.status_code
+        response_text = r.text[:1500]
+    except Exception as e:
+        error = str(e)[:300]
+        logger.exception(f"Erro no teste de envio Maxx: {e}")
+
+    success = bool(response_status and 200 <= response_status < 300)
+    # Logamos mas SEM mexer no points_log
+    await _log(db, "test", url, payload, response_status, response_text, error, [], success)
+    return {
+        "success": success,
+        "status_code": response_status,
+        "response": response_text,
+        "error": error,
+        "request_url": url,
+        "request_headers": {k: ("***" if k.lower() in ("authorization", "x-webhook-token", "x-api-key") else v) for k, v in headers.items()},
+        "request_payload": payload,
+        "user": {
+            "user_id": user.get("user_id"),
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "external_id": user.get("external_id"),
+            "has_external_id": bool(user.get("external_id")),
+        },
+    }
