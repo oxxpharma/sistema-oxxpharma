@@ -107,6 +107,10 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Visualização da rede unificada:** `/api/users/me/network` e `/api/admin/users/{id}/details.network.downline_by_generation` agora fazem BFS unificado por `sponsor_id` OU `network_sponsor_id` (dedup por user_id). Inclui customers e MMN misturados — `MyNetwork.jsx` exibe badge "Rede 1/2" no membro quando aplicável.
   - **Compatibilidade:** preserva o fluxo Maxx (cadeia via `network_sponsor_id` continua funcionando para usuários importados sem `sponsor_id`).
   - Testes pytest: 20/20 passing (`test_mmn_via_affiliate_chain.py` 3 novos + 17 pré-existentes inalterados).
+- ✅ Iter 32 (Fev/2026): Dashboard administrativo redesenhado
+  - **Novos campos do `/api/admin/dashboard`:** `avg_ticket`, `revenue_by_day` (30 dias), `weekly_comparison` (current/previous + %delta de receita e pedidos), `top_buyers` (top 10 por valor pago acumulado), `top_affiliates` (top 10 por comissões geradas, com referrals_count e referral_code), `commissions_summary` (pending/paid/paid_out/cancelled), `orders_by_status` agora retorna lista com count + total R$
+  - **Frontend `AdminDashboard.jsx` reescrito** com 4 KPI cards no topo (faturamento em destaque com gradient laranja + delta vs. semana anterior, pedidos com delta, ticket médio, clientes ativos), gráfico de linha Recharts dos últimos 30 dias com gradient e tooltip, donut chart de status com lista detalhada (count + R$), Top 10 compradores e Top 10 indicadores lado a lado (com pódio ouro/prata/bronze nos 3 primeiros, link para detalhes do user, badges de rede), card de comissões consolidadas (cores semânticas), tabela de pedidos recentes
+  - Tudo com `data-testid` para automação e responsivo (lg:grid-cols-3, lg:grid-cols-4)
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

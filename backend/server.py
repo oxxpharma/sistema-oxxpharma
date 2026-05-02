@@ -1682,24 +1682,156 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
     db = request.app.db
     n = datetime.now(timezone.utc)
     month_start = n.replace(day=1, hour=0, minute=0, second=0).isoformat()
+    today_start = n.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = (today_start - timedelta(days=7)).isoformat()
+    prev_week_start = (today_start - timedelta(days=14)).isoformat()
+    last_30_start = (today_start - timedelta(days=29)).isoformat()
+
     total_users = await db.users.count_documents({"role": "customer"})
     total_orders = await db.orders.count_documents({})
     month_orders = await db.orders.count_documents({"created_at": {"$gte": month_start}})
-    revenue_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid"}}, {"$group": {"_id": None, "total": {"$sum": "$total"}}}]).to_list(1)
+
+    revenue_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid"}}, {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}]).to_list(1)
     total_revenue = revenue_agg[0]["total"] if revenue_agg else 0
+    paid_count = revenue_agg[0]["count"] if revenue_agg else 0
     month_rev_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid", "created_at": {"$gte": month_start}}}, {"$group": {"_id": None, "total": {"$sum": "$total"}}}]).to_list(1)
     month_revenue = month_rev_agg[0]["total"] if month_rev_agg else 0
     pending_orders = await db.orders.count_documents({"order_status": "pending"})
     total_products = await db.products.count_documents({"active": True})
     recent_orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
-    # Orders by status
-    status_agg = await db.orders.aggregate([{"$group": {"_id": "$order_status", "count": {"$sum": 1}}}]).to_list(20)
-    by_status = {s["_id"]: s["count"] for s in status_agg}
+
+    # Status breakdown com totais em R$
+    status_agg = await db.orders.aggregate([
+        {"$group": {"_id": "$order_status", "count": {"$sum": 1}, "total": {"$sum": "$total"}}}
+    ]).to_list(20)
+    by_status = [{"status": s["_id"] or "pending", "count": s["count"], "total": round(s["total"] or 0, 2)} for s in status_agg]
+
+    # Comparativo semanal (semana atual vs anterior)
+    cur_week = await db.orders.aggregate([
+        {"$match": {"payment_status": "paid", "created_at": {"$gte": week_start}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    prev_week = await db.orders.aggregate([
+        {"$match": {"payment_status": "paid", "created_at": {"$gte": prev_week_start, "$lt": week_start}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    cw_rev = cur_week[0]["total"] if cur_week else 0
+    cw_count = cur_week[0]["count"] if cur_week else 0
+    pw_rev = prev_week[0]["total"] if prev_week else 0
+    pw_count = prev_week[0]["count"] if prev_week else 0
+    def _pct(cur, prev):
+        if not prev:
+            return None  # sem base de comparacao
+        return round((cur - prev) / prev * 100, 2)
+
+    # Receita por dia (ultimos 30 dias)
+    daily = await db.orders.aggregate([
+        {"$match": {"payment_status": "paid", "created_at": {"$gte": last_30_start}}},
+        {"$group": {
+            "_id": {"$substr": ["$created_at", 0, 10]},
+            "revenue": {"$sum": "$total"},
+            "orders": {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]).to_list(60)
+    # Preenche dias faltantes com zero
+    daily_map = {d["_id"]: {"revenue": round(d["revenue"], 2), "orders": d["orders"]} for d in daily}
+    revenue_by_day = []
+    for i in range(30):
+        day = (today_start - timedelta(days=29 - i)).date().isoformat()
+        d = daily_map.get(day, {"revenue": 0, "orders": 0})
+        revenue_by_day.append({"date": day, "revenue": d["revenue"], "orders": d["orders"]})
+
+    # Top 10 compradores (por valor pago)
+    top_buyers_agg = await db.orders.aggregate([
+        {"$match": {"payment_status": "paid", "user_id": {"$ne": None}}},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$total"}, "orders": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+        {"$limit": 10},
+    ]).to_list(10)
+    top_buyer_ids = [b["_id"] for b in top_buyers_agg]
+    buyer_users = {}
+    if top_buyer_ids:
+        async for u in db.users.find({"user_id": {"$in": top_buyer_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1}):
+            buyer_users[u["user_id"]] = u
+    top_buyers = []
+    for b in top_buyers_agg:
+        u = buyer_users.get(b["_id"], {})
+        top_buyers.append({
+            "user_id": b["_id"],
+            "name": u.get("name") or "(sem nome)",
+            "email": u.get("email"),
+            "network_type": u.get("network_type") or "customer",
+            "total": round(b["total"] or 0, 2),
+            "orders": b["orders"],
+        })
+
+    # Top 10 indicadores (por comissoes ganhas, tipo affiliate ou network_gen)
+    top_aff_agg = await db.commissions.aggregate([
+        {"$match": {"status": {"$in": ["paid", "pending"]}}},
+        {"$group": {
+            "_id": "$user_id",
+            "total": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+            "paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}},
+        }},
+        {"$sort": {"total": -1}},
+        {"$limit": 10},
+    ]).to_list(10)
+    top_aff_ids = [a["_id"] for a in top_aff_agg]
+    aff_users = {}
+    referral_counts = {}
+    if top_aff_ids:
+        async for u in db.users.find({"user_id": {"$in": top_aff_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1, "referral_code": 1}):
+            aff_users[u["user_id"]] = u
+        # Conta indicacoes diretas (sponsor_id)
+        ref_agg = await db.users.aggregate([
+            {"$match": {"sponsor_id": {"$in": top_aff_ids}}},
+            {"$group": {"_id": "$sponsor_id", "n": {"$sum": 1}}},
+        ]).to_list(50)
+        referral_counts = {r["_id"]: r["n"] for r in ref_agg}
+    top_affiliates = []
+    for a in top_aff_agg:
+        u = aff_users.get(a["_id"], {})
+        top_affiliates.append({
+            "user_id": a["_id"],
+            "name": u.get("name") or "(sem nome)",
+            "email": u.get("email"),
+            "network_type": u.get("network_type") or "customer",
+            "referral_code": u.get("referral_code"),
+            "total_earned": round(a["total"] or 0, 2),
+            "total_paid": round(a["paid"] or 0, 2),
+            "commissions_count": a["count"],
+            "referrals_count": referral_counts.get(a["_id"], 0),
+        })
+
+    # Comissoes consolidadas
+    comm_agg = await db.commissions.aggregate([
+        {"$group": {"_id": "$status", "total": {"$sum": "$amount"}}}
+    ]).to_list(10)
+    commissions_summary = {(s["_id"] or "pending"): round(s["total"] or 0, 2) for s in comm_agg}
+
+    # Ticket medio (orders pagos)
+    avg_ticket = round(total_revenue / paid_count, 2) if paid_count else 0
+
     return {
         "total_users": total_users, "total_orders": total_orders, "month_orders": month_orders,
-        "total_revenue": total_revenue, "month_revenue": month_revenue,
+        "total_revenue": round(total_revenue, 2), "month_revenue": round(month_revenue, 2),
         "pending_orders": pending_orders, "total_products": total_products,
+        "paid_orders": paid_count, "avg_ticket": avg_ticket,
         "recent_orders": recent_orders, "orders_by_status": by_status,
+        "revenue_by_day": revenue_by_day,
+        "weekly_comparison": {
+            "current_revenue": round(cw_rev, 2),
+            "previous_revenue": round(pw_rev, 2),
+            "revenue_pct": _pct(cw_rev, pw_rev),
+            "current_orders": cw_count,
+            "previous_orders": pw_count,
+            "orders_pct": _pct(cw_count, pw_count),
+        },
+        "top_buyers": top_buyers,
+        "top_affiliates": top_affiliates,
+        "commissions_summary": commissions_summary,
     }
 
 # ==================== AFFILIATE / REFERRALS ====================
