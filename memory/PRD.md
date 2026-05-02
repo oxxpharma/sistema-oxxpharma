@@ -101,6 +101,12 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **UI Admin:** `/backoffice/usuarios/duplicados` com banner de regras, tabs Duplicatas/Histórico, seleção radio (Manter) + checkbox (Fundir) por linha, dialog de confirmação irreversível, botão atalho em `/backoffice/usuarios`, item no menu lateral
   - **6 gerações nominais:** `/api/users/me/network` agora retorna `members` array (name/email/external_id/created_at/referral_program_active) por geração; `MyNetwork.jsx` reescrito com accordion expandível por geração mostrando os nomes; `AdminUserDetails.jsx` já tinha `network.downline_by_generation` exibindo até 6 gerações
   - Testes pytest: 14/14 passing (`test_merge_users.py` 4 + `test_merge_users_edgecases.py` 10)
+- ✅ Iter 31 (Fev/2026): Comissão MMN flui pela cadeia de afiliados (até 6 gerações)
+  - **Nova regra crítica:** quando um pedido vira pago, a lógica de comissão MMN agora sobe pela cadeia `sponsor_id` (afiliados) **com fallback para `network_sponsor_id`** (Maxx), até 6 níveis. A cada nível, se o ancestor for `network_1`/`network_2` E tiver `referral_program_active=True`, recebe comissão da geração N usando a taxa da própria rede (network1_generations / network2_generations). Múltiplos MMN na mesma cadeia recebem cada um sua geração relativa ao comprador.
+  - **Cenário típico:** Giovani (N1 ativo) → A (customer+programa) → B → C → D → E → F (customer compra). Resultado: E ganha afiliado gen 0, Giovani ganha MMN gen 6 (taxa N1: 0,5%). Antes Giovani não ganhava nada porque a cadeia parava no primeiro `customer`.
+  - **Visualização da rede unificada:** `/api/users/me/network` e `/api/admin/users/{id}/details.network.downline_by_generation` agora fazem BFS unificado por `sponsor_id` OU `network_sponsor_id` (dedup por user_id). Inclui customers e MMN misturados — `MyNetwork.jsx` exibe badge "Rede 1/2" no membro quando aplicável.
+  - **Compatibilidade:** preserva o fluxo Maxx (cadeia via `network_sponsor_id` continua funcionando para usuários importados sem `sponsor_id`).
+  - Testes pytest: 20/20 passing (`test_mmn_via_affiliate_chain.py` 3 novos + 17 pré-existentes inalterados).
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

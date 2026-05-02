@@ -926,29 +926,38 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         })
 
     # 2) Comissoes de rede MMN (ate 6 geracoes)
-    # Regra: cadeia MMN so existe se o sponsor direto estiver em uma das redes (network_1 ou network_2).
-    # Se sponsor eh 'customer', a cadeia para ali (regra 2A).
-    sponsor = None
-    if user.get("sponsor_id"):
-        sponsor = await db.users.find_one({"user_id": user["sponsor_id"]}, {"_id": 0})
-    if sponsor and sponsor.get("network_type") in (NETWORK_1, NETWORK_2):
-        network_type = sponsor["network_type"]
-        gens_pct = settings.get(f"{'network1' if network_type == NETWORK_1 else 'network2'}_generations", [])
-        current = sponsor
-        generation = 1
-        while generation <= 6 and current:
-            pct = gens_pct[generation - 1] if generation <= len(gens_pct) else 0
+    # NOVA REGRA (Iter 31): subir pela cadeia ATE 6 niveis. O "ancestral imediato" de
+    # um usuario eh sponsor_id (cadeia de afiliados, da loja) OU network_sponsor_id
+    # (cadeia MMN importada da Maxx) - prefere sponsor_id quando ambos existem.
+    # A cada nivel, se o ancestor for network_1 ou network_2 E tiver programa de
+    # indicacao ativo, ele recebe comissao da geracao N usando a taxa DA SUA REDE.
+    # Multiplos MMN na mesma cadeia recebem cada um sua geracao relativa ao comprador.
+    network1_pcts = settings.get("network1_generations", []) or []
+    network2_pcts = settings.get("network2_generations", []) or []
+    current_id = user.get("sponsor_id") or user.get("network_sponsor_id")
+    visited = {user["user_id"]}  # evita ciclo
+    generation = 1
+    while generation <= 6 and current_id and current_id not in visited:
+        visited.add(current_id)
+        ancestor = await db.users.find_one({"user_id": current_id}, {"_id": 0})
+        if not ancestor:
+            break
+        a_net = ancestor.get("network_type")
+        a_active = bool(ancestor.get("referral_program_active"))
+        if a_net in (NETWORK_1, NETWORK_2) and a_active:
+            pcts = network1_pcts if a_net == NETWORK_1 else network2_pcts
+            pct = pcts[generation - 1] if generation - 1 < len(pcts) else 0
             if pct > 0:
                 amt = round(subtotal * pct / 100, 2)
                 if amt > 0:
                     commissions_to_insert.append({
                         "commission_id": gen_id("com_"),
-                        "user_id": current["user_id"],
+                        "user_id": ancestor["user_id"],
                         "order_id": order["order_id"],
                         "customer_id": user["user_id"],
                         "customer_name": user.get("name"),
                         "type": "network_gen",
-                        "network_type": network_type,
+                        "network_type": a_net,
                         "generation": generation,
                         "amount": amt,
                         "rate": pct / 100,
@@ -956,15 +965,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                         "status": "pending",
                         "created_at": now_iso(),
                     })
-            # Subir na rede: so sobe se proximo for da mesma rede (senao para)
-            next_id = current.get("network_sponsor_id")
-            if not next_id:
-                break
-            nxt = await db.users.find_one({"user_id": next_id}, {"_id": 0})
-            if not nxt or nxt.get("network_type") != network_type:
-                break
-            current = nxt
-            generation += 1
+        # Sobe pela cadeia: prefere sponsor_id, fallback para network_sponsor_id
+        current_id = ancestor.get("sponsor_id") or ancestor.get("network_sponsor_id")
+        generation += 1
 
     if commissions_to_insert:
         await db.commissions.insert_many(commissions_to_insert)
@@ -1601,19 +1604,28 @@ async def admin_user_details(request: Request, user_id: str, user: dict = Depend
     network_downline = await db.users.find({"network_sponsor_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "network_type": 1, "created_at": 1}).sort("created_at", -1).limit(100).to_list(100)
 
     # Downline ate 6 geracoes (BFS)
+    # Iter 31: agrega cadeia de afiliados (sponsor_id) + cadeia MMN herdada
+    # (network_sponsor_id) - dedup por user_id. Reflete a regra de comissao MMN
+    # que sobe por sponsor_id|network_sponsor_id.
     downline_by_generation = []
     current_ids = [user_id]
+    seen = {user_id}
     for gen in range(1, 7):
         level_users = await db.users.find(
-            {"network_sponsor_id": {"$in": current_ids}},
-            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1, "external_id": 1, "network_type": 1, "created_at": 1, "referral_program_active": 1, "network_sponsor_id": 1},
+            {"$or": [
+                {"sponsor_id": {"$in": current_ids}},
+                {"network_sponsor_id": {"$in": current_ids}},
+            ], "user_id": {"$nin": list(seen)}},
+            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1, "external_id": 1, "network_type": 1, "created_at": 1, "referral_program_active": 1, "sponsor_id": 1, "network_sponsor_id": 1},
         ).sort("created_at", -1).limit(2000).to_list(2000)
         downline_by_generation.append({
             "generation": gen,
             "members_count": len(level_users),
             "members": level_users,
         })
-        current_ids = [u["user_id"] for u in level_users]
+        new_ids = [u["user_id"] for u in level_users]
+        seen.update(new_ids)
+        current_ids = new_ids
         if not current_ids:
             # preenche zeros ate 6
             for g in range(gen + 1, 7):
@@ -2038,12 +2050,17 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
     generations = []
     if network_type in (NETWORK_1, NETWORK_2):
         current_ids = [user["user_id"]]
+        seen = {user["user_id"]}
         for gen in range(1, 7):
-            # Buscar todos abaixo deste nivel que pertencem a mesma rede
+            # Iter 31: BFS unificado via sponsor_id OU network_sponsor_id (dedup por user_id).
+            # Reflete a nova regra de comissao MMN que sobe por ambas as cadeias.
             level_users = await db.users.find(
-                {"network_sponsor_id": {"$in": current_ids}, "network_type": network_type},
+                {"$or": [
+                    {"sponsor_id": {"$in": current_ids}},
+                    {"network_sponsor_id": {"$in": current_ids}},
+                ], "user_id": {"$nin": list(seen)}},
                 {"_id": 0, "password_hash": 0}
-            ).to_list(1000)
+            ).to_list(2000)
             # Stats de comissao da geracao
             level_user_ids = [u["user_id"] for u in level_users]
             comm_agg = await db.commissions.aggregate([
@@ -2061,6 +2078,7 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                     "name": m.get("name"),
                     "email": m.get("email"),
                     "external_id": m.get("external_id"),
+                    "network_type": m.get("network_type") or NETWORK_CUSTOMER,
                     "created_at": m.get("created_at"),
                     "referral_program_active": bool(m.get("referral_program_active")),
                 }
@@ -2076,6 +2094,7 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                 "total_commissions": stats.get("count", 0),
             })
             current_ids = level_user_ids
+            seen.update(level_user_ids)
             if not current_ids:
                 # Sem mais descendentes - preencher zeros ate 6
                 for g in range(gen + 1, 7):

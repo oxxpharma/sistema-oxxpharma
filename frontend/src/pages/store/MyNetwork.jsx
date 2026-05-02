@@ -106,7 +106,8 @@ export default function MyNetwork() {
         <div className="p-6 border-b border-border">
           <h2 className="font-heading font-black text-xl">Minhas gerações (até 6 níveis)</h2>
           <p className="text-xs text-txt-secondary mt-1">
-            Clique em cada geração para ver quem está nela. Comissões e taxas calculadas conforme a configuração da rede.
+            Você recebe comissão de toda a sua linha de indicados — direta e indireta — até a 6ª geração.
+            Clique em cada geração para ver os membros.
           </p>
         </div>
 
@@ -145,23 +146,30 @@ export default function MyNetwork() {
                 {isExp && !isEmpty && (
                   <div className="bg-bg-secondary/40 px-4 pb-4 pt-1">
                     <ul className="bg-white border border-border rounded-lg divide-y divide-border">
-                      {(g.members || []).map(m => (
-                        <li key={m.user_id} className="flex items-center justify-between gap-3 p-3 text-sm" data-testid={`gen-${g.generation}-member-${m.user_id}`}>
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-brand-light text-brand-main font-bold text-xs flex items-center justify-center shrink-0">
-                              {m.name?.[0]?.toUpperCase() || '?'}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-semibold truncate">{m.name || '(sem nome)'}</div>
-                              <div className="text-xs text-txt-secondary truncate">
-                                {m.email || '—'}
-                                {m.created_at && <> · entrou em {formatDateTime(m.created_at).split(' ')[0]}</>}
+                      {(g.members || []).map(m => {
+                        const netLabel = m.network_type === 'network_1' ? 'Rede 1'
+                          : m.network_type === 'network_2' ? 'Rede 2' : null;
+                        return (
+                          <li key={m.user_id} className="flex items-center justify-between gap-3 p-3 text-sm" data-testid={`gen-${g.generation}-member-${m.user_id}`}>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-8 h-8 rounded-full bg-brand-light text-brand-main font-bold text-xs flex items-center justify-center shrink-0">
+                                {m.name?.[0]?.toUpperCase() || '?'}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-semibold truncate">{m.name || '(sem nome)'}</div>
+                                <div className="text-xs text-txt-secondary truncate">
+                                  {m.email || '—'}
+                                  {m.created_at && <> · entrou em {formatDateTime(m.created_at).split(' ')[0]}</>}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          {m.referral_program_active && <Badge variant="success">Programa ativo</Badge>}
-                        </li>
-                      ))}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {netLabel && <Badge variant="brand">{netLabel}</Badge>}
+                              {m.referral_program_active && <Badge variant="success">Programa ativo</Badge>}
+                            </div>
+                          </li>
+                        );
+                      })}
                       {(g.members || []).length === 0 && (
                         <li className="p-3 text-xs text-txt-secondary">Nenhum membro detalhado disponível.</li>
                       )}
