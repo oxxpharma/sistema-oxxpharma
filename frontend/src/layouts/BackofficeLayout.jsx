@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
-  GitMerge,
+  GitMerge, Calculator,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -40,6 +40,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments' },
       { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved' },
       { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Rel. comissões', testId: 'nav-commissions-report' },
+      { to: '/backoffice/recalcular-comissoes', icon: Calculator, label: 'Recalcular comissões', testId: 'nav-recalc-commissions' },
       { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points' },
       { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card' },
       { to: '/backoffice/maxx', icon: Repeat, label: 'Maxx MMN', testId: 'nav-maxx' },

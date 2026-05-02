@@ -62,6 +62,7 @@ import AdminUserCategories from './pages/backoffice/AdminUserCategories';
 import AdminCoupons from './pages/backoffice/AdminCoupons';
 import AdminReferralEnrollments from './pages/backoffice/AdminReferralEnrollments';
 import AdminMergeUsers from './pages/backoffice/AdminMergeUsers';
+import AdminRecalcCommissions from './pages/backoffice/AdminRecalcCommissions';
 
 function Guard({ children, requireAuth = false, requireAdmin = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -129,6 +130,7 @@ function AppRoutes() {
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="adesoes-indicacao" element={<AdminReferralEnrollments />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
+        <Route path="recalcular-comissoes" element={<AdminRecalcCommissions />} />
         <Route path="cartao" element={<AdminGiftCards />} />
         <Route path="pontos" element={<AdminPoints />} />
         <Route path="pagamentos" element={<AdminPayments />} />

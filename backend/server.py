@@ -1677,6 +1677,98 @@ async def admin_user_details(request: Request, user_id: str, user: dict = Depend
 
 # ==================== ADMIN DASHBOARD ====================
 
+# ==================== COMMISSION HELPER (reusable) ====================
+
+async def compute_order_commissions(db, order, customer, settings, *, mark_retroactive=False, batch_id=None):
+    """Calcula a lista de comissoes (afiliado + MMN ate 6 geracoes) para um pedido.
+
+    Reproduz EXATAMENTE a regra do /api/checkout (Iter 31):
+      - afiliado: sponsor_id direto do customer recebe affiliate_commission_rate (gen 0)
+      - MMN: sobe pela cadeia sponsor_id -> network_sponsor_id ate 6 niveis. Em cada nivel,
+        ancestor recebe se for network_1/network_2 E referral_program_active=True.
+      - Se mark_retroactive=True, marca cada doc com retroactive + recalc_batch_id.
+
+    Retorna lista de dicts prontos para inserir em db.commissions (NAO insere).
+    """
+    subtotal = float(order.get("subtotal") or 0)
+    order_id = order["order_id"]
+    customer_id = customer["user_id"]
+    customer_name = customer.get("name")
+    affiliate_rate = float(settings.get("affiliate_commission_rate") or 0)
+
+    out = []
+
+    # 1) Afiliado
+    sp_id = customer.get("sponsor_id")
+    if sp_id and sp_id != customer_id:
+        amt = round(subtotal * affiliate_rate, 2)
+        if amt > 0:
+            doc = {
+                "commission_id": gen_id("com_"),
+                "user_id": sp_id,
+                "order_id": order_id,
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "type": "affiliate",
+                "network_type": None,
+                "generation": 0,
+                "amount": amt,
+                "rate": affiliate_rate,
+                "order_subtotal": round(subtotal, 2),
+                "status": "pending",
+                "created_at": now_iso(),
+            }
+            if mark_retroactive:
+                doc["retroactive"] = True
+                doc["recalc_batch_id"] = batch_id
+            out.append(doc)
+
+    # 2) MMN ate 6 geracoes
+    network1_pcts = settings.get("network1_generations", []) or []
+    network2_pcts = settings.get("network2_generations", []) or []
+    current_id = customer.get("sponsor_id") or customer.get("network_sponsor_id")
+    visited = {customer_id}
+    generation = 1
+    while generation <= 6 and current_id and current_id not in visited:
+        visited.add(current_id)
+        ancestor = await db.users.find_one({"user_id": current_id}, {"_id": 0})
+        if not ancestor:
+            break
+        a_net = ancestor.get("network_type")
+        a_active = bool(ancestor.get("referral_program_active"))
+        if a_net in (NETWORK_1, NETWORK_2) and a_active:
+            pcts = network1_pcts if a_net == NETWORK_1 else network2_pcts
+            pct = pcts[generation - 1] if generation - 1 < len(pcts) else 0
+            if pct > 0:
+                amt = round(subtotal * pct / 100, 2)
+                if amt > 0:
+                    doc = {
+                        "commission_id": gen_id("com_"),
+                        "user_id": ancestor["user_id"],
+                        "order_id": order_id,
+                        "customer_id": customer_id,
+                        "customer_name": customer_name,
+                        "type": "network_gen",
+                        "network_type": a_net,
+                        "generation": generation,
+                        "amount": amt,
+                        "rate": pct / 100,
+                        "order_subtotal": round(subtotal, 2),
+                        "status": "pending",
+                        "created_at": now_iso(),
+                    }
+                    if mark_retroactive:
+                        doc["retroactive"] = True
+                        doc["recalc_batch_id"] = batch_id
+                    out.append(doc)
+        current_id = ancestor.get("sponsor_id") or ancestor.get("network_sponsor_id")
+        generation += 1
+
+    return out
+
+
+# ==================== COMMISSION HELPER END ====================
+
 @app.get("/api/admin/dashboard")
 async def admin_dashboard(request: Request, user: dict = Depends(require_admin())):
     db = request.app.db
@@ -1833,6 +1925,183 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
         "top_affiliates": top_affiliates,
         "commissions_summary": commissions_summary,
     }
+
+
+# ==================== ADMIN: RECALCULAR COMISSOES (RETROATIVO) ====================
+
+class _RecalcBody(BaseModel):
+    date_from: Optional[str] = None  # ISO date inclusive (YYYY-MM-DD)
+    date_to: Optional[str] = None    # ISO date inclusive
+    user_id: Optional[str] = None    # filtra por user_id (comprador)
+    customer_email: Optional[str] = None  # filtra por email do comprador
+    order_ids: Optional[List[str]] = None  # opcional, lista especifica
+
+
+async def _list_orders_missing_commissions(db, body: _RecalcBody):
+    """Retorna orders pagos SEM nenhuma comissao registrada hoje, aplicando filtros."""
+    q = {"payment_status": "paid"}
+    # Periodo
+    if body.date_from:
+        q.setdefault("created_at", {})["$gte"] = body.date_from + "T00:00:00"
+    if body.date_to:
+        q.setdefault("created_at", {})["$lte"] = body.date_to + "T23:59:59"
+    if body.user_id:
+        q["user_id"] = body.user_id
+    if body.customer_email:
+        # resolve user_id
+        cust = await db.users.find_one({"email": body.customer_email.strip().lower()}, {"_id": 0, "user_id": 1})
+        if not cust:
+            return []
+        q["user_id"] = cust["user_id"]
+    if body.order_ids:
+        q["order_id"] = {"$in": body.order_ids}
+
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).limit(2000).to_list(2000)
+
+    # Filtra apenas os que NAO tem comissao
+    if not orders:
+        return []
+    order_ids = [o["order_id"] for o in orders]
+    have = await db.commissions.distinct("order_id", {"order_id": {"$in": order_ids}})
+    have_set = set(have)
+    return [o for o in orders if o["order_id"] not in have_set]
+
+
+async def _build_recalc_preview(db, body: _RecalcBody):
+    """Para cada order elegivel, simula compute_order_commissions e agrega o resultado."""
+    settings = await get_settings(db)
+    orders = await _list_orders_missing_commissions(db, body)
+    by_user = {}  # user_id -> {name, email, total, count}
+    affected_orders = []
+    total_amount = 0.0
+    total_commissions = 0
+    for o in orders:
+        cust = await db.users.find_one({"user_id": o.get("user_id")}, {"_id": 0}) if o.get("user_id") else None
+        if not cust:
+            affected_orders.append({
+                "order_id": o["order_id"], "customer_name": o.get("customer_name"),
+                "customer_email": o.get("customer_email"), "subtotal": o.get("subtotal"),
+                "total": o.get("total"), "created_at": o.get("created_at"),
+                "commissions_count": 0, "commissions_total": 0,
+                "skipped_reason": "Comprador nao encontrado",
+            })
+            continue
+        comms = await compute_order_commissions(db, o, cust, settings, mark_retroactive=False)
+        order_total = round(sum(c["amount"] for c in comms), 2)
+        affected_orders.append({
+            "order_id": o["order_id"],
+            "customer_name": o.get("customer_name") or cust.get("name"),
+            "customer_email": o.get("customer_email") or cust.get("email"),
+            "subtotal": o.get("subtotal"),
+            "total": o.get("total"),
+            "created_at": o.get("created_at"),
+            "commissions_count": len(comms),
+            "commissions_total": order_total,
+            "commissions_breakdown": [
+                {"user_id": c["user_id"], "type": c["type"], "generation": c["generation"],
+                 "amount": c["amount"], "rate": c["rate"]}
+                for c in comms
+            ],
+        })
+        for c in comms:
+            uid = c["user_id"]
+            row = by_user.setdefault(uid, {"user_id": uid, "total": 0, "count": 0})
+            row["total"] = round(row["total"] + c["amount"], 2)
+            row["count"] += 1
+        total_amount = round(total_amount + order_total, 2)
+        total_commissions += len(comms)
+
+    # Hidrata nomes/emails dos beneficiarios
+    if by_user:
+        async for u in db.users.find({"user_id": {"$in": list(by_user.keys())}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1}):
+            by_user[u["user_id"]]["name"] = u.get("name")
+            by_user[u["user_id"]]["email"] = u.get("email")
+            by_user[u["user_id"]]["network_type"] = u.get("network_type")
+
+    by_user_list = sorted(by_user.values(), key=lambda x: -x["total"])
+
+    return {
+        "orders_eligible": len(orders),
+        "orders_with_commissions": len([o for o in affected_orders if o["commissions_count"] > 0]),
+        "orders_without_eligible_chain": len([o for o in affected_orders if o["commissions_count"] == 0]),
+        "total_commissions": total_commissions,
+        "total_amount": total_amount,
+        "affected_orders": affected_orders,
+        "beneficiaries": by_user_list,
+    }
+
+
+@app.post("/api/admin/recalc-commissions/preview")
+async def admin_recalc_preview(request: Request, body: _RecalcBody, user: dict = Depends(require_admin())):
+    """Modo SIMULAR: nao grava nada. Retorna resumo das comissoes que seriam criadas."""
+    db = request.app.db
+    return await _build_recalc_preview(db, body)
+
+
+@app.post("/api/admin/recalc-commissions/apply")
+async def admin_recalc_apply(request: Request, body: _RecalcBody, user: dict = Depends(require_admin())):
+    """Modo APLICAR: cria comissoes retroativas para orders pagos sem comissao,
+    seguindo a mesma regra do checkout (afiliado + MMN ate 6 geracoes via cadeia
+    sponsor_id->network_sponsor_id, MMN com programa ativo).
+
+    Cada commission criada recebe retroactive=True e recalc_batch_id=<batch>.
+    Audit log em db.recalc_audit_log.
+    """
+    db = request.app.db
+    settings = await get_settings(db)
+    orders = await _list_orders_missing_commissions(db, body)
+    if not orders:
+        return {"success": True, "batch_id": None, "orders_processed": 0, "commissions_created": 0, "total_amount": 0}
+
+    batch_id = gen_id("recalc_")
+    all_docs = []
+    processed_ids = []
+    for o in orders:
+        cust = await db.users.find_one({"user_id": o.get("user_id")}, {"_id": 0}) if o.get("user_id") else None
+        if not cust:
+            continue
+        # Re-checa que ainda nao tem comissao (proteção race-condition)
+        if await db.commissions.count_documents({"order_id": o["order_id"]}) > 0:
+            continue
+        comms = await compute_order_commissions(db, o, cust, settings, mark_retroactive=True, batch_id=batch_id)
+        if comms:
+            all_docs.extend(comms)
+            processed_ids.append(o["order_id"])
+
+    total_amount = round(sum(d["amount"] for d in all_docs), 2)
+    if all_docs:
+        await db.commissions.insert_many(all_docs)
+
+    # Audit log
+    try:
+        await db.recalc_audit_log.insert_one({
+            "batch_id": batch_id,
+            "performed_by_user_id": user.get("user_id"),
+            "performed_by_email": user.get("email"),
+            "performed_at": now_iso(),
+            "filters": body.dict(),
+            "orders_processed": len(processed_ids),
+            "commissions_created": len(all_docs),
+            "total_amount": total_amount,
+            "order_ids": processed_ids,
+        })
+    except Exception as e:
+        logger.warning(f"recalc_audit_log insert failed: {e}")
+
+    return {
+        "success": True,
+        "batch_id": batch_id,
+        "orders_processed": len(processed_ids),
+        "commissions_created": len(all_docs),
+        "total_amount": total_amount,
+    }
+
+
+@app.get("/api/admin/recalc-commissions/history")
+async def admin_recalc_history(request: Request, limit: int = 50, user: dict = Depends(require_admin())):
+    db = request.app.db
+    rows = await db.recalc_audit_log.find({}, {"_id": 0}).sort("performed_at", -1).limit(int(limit)).to_list(int(limit))
+    return {"items": rows, "total": len(rows)}
 
 # ==================== AFFILIATE / REFERRALS ====================
 
