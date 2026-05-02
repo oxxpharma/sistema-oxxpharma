@@ -306,10 +306,53 @@ function NetworkTab({ network, u }) {
         <UserMiniList list={referrals} emptyText="Nenhum indicado direto." showProgram />
       </div>
 
+      {/* Downline ate 6 geracoes - rede MMN */}
       <div>
-        <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">Downline 1ª geração (rede MMN) — {downline.length}</div>
-        <UserMiniList list={downline} emptyText="Nenhum membro na 1ª geração." />
+        <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">
+          Downline rede MMN — até 6 gerações ({(network.downline_by_generation || []).reduce((s, g) => s + (g.members_count || 0), 0)} membros total)
+        </div>
+        <DownlineByGeneration generations={network.downline_by_generation || []} />
       </div>
+    </div>
+  );
+}
+
+function DownlineByGeneration({ generations }) {
+  const [expanded, setExpanded] = React.useState({});
+  if (!generations.length) {
+    return <div className="text-xs text-txt-secondary bg-white border border-border rounded-lg p-4">Nenhum membro na rede.</div>;
+  }
+  return (
+    <div className="space-y-2">
+      {generations.map((gen) => {
+        const isExp = !!expanded[gen.generation];
+        const isEmpty = gen.members_count === 0;
+        return (
+          <div key={gen.generation} className="bg-white border border-border rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => !isEmpty && setExpanded({ ...expanded, [gen.generation]: !isExp })}
+              disabled={isEmpty}
+              className={`w-full flex items-center gap-3 p-3 text-left ${isEmpty ? 'opacity-50 cursor-default' : 'hover:bg-bg-secondary/50'}`}
+              data-testid={`gen-${gen.generation}`}
+            >
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center font-heading font-black text-sm shrink-0 ${gen.generation === 1 ? 'bg-brand-main text-white' : 'bg-brand-light text-brand-main'}`}>
+                {gen.generation}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-sm">{gen.generation}ª geração</div>
+                <div className="text-xs text-txt-secondary">{gen.members_count} {gen.members_count === 1 ? 'membro' : 'membros'}</div>
+              </div>
+              {!isEmpty && <div className="text-xs text-brand-main">{isExp ? 'ocultar ▲' : 'ver membros ▼'}</div>}
+            </button>
+            {isExp && gen.members_count > 0 && (
+              <div className="border-t border-border">
+                <UserMiniList list={gen.members} emptyText="" />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

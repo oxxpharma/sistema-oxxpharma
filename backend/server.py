@@ -1257,6 +1257,216 @@ async def admin_get_user(request: Request, user_id: str, user: dict = Depends(re
     return u
 
 
+# ============ Deteccao e fusao de usuarios duplicados ============
+def _user_short(u: Dict) -> Dict:
+    return {
+        "user_id": u.get("user_id"),
+        "name": u.get("name") or "",
+        "email": u.get("email") or "",
+        "phone": u.get("phone") or "",
+        "cpf": u.get("cpf") or "",
+        "external_id": u.get("external_id") or "",
+        "leader_external_id": u.get("leader_external_id") or "",
+        "network_type": u.get("network_type") or "",
+        "created_at": u.get("created_at"),
+        "addresses": u.get("addresses") or [],
+        "has_orders": False,
+        "has_points": False,
+    }
+
+
+@app.get("/api/admin/duplicate-users")
+async def admin_duplicate_users(request: Request, user: dict = Depends(require_admin())):
+    """Cruza usuarios por CPF, email e telefone (normalizados) e retorna grupos
+    com 2+ usuarios. Usa Mongo aggregate para performance."""
+    db = request.app.db
+
+    async def _groups_by(field):
+        pipeline = [
+            {"$match": {field: {"$exists": True, "$ne": None, "$nin": ["", None]}}},
+            {"$group": {"_id": f"${field}", "user_ids": {"$addToSet": "$user_id"}, "count": {"$sum": 1}}},
+            {"$match": {"count": {"$gte": 2}}},
+        ]
+        return await db.users.aggregate(pipeline).to_list(5000)
+
+    groups = []
+    seen_pairs = set()  # (uid_a, uid_b) ordenado para nao duplicar grupo
+
+    # Pre-popular phone_digits para users que nao tem (lazy migration)
+    async for udoc in db.users.find({"phone": {"$exists": True, "$ne": ""}, "phone_digits": {"$exists": False}}, {"_id": 0, "user_id": 1, "phone": 1}):
+        pd = _clean_phone(udoc.get("phone"))
+        if pd:
+            await db.users.update_one({"user_id": udoc["user_id"]}, {"$set": {"phone_digits": pd}})
+
+    # Coleta groups por cpf_digits
+    cpf_groups = await _groups_by("cpf_digits")
+    email_groups = await _groups_by("email")
+    phone_groups = await _groups_by("phone_digits")
+
+    raw = []
+    for g in cpf_groups:
+        raw.append({"match_field": "cpf", "match_value": g["_id"], "user_ids": g["user_ids"]})
+    for g in email_groups:
+        raw.append({"match_field": "email", "match_value": g["_id"], "user_ids": g["user_ids"]})
+    for g in phone_groups:
+        raw.append({"match_field": "phone", "match_value": g["_id"], "user_ids": g["user_ids"]})
+
+    # Hidratar com dados do usuario + flags
+    for grp in raw:
+        users_full = await db.users.find({"user_id": {"$in": grp["user_ids"]}}, {"_id": 0, "password_hash": 0}).to_list(20)
+        if len(users_full) < 2:
+            continue
+        # Skip se for o mesmo "par" ja visto via outro campo
+        ids_sorted = tuple(sorted(grp["user_ids"]))
+        if ids_sorted in seen_pairs and len(ids_sorted) == 2:
+            # Adicionar o match_field como info adicional no grupo ja existente
+            for existing in groups:
+                ex_ids = tuple(sorted([u["user_id"] for u in existing["users"]]))
+                if ex_ids == ids_sorted:
+                    if grp["match_field"] not in existing["match_fields"]:
+                        existing["match_fields"].append(grp["match_field"])
+                    break
+            continue
+        seen_pairs.add(ids_sorted)
+
+        # Ordenar: o mais recente com external_id primeiro (sugerido como "drop")
+        # mas user com mais historico (orders/points) eh sugerido como "keep"
+        for u in users_full:
+            u["has_orders"] = (await db.orders.count_documents({"user_id": u["user_id"]})) > 0
+            u["has_points"] = (await db.points_log.count_documents({"user_id": u["user_id"]})) > 0
+            u["has_external_id"] = bool(u.get("external_id"))
+        # Sugestao: keep = o que tem mais "historico", drop = o duplicado vindo da API ou sem historico
+        users_full.sort(key=lambda u: (
+            -1 if (u["has_orders"] or u["has_points"]) else 1,
+            -1 if u.get("external_id") else 1,
+            u.get("created_at") or "",
+        ))
+
+        groups.append({
+            "match_fields": [grp["match_field"]],
+            "match_value": grp["match_value"],
+            "users": [_user_short({**u, "has_orders": u["has_orders"], "has_points": u["has_points"]}) for u in users_full],
+            "suggested_keep": users_full[0]["user_id"],
+            "suggested_drop": users_full[-1]["user_id"] if len(users_full) > 1 else None,
+        })
+
+    return {"groups": groups, "total_groups": len(groups)}
+
+
+class _MergeBody(BaseModel):
+    keep_user_id: str
+    drop_user_id: str
+
+
+@app.post("/api/admin/merge-users")
+async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Depends(require_admin())):
+    """Funde 2 usuarios. O 'keep' permanece e absorve relacionamentos do 'drop'.
+
+    Substitui dados cadastrais do keep pelos do drop SE o drop tiver valor preenchido
+    (cobre o caso "user da Maxx tinha external_id mas faltavam dados que estavam na OxxPharma"
+    e tambem o inverso).
+    """
+    db = request.app.db
+    if data.keep_user_id == data.drop_user_id:
+        raise HTTPException(status_code=400, detail="keep_user_id e drop_user_id sao iguais")
+    keep = await db.users.find_one({"user_id": data.keep_user_id})
+    drop = await db.users.find_one({"user_id": data.drop_user_id})
+    if not keep or not drop:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+
+    # 1. Atualizar dados cadastrais do keep com os do drop (se preenchido)
+    overwrite_fields = ["name", "email", "phone", "cpf", "cpf_digits", "phone_digits",
+                        "external_id", "leader_external_id", "network_type",
+                        "rg", "birth_date", "mother_name"]
+    update_set = {}
+    for f in overwrite_fields:
+        v_drop = drop.get(f)
+        if v_drop and str(v_drop).strip():  # so substitui se drop tem valor
+            update_set[f] = v_drop
+    # Email: garantir lower e nao colidir
+    if "email" in update_set:
+        update_set["email"] = str(update_set["email"]).lower()
+        # Se ja existe outro user com esse email diferente do keep, abortar
+        coll = await db.users.find_one({"email": update_set["email"], "user_id": {"$nin": [data.keep_user_id, data.drop_user_id]}})
+        if coll:
+            raise HTTPException(status_code=409, detail=f"Email {update_set['email']} ja em uso por outro usuario")
+    # Recalcula cpf_digits se cpf veio
+    if "cpf" in update_set:
+        update_set["cpf_digits"] = _clean_cpf(update_set["cpf"]) or update_set.get("cpf_digits")
+    if "phone" in update_set:
+        update_set["phone_digits"] = _clean_phone(update_set["phone"]) or update_set.get("phone_digits")
+
+    # Mesclar enderecos: keep + drop, deduplicando por (zip+number)
+    keep_addrs = keep.get("addresses") or []
+    drop_addrs = drop.get("addresses") or []
+    if drop_addrs:
+        existing_keys = {(a.get("zip_code"), a.get("number"), a.get("street")) for a in keep_addrs}
+        merged = list(keep_addrs)
+        for a in drop_addrs:
+            k = (a.get("zip_code"), a.get("number"), a.get("street"))
+            if k not in existing_keys:
+                merged.append(a)
+                existing_keys.add(k)
+        update_set["addresses"] = merged
+
+    # PIX: se keep nao tem mas drop tem
+    if not keep.get("pix_key") and drop.get("pix_key"):
+        update_set["pix_key"] = drop["pix_key"]
+        update_set["pix_key_type"] = drop.get("pix_key_type")
+
+    # referral_program_active: ficar TRUE se algum dos dois tiver
+    if drop.get("referral_program_active") and not keep.get("referral_program_active"):
+        update_set["referral_program_active"] = True
+        if drop.get("referral_code") and not keep.get("referral_code"):
+            update_set["referral_code"] = drop.get("referral_code")
+        if drop.get("referral_enrollment"):
+            update_set["referral_enrollment"] = drop["referral_enrollment"]
+
+    update_set["updated_at"] = now_iso()
+    update_set["merged_from_user_ids"] = (keep.get("merged_from_user_ids") or []) + [data.drop_user_id]
+
+    await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
+
+    # 2. Migrar relacionamentos (compras, pontos, comissoes, saques, batches do cartao,
+    #    referidos, indicacoes, e qualquer ref a user_id)
+    moved = {}
+    for coll_name, field in [
+        ("orders", "user_id"),
+        ("commissions", "user_id"),
+        ("commissions", "from_user_id"),
+        ("withdrawals", "user_id"),
+        ("points_log", "user_id"),
+        ("payment_webhook_logs", "user_id"),
+        ("addresses", "user_id"),
+    ]:
+        coll = db[coll_name]
+        try:
+            r = await coll.update_many({field: data.drop_user_id}, {"$set": {field: data.keep_user_id}})
+            moved[f"{coll_name}.{field}"] = r.modified_count
+        except Exception as e:
+            moved[f"{coll_name}.{field}"] = f"err: {e}"
+
+    # 3. Atualizar referencias de SPONSOR/LEADER de outros users
+    # Quem tinha drop como sponsor passa a ter keep
+    r1 = await db.users.update_many({"sponsor_id": data.drop_user_id}, {"$set": {"sponsor_id": data.keep_user_id}})
+    moved["users.sponsor_id"] = r1.modified_count
+    r2 = await db.users.update_many({"network_sponsor_id": data.drop_user_id}, {"$set": {"network_sponsor_id": data.keep_user_id}})
+    moved["users.network_sponsor_id"] = r2.modified_count
+
+    # 4. Mover lines do card_batches (estrutura: lines[].user_id)
+    try:
+        r3 = await db.card_batches.update_many({"lines.user_id": data.drop_user_id}, {"$set": {"lines.$[elem].user_id": data.keep_user_id}}, array_filters=[{"elem.user_id": data.drop_user_id}])
+        moved["card_batches.lines"] = r3.modified_count
+    except Exception as e:
+        moved["card_batches.lines"] = f"err: {e}"
+
+    # 5. Deletar o drop
+    await db.users.delete_one({"user_id": data.drop_user_id})
+
+    fresh = await db.users.find_one({"user_id": data.keep_user_id}, {"_id": 0, "password_hash": 0})
+    return {"success": True, "kept": fresh, "deleted_user_id": data.drop_user_id, "moved": moved}
+
+
 @app.get("/api/admin/users/{user_id}/details")
 async def admin_user_details(request: Request, user_id: str, user: dict = Depends(require_admin())):
     """Painel agregador: retorna user + KPIs + listas (commissions, orders, network,
@@ -1353,6 +1563,26 @@ async def admin_user_details(request: Request, user_id: str, user: dict = Depend
     referrals = await db.users.find({"sponsor_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "created_at": 1, "referral_program_active": 1}).sort("created_at", -1).limit(100).to_list(100)
     network_downline = await db.users.find({"network_sponsor_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "network_type": 1, "created_at": 1}).sort("created_at", -1).limit(100).to_list(100)
 
+    # Downline ate 6 geracoes (BFS)
+    downline_by_generation = []
+    current_ids = [user_id]
+    for gen in range(1, 7):
+        level_users = await db.users.find(
+            {"network_sponsor_id": {"$in": current_ids}},
+            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1, "external_id": 1, "network_type": 1, "created_at": 1, "referral_program_active": 1, "network_sponsor_id": 1},
+        ).sort("created_at", -1).limit(2000).to_list(2000)
+        downline_by_generation.append({
+            "generation": gen,
+            "members_count": len(level_users),
+            "members": level_users,
+        })
+        current_ids = [u["user_id"] for u in level_users]
+        if not current_ids:
+            # preenche zeros ate 6
+            for g in range(gen + 1, 7):
+                downline_by_generation.append({"generation": g, "members_count": 0, "members": []})
+            break
+
     # ---- Cartao: batches/lines deste user ----
     card_lines = await db.card_batches.aggregate([
         {"$unwind": "$lines"},
@@ -1383,6 +1613,7 @@ async def admin_user_details(request: Request, user_id: str, user: dict = Depend
             "network_sponsor": network_sponsor,
             "referrals": referrals,
             "downline": network_downline,
+            "downline_by_generation": downline_by_generation,
         },
         "card": {
             "total_sent": card_total,
@@ -1949,6 +2180,19 @@ def _clean_cpf(cpf: Optional[str]) -> Optional[str]:
     if not cpf:
         return None
     digits = "".join(ch for ch in str(cpf) if ch.isdigit())
+    return digits or None
+
+
+def _clean_phone(phone: Optional[str]) -> Optional[str]:
+    """Normaliza telefone para apenas digitos. Remove DDI 55 quando presente."""
+    if not phone:
+        return None
+    digits = "".join(ch for ch in str(phone) if ch.isdigit())
+    if not digits:
+        return None
+    # Remove DDI 55 do BR para normalizar (ex: 5511999999999 -> 11999999999)
+    if len(digits) > 11 and digits.startswith("55"):
+        digits = digits[2:]
     return digits or None
 
 
