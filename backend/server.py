@@ -4785,6 +4785,12 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         raise HTTPException(status_code=400, detail="Email ja cadastrado")
 
     role = body.get("role") or "customer"
+    # Valida papel solicitado: somente super_admin (ou legacy 'admin') pode criar admin/super_admin
+    creator_role = _role_of(user)
+    if role in ("admin", "super_admin") and creator_role not in ("super_admin", "admin"):
+        raise HTTPException(status_code=403, detail="Apenas Super Admin pode criar Admin ou Super Admin")
+    if role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
+        raise HTTPException(status_code=400, detail="Papel invalido")
     network_type = body.get("network_type") or NETWORK_CUSTOMER
 
     # Sponsor por codigo (opcional)
@@ -4811,7 +4817,7 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         "cpf_digits": _clean_cpf(body.get("cpf")),
         "external_id": (body.get("external_id") or "").strip() or None,
         "role": role,
-        "access_level": 0 if role == "admin" else int(body.get("access_level") or 99),
+        "access_level": 0 if role in ("super_admin", "admin") else (1 if role in ("comercial", "financeiro") else int(body.get("access_level") or 99)),
         "status": body.get("status") or "active",
         "addresses": body.get("addresses") or [],
         "pix_key": body.get("pix_key") or None,
@@ -4873,6 +4879,27 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     for k, v in body.items():
         if k in allowed:
             update[k] = v
+    # Iter 38: somente super_admin (ou legacy 'admin') pode promover alguem a admin/super_admin
+    if "role" in update:
+        new_role = update["role"]
+        if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
+            raise HTTPException(status_code=400, detail="Papel invalido")
+        current_role = target.get("role") or "customer"
+        editor_role = _role_of(user)
+        is_super = editor_role in ("super_admin", "admin")
+        if new_role != current_role:
+            if new_role in ("admin", "super_admin") and not is_super:
+                raise HTTPException(status_code=403, detail="Apenas Super Admin pode promover a Admin/Super Admin")
+            # Nao-super_admin tambem nao pode rebaixar um admin/super_admin
+            if current_role in ("admin", "super_admin") and not is_super:
+                raise HTTPException(status_code=403, detail="Apenas Super Admin pode alterar o papel de um Admin")
+        # Sincroniza access_level com o papel (backoffice=0/1, cliente=99)
+        if new_role in ("super_admin", "admin"):
+            update["access_level"] = 0
+        elif new_role in ("comercial", "financeiro"):
+            update["access_level"] = 1
+        else:
+            update["access_level"] = 99
     # Validar email unico
     if "email" in update and update["email"]:
         update["email"] = update["email"].lower()

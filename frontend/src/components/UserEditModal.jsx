@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { Button } from './ui/Button';
 import { X, Loader2, Save, Mail, Trash2, Power, KeyRound, Send } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
 
 const FIELDS = [
   { key: 'name', label: 'Nome', type: 'text' },
@@ -18,12 +19,14 @@ const NETWORK_OPTIONS = [
   { value: 'network_1', label: 'Equipe 1 (Corporativa)' },
   { value: 'network_2', label: 'Equipe 2 (Propagandista)' },
 ];
-const ROLE_OPTIONS = [
+const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
-  { value: 'comercial', label: 'Comercial' },
-  { value: 'financeiro', label: 'Financeiro' },
-  { value: 'admin', label: 'Admin (limitado)' },
-  { value: 'super_admin', label: 'Super Admin' },
+  { value: 'comercial', label: 'Comercial (backoffice sem financeiro/integrações)' },
+  { value: 'financeiro', label: 'Financeiro (comissões, saques, cartão)' },
+];
+const ROLE_OPTIONS_SUPER = [
+  { value: 'admin', label: 'Admin (tudo exceto integrações críticas)' },
+  { value: 'super_admin', label: 'Super Admin (acesso total)' },
 ];
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Ativo' },
@@ -31,6 +34,10 @@ const STATUS_OPTIONS = [
 ];
 
 export default function UserEditModal({ userId, onClose, onSaved }) {
+  const { isSuperAdmin } = useAuth();
+  const ROLE_OPTIONS = isSuperAdmin
+    ? [...ROLE_OPTIONS_BASE, ...ROLE_OPTIONS_SUPER]
+    : ROLE_OPTIONS_BASE;
   const [u, setU] = useState(null);
   const [original, setOriginal] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -67,7 +74,7 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         external_id: u.external_id, sponsor_code: u.sponsor_code,
         leader_external_id: u.leader_external_id || null,
         status: u.status, role: u.role, network_type: u.network_type,
-        access_level: u.role === 'admin' ? 0 : 99,
+        // access_level agora e sincronizado pelo backend baseado no role
       };
       // Se o admin alterou leader_external_id mas NAO tocou no network_sponsor_id,
       // omitir network_sponsor_id para o backend auto-resolver via external_id.
@@ -197,8 +204,8 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
 
 function Modal({ children, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-2xl w-full my-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center overflow-y-auto overscroll-contain py-6 sm:py-12 px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl mb-6" onClick={e => e.stopPropagation()}>
         {children}
       </div>
     </div>

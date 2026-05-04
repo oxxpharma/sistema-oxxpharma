@@ -3,15 +3,21 @@ import { api } from '../lib/api';
 import { Button } from './ui/Button';
 import { X, Loader2, Save, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
 
 const NETWORK_OPTIONS = [
   { value: 'customer', label: 'Cliente' },
   { value: 'network_1', label: 'Equipe 1 (Corporativa)' },
   { value: 'network_2', label: 'Equipe 2 (Propagandista)' },
 ];
-const ROLE_OPTIONS = [
+const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
-  { value: 'admin', label: 'Admin' },
+  { value: 'comercial', label: 'Comercial (backoffice sem financeiro/integrações)' },
+  { value: 'financeiro', label: 'Financeiro (comissões, saques, cartão)' },
+];
+const ROLE_OPTIONS_SUPER = [
+  { value: 'admin', label: 'Admin (tudo exceto integrações críticas)' },
+  { value: 'super_admin', label: 'Super Admin (acesso total)' },
 ];
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Ativo' },
@@ -31,6 +37,10 @@ const EMPTY_ADDR = {
 };
 
 export default function UserCreateModal({ onClose, onCreated }) {
+  const { isSuperAdmin } = useAuth();
+  const ROLE_OPTIONS = isSuperAdmin
+    ? [...ROLE_OPTIONS_BASE, ...ROLE_OPTIONS_SUPER]
+    : ROLE_OPTIONS_BASE;
   const [form, setForm] = useState({
     name: '', email: '', phone: '', cpf: '',
     external_id: '',
@@ -85,8 +95,8 @@ export default function UserCreateModal({ onClose, onCreated }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-3xl w-full my-8 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="user-create-modal">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center overflow-y-auto overscroll-contain py-6 sm:py-12 px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl mb-6" onClick={e => e.stopPropagation()} data-testid="user-create-modal">
         <div className="p-5 border-b border-border flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-brand-light text-brand-main flex items-center justify-center"><UserPlus className="w-5 h-5" /></div>
