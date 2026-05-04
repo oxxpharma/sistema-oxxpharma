@@ -83,15 +83,41 @@ export default function AdminAppearance() {
       const reader = new FileReader();
       reader.onload = async () => {
         try {
-          const r = await api.post('/api/admin/upload-image', { data: reader.result, name: file.name });
+          let dataUrl = reader.result;
+          // Para favicon: redimensiona para 64x64 quadrado para garantir que o
+          // browser consiga usar como icone (favicon grande vira mancha cinza)
+          if (key === 'favicon_url') {
+            dataUrl = await resizeToSquare(dataUrl, 64);
+          }
+          const r = await api.post('/api/admin/upload-image', { data: dataUrl, name: file.name });
           set(key, r.url);
-          toast.success('Imagem enviada');
+          toast.success(key === 'favicon_url' ? 'Favicon enviado (redimensionado para 64×64).' : 'Imagem enviada');
         } catch (e) { toast.error(e?.message); }
       };
       reader.readAsDataURL(file);
     };
     inp.click();
   };
+
+  // Redimensiona uma data URL para um quadrado 'size'x'size' centralizado
+  // (mantem aspect ratio, preenche fundo transparente).
+  const resizeToSquare = (dataUrl, size) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      // Fit dentro do quadrado mantendo proporcao
+      const ratio = Math.min(size / img.width, size / img.height);
+      const w = img.width * ratio;
+      const h = img.height * ratio;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
 
   const setFooterPage = (i, patch) => set('footer_pages', s.footer_pages.map((p, idx) => idx === i ? { ...p, ...patch } : p));
   const removeFooterPage = (i) => set('footer_pages', s.footer_pages.filter((_, idx) => idx !== i));
