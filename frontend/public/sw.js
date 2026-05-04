@@ -1,14 +1,13 @@
 // Service Worker for OxxPharma PWA
-const CACHE_NAME = 'oxxpharma-v2-1777854515';
-const STATIC_CACHE = 'oxxpharma-static-v2-1777854515';
+const CACHE_NAME = 'oxxpharma-v3-icons-1777854900';
+const STATIC_CACHE = 'oxxpharma-static-v3-icons-1777854900';
 
 // Files to cache immediately
 const STATIC_FILES = [
   '/',
-  '/dashboard',
   '/manifest.json',
-  '/icon-192x192.png',
-  '/icon-512x512.png'
+  '/icon-192x192-v2.png',
+  '/icon-512x512-v2.png'
 ];
 
 // Install event - cache static files
@@ -71,7 +70,7 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'OxxPharma',
     body: 'Você tem uma nova notificação!',
-    icon: '/icon-192x192.png',
+    icon: '/icon-192x192-v2.png',
     badge: '/icon-72x72.png',
     tag: 'oxxpharma-notification',
     data: {}
@@ -88,7 +87,7 @@ self.addEventListener('push', (event) => {
   
   const options = {
     body: data.body,
-    icon: data.icon || '/icon-192x192.png',
+    icon: data.icon || '/icon-192x192-v2.png',
     badge: data.badge || '/icon-72x72.png',
     tag: data.tag || 'oxxpharma-notification',
     vibrate: [100, 50, 100],
