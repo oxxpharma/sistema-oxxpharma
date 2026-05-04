@@ -148,11 +148,14 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 async def get_current_user(request: Request):
-    token = request.cookies.get("access_token")
+    # Prioridade: header Authorization > cookie. Isso eh critico para impersonation,
+    # onde o frontend troca o token no localStorage mas o cookie do admin permanece.
+    auth = request.headers.get("Authorization", "")
+    token = None
+    if auth.startswith("Bearer "):
+        token = auth[7:]
     if not token:
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
+        token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Nao autenticado")
     try:
@@ -1168,7 +1171,10 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
     Acionado quando order vira 'paid' (status de pagamento confirmado).
     """
     try:
-        s = await _get_site_settings(db)
+        # BUGFIX Iter 38: a chave 'order_invoice_email_to' eh salva em settings {_id: "global"}
+        # via PUT /api/admin/settings. _get_site_settings le de {_id: "site"} (aparencia/loja),
+        # portanto nunca via a config. Usamos get_settings(db) para ler o doc global.
+        s = await get_settings(db)
         to_addr = (s.get("order_invoice_email_to") or "").strip()
         if not to_addr:
             return

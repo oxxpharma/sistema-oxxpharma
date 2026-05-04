@@ -124,7 +124,9 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Backend `/api/payments/create/{order_id}`:** se `order.total <= 0` (totalmente coberto pelo voucher), chama `mark_order_paid(... source="voucher")` retornando `{provider: "voucher", paid: true}` — pula MP, dispara emissão de NF, comissões → paid, registro de pontos e e-mails normalmente.
   - **MercadoPago:** quando há voucher_used > 0 ou cupom, agora envia uma única linha consolidada `Pedido #ord_xxx` com `order.total` real (antes mandaria subtotal+frete sem desconto, cobrando demais).
   - **Maxx — agregação por pedido (`maxx_service.py::_build_payload`):** antes 1 entrada por produto (gerava N logs na Maxx por compra). Agora agrupa por `(user_id, order_id)`: soma pontos, soma quantidade total, lista produtos em `products[]` e gera resumo `product_name = "Vit C x2; Omega 3 x1"`. Cliente + sponsor espelhado de Equipe 1 do mesmo pedido continuam como 2 entradas (chaves distintas).
-  - Testes: 38/38 passing (`test_iter38_maxx_per_order.py` 2 novos + 36 pré-existentes inalterados).
+  - **Bugfix Impersonation (voltava para admin em <1s):** `get_current_user` lia o cookie `access_token` ANTES do header `Authorization`. Como o login grava um cookie httpOnly do admin, a impersonation (que troca só o token do localStorage) era ignorada pelo backend → `/api/auth/me` retornava admin → UI revertia. Corrigido: header Authorization tem prioridade sobre cookie.
+  - **Bugfix Fatura admin não enviada:** `_send_admin_invoice_if_configured` lia `order_invoice_email_to` do doc `settings{_id:"site"}` (configs visuais da loja), mas a chave é salva via PUT `/api/admin/settings` em `settings{_id:"global"}`. Sempre retornava vazio e o email não disparava. Corrigido para usar `get_settings(db)`. Validado E2E: invoice_admin_paid para giovani.mella@gmail.com = sent:True.
+  - Testes: 20/20 passing (`test_iter38_maxx_per_order.py` 2 + `test_iter38_auth_priority.py` 1 + regressão).
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
