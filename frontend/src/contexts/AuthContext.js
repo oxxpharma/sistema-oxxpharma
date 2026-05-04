@@ -102,23 +102,22 @@ export function AuthProvider({ children }) {
 
   const role = user?.role || (user ? 'customer' : null);
   const isAdmin = ADMIN_ROLES.has(role) || (user?.access_level ?? 99) <= 1;
-  const isSuperAdmin = role === 'super_admin' || role === 'admin' && (user?.access_level ?? 99) === 0;
-  // 'admin' legacy = super_admin se access_level == 0, senão é admin limitado
-  const isSuperAdminEffective = role === 'super_admin' || (role === 'admin' && (user?.access_level ?? 99) === 0);
+  // Super admin STRICT: apenas quem tem role='super_admin'. Admin (novo) NAO vira super.
+  const isSuperAdmin = role === 'super_admin';
   const canImpersonate = ['super_admin', 'admin', 'comercial'].includes(role);
   const can = {
-    integrations: isSuperAdminEffective,      // Maxx, Melhor Envio, Webhooks, settings avancadas
+    integrations: isSuperAdmin,               // Maxx, Melhor Envio, Webhooks, settings avancadas
     financial: ['super_admin', 'admin', 'financeiro'].includes(role),
     commercial: ['super_admin', 'admin', 'comercial'].includes(role),
     impersonate: canImpersonate,
     editProducts: ['super_admin', 'admin'].includes(role),
-    manageRoles: isSuperAdminEffective,
+    manageRoles: isSuperAdmin,
   };
 
   return (
     <AuthContext.Provider value={{
       user, loading, role,
-      isAuthenticated: !!user, isAdmin, isSuperAdmin: isSuperAdminEffective, can,
+      isAuthenticated: !!user, isAdmin, isSuperAdmin, can,
       impersonating, impersonator,
       login, register, logout, refresh, setUser,
       startImpersonation, stopImpersonation,

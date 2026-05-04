@@ -212,10 +212,10 @@ def require_role(*allowed_roles):
 
 
 def require_super_admin():
-    """So super_admin (ou 'admin' legado = super_admin)."""
+    """Strict: apenas role='super_admin'. Admin novo NAO entra."""
     async def dep(user: dict = Depends(get_current_user)):
         r = _role_of(user)
-        if r not in ("super_admin", "admin"):
+        if r != "super_admin":
             raise HTTPException(status_code=403, detail="Apenas Super Admin")
         return user
     return dep
@@ -309,7 +309,7 @@ async def seed_admin(db):
     if not existing:
         await db.users.insert_one({
             "user_id": gen_id("user_"), "email": email, "password_hash": hash_pw(pw),
-            "name": "Administrador OxxPharma", "phone": None, "role": "admin",
+            "name": "Administrador OxxPharma", "phone": None, "role": "super_admin",
             "access_level": 0, "status": "active", "addresses": [],
             "referral_code": gen_referral_code(),
             "sponsor_id": None, "sponsor_code": None,
@@ -325,8 +325,11 @@ async def seed_admin(db):
             update["password_hash"] = hash_pw(pw)
         if not existing.get("referral_code"):
             update["referral_code"] = gen_referral_code()
-        if existing.get("role") != "admin":
-            update["role"] = "admin"
+        # Iter 38: admin seed sempre garante role=super_admin.
+        # Usuarios com role legado 'admin' sao promovidos para super_admin.
+        if existing.get("role") not in ("super_admin",):
+            update["role"] = "super_admin"
+            update["access_level"] = 0
         if update:
             await db.users.update_one({"email": email}, {"$set": update})
 
@@ -4785,9 +4788,9 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         raise HTTPException(status_code=400, detail="Email ja cadastrado")
 
     role = body.get("role") or "customer"
-    # Valida papel solicitado: somente super_admin (ou legacy 'admin') pode criar admin/super_admin
+    # Valida papel solicitado: somente super_admin pode criar admin/super_admin
     creator_role = _role_of(user)
-    if role in ("admin", "super_admin") and creator_role not in ("super_admin", "admin"):
+    if role in ("admin", "super_admin") and creator_role != "super_admin":
         raise HTTPException(status_code=403, detail="Apenas Super Admin pode criar Admin ou Super Admin")
     if role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
         raise HTTPException(status_code=400, detail="Papel invalido")
@@ -4879,14 +4882,14 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     for k, v in body.items():
         if k in allowed:
             update[k] = v
-    # Iter 38: somente super_admin (ou legacy 'admin') pode promover alguem a admin/super_admin
+    # Iter 38: somente super_admin pode promover alguem a admin/super_admin
     if "role" in update:
         new_role = update["role"]
         if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
             raise HTTPException(status_code=400, detail="Papel invalido")
         current_role = target.get("role") or "customer"
         editor_role = _role_of(user)
-        is_super = editor_role in ("super_admin", "admin")
+        is_super = editor_role == "super_admin"
         if new_role != current_role:
             if new_role in ("admin", "super_admin") and not is_super:
                 raise HTTPException(status_code=403, detail="Apenas Super Admin pode promover a Admin/Super Admin")

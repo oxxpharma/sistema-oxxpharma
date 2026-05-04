@@ -10,14 +10,20 @@ import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
 
 // ====== Menu agrupado em seções ======
+// perm: chave no objeto `can` do AuthContext. Sem `perm` => visível para todo admin.
+//  - integrations: apenas super_admin (Maxx, Melhor Envio, webhooks, configs)
+//  - financial: super_admin + admin + financeiro
+//  - commercial: super_admin + admin + comercial
+//  - editProducts: super_admin + admin
+//  - manageRoles: super_admin (gestão de papéis/usuários administrativos)
 const NAV_GROUPS = [
   {
     key: 'principal',
     label: 'Principal',
     items: [
       { to: '/backoffice', icon: LayoutDashboard, label: 'Dashboard', end: true, testId: 'nav-dashboard' },
-      { to: '/backoffice/produtos', icon: Package, label: 'Produtos', testId: 'nav-products' },
-      { to: '/backoffice/categorias', icon: FolderTree, label: 'Categorias', testId: 'nav-categories' },
+      { to: '/backoffice/produtos', icon: Package, label: 'Produtos', testId: 'nav-products', perm: 'editProducts' },
+      { to: '/backoffice/categorias', icon: FolderTree, label: 'Categorias', testId: 'nav-categories', perm: 'editProducts' },
     ],
   },
   {
@@ -25,53 +31,53 @@ const NAV_GROUPS = [
     label: 'Vendas',
     items: [
       { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders' },
-      { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons' },
-      { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices' },
-      { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments' },
-      { to: '/backoffice/frete', icon: Truck, label: 'Frete', testId: 'nav-shipping' },
+      { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'commercial' },
+      { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices', perm: 'financial' },
+      { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments', perm: 'integrations' },
+      { to: '/backoffice/frete', icon: Truck, label: 'Frete', testId: 'nav-shipping', perm: 'integrations' },
     ],
   },
   {
     key: 'mmn',
     label: 'Equipe / Comissões',
     items: [
-      { to: '/backoffice/redes', icon: Network, label: 'Redes Equipe', testId: 'nav-networks' },
-      { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates' },
-      { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments' },
-      { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved' },
-      { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Rel. comissões', testId: 'nav-commissions-report' },
-      { to: '/backoffice/recalcular-comissoes', icon: Calculator, label: 'Recalcular comissões', testId: 'nav-recalc-commissions' },
-      { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points' },
-      { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card' },
-      { to: '/backoffice/maxx', icon: Repeat, label: 'Maxx Equipe', testId: 'nav-maxx' },
-      { to: '/backoffice/maxx-pendentes', icon: Send, label: 'Pontos pendentes', testId: 'nav-maxx-pending' },
-      { to: '/backoffice/melhor-envio', icon: Truck, label: 'Melhor Envio', testId: 'nav-melhor-envio' },
+      { to: '/backoffice/redes', icon: Network, label: 'Redes Equipe', testId: 'nav-networks', perm: 'commercial' },
+      { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates', perm: 'commercial' },
+      { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments', perm: 'commercial' },
+      { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved', perm: 'commercial' },
+      { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Rel. comissões', testId: 'nav-commissions-report', perm: 'financial' },
+      { to: '/backoffice/recalcular-comissoes', icon: Calculator, label: 'Recalcular comissões', testId: 'nav-recalc-commissions', perm: 'financial' },
+      { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points', perm: 'financial' },
+      { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card', perm: 'financial' },
+      { to: '/backoffice/maxx', icon: Repeat, label: 'Maxx Equipe', testId: 'nav-maxx', perm: 'integrations' },
+      { to: '/backoffice/maxx-pendentes', icon: Send, label: 'Pontos pendentes', testId: 'nav-maxx-pending', perm: 'integrations' },
+      { to: '/backoffice/melhor-envio', icon: Truck, label: 'Melhor Envio', testId: 'nav-melhor-envio', perm: 'integrations' },
     ],
   },
   {
     key: 'conteudo',
     label: 'Conteúdo',
     items: [
-      { to: '/backoffice/aparencia', icon: Palette, label: 'Aparência', testId: 'nav-appearance' },
-      { to: '/backoffice/paginas', icon: FileEdit, label: 'Páginas (CMS)', testId: 'nav-pages' },
+      { to: '/backoffice/aparencia', icon: Palette, label: 'Aparência', testId: 'nav-appearance', perm: 'integrations' },
+      { to: '/backoffice/paginas', icon: FileEdit, label: 'Páginas (CMS)', testId: 'nav-pages', perm: 'integrations' },
     ],
   },
   {
     key: 'comunicacao',
     label: 'Comunicação',
     items: [
-      { to: '/backoffice/emails', icon: Mail, label: 'Emails', testId: 'nav-emails' },
-      { to: '/backoffice/webhook', icon: Webhook, label: 'API Sync', testId: 'nav-webhook' },
+      { to: '/backoffice/emails', icon: Mail, label: 'Emails', testId: 'nav-emails', perm: 'integrations' },
+      { to: '/backoffice/webhook', icon: Webhook, label: 'API Sync', testId: 'nav-webhook', perm: 'integrations' },
     ],
   },
   {
     key: 'sistema',
     label: 'Sistema',
     items: [
-      { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users' },
-      { to: '/backoffice/usuarios/duplicados', icon: GitMerge, label: 'Fundir duplicatas', testId: 'nav-merge-users' },
-      { to: '/backoffice/categorias-usuarios', icon: Tag, label: 'Cat. de usuários', testId: 'nav-user-categories' },
-      { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings' },
+      { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users', perm: 'commercial' },
+      { to: '/backoffice/usuarios/duplicados', icon: GitMerge, label: 'Fundir duplicatas', testId: 'nav-merge-users', perm: 'manageRoles' },
+      { to: '/backoffice/categorias-usuarios', icon: Tag, label: 'Cat. de usuários', testId: 'nav-user-categories', perm: 'commercial' },
+      { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings', perm: 'integrations' },
     ],
   },
 ];

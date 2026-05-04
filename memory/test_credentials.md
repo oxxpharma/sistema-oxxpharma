@@ -5,6 +5,11 @@
 - **Password**: admin123
 - Role: **super_admin** (access_level 0) → acessa tudo, incluindo integrações
 
+## Roles de teste (senha: `oxx@pharma`)
+- **admin2@oxxpharma.com** → role `admin` (tudo EXCETO integrações críticas)
+- **comercial@oxxpharma.com** → role `comercial` (usuários, pedidos, cupons, redes)
+- **financeiro@oxxpharma.com** → role `financeiro` (pedidos, comissões, faturamento, cartão)
+
 ## Roles disponíveis (Iter 34 — Fev/2026)
 - **super_admin** → acesso total (tudo, incl. Maxx, Melhor Envio, webhooks, settings)
 - **admin** → tudo, EXCETO endpoints críticos de integração (Maxx, webhook, melhorenvio, site-settings/settings PUT)
