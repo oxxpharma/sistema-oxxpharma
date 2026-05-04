@@ -4,12 +4,14 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus, Eye, GitMerge } from 'lucide-react';
+import { Search, Loader2, Mail, Phone, CreditCard, Power, Pencil, UserPlus, Eye, GitMerge, UserCog } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import UserEditModal from '../../components/UserEditModal';
 import UserCreateModal from '../../components/UserCreateModal';
 
 export default function AdminUsers() {
+  const { can, startImpersonation } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -29,6 +31,18 @@ export default function AdminUsers() {
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [role]);
+
+  const onImpersonate = async (u) => {
+    const ok = window.confirm(`Entrar na conta de "${u.name || u.email}"?\n\nVocê poderá navegar como esse usuário, criar pedidos em nome dele, etc. Um banner amarelo ficará visível no topo. Use o botão "Voltar à minha conta" para sair a qualquer momento.`);
+    if (!ok) return;
+    try {
+      await startImpersonation(u.user_id);
+      toast.success('Você entrou como ' + (u.name || u.email));
+      setTimeout(() => { window.location.href = '/'; }, 400);
+    } catch (e) {
+      toast.error('Falha: ' + (e?.message || e));
+    }
+  };
 
   const activate = async (uid) => {
     try {
@@ -135,6 +149,16 @@ export default function AdminUsers() {
                         <Link to={`/backoffice/usuarios/${u.user_id}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-bg-secondary text-txt-primary rounded hover:bg-border" data-testid={`details-user-${u.user_id}`}>
                           <Eye className="w-3 h-3" /> Detalhes
                         </Link>
+                        {can?.impersonate && (u.role === 'customer' || !u.role) && (
+                          <button
+                            onClick={() => onImpersonate(u)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-amber-100 text-amber-800 rounded hover:bg-amber-200"
+                            data-testid={`impersonate-${u.user_id}`}
+                            title="Entrar na conta deste usuário"
+                          >
+                            <UserCog className="w-3 h-3" /> Entrar como
+                          </button>
+                        )}
                         <button onClick={() => setEditingId(u.user_id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-brand-main text-white rounded hover:bg-brand-hover" data-testid={`edit-user-${u.user_id}`}>
                           <Pencil className="w-3 h-3" /> Editar
                         </button>

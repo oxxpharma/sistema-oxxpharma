@@ -260,8 +260,8 @@ export default function AdminProducts() {
                           <select className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.network_type || ''} onChange={e => update({ network_type: e.target.value || null })}>
                             <option value="">Selecione a rede...</option>
                             <option value="customer">Consumidor</option>
-                            <option value="network_1">Rede 1 (Corporativa)</option>
-                            <option value="network_2">Rede 2 (Propagandista)</option>
+                            <option value="network_1">Equipe 1 (Corporativa)</option>
+                            <option value="network_2">Equipe 2 (Propagandista)</option>
                           </select>
                         ) : (
                           <input className="md:col-span-4 px-2 py-1.5 border border-border rounded text-sm" value={t.label || ''} placeholder="Rótulo (opcional)" onChange={e => update({ label: e.target.value })} />

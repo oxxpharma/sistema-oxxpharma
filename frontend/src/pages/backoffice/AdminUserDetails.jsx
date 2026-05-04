@@ -14,7 +14,7 @@ const TABS = [
   { id: 'overview', label: 'Visão geral' },
   { id: 'commissions', label: 'Comissões' },
   { id: 'orders', label: 'Pedidos' },
-  { id: 'network', label: 'Rede MMN' },
+  { id: 'network', label: 'Equipe' },
   { id: 'card', label: 'Cartão de Benefícios' },
   { id: 'points', label: 'Pontos' },
 ];
@@ -170,7 +170,7 @@ function OverviewTab({ kpis, u }) {
         <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">Rede & Engajamento</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard icon={Users} label="Indicados (afiliado)" value={kpis.direct_referrals} color="brand" hint="Pessoas com este como sponsor_id" />
-          <KpiCard icon={Users} label="Downline MMN direto" value={kpis.direct_downline} color="purple" hint="1ª geração da rede MMN" />
+          <KpiCard icon={Users} label="Downline Equipe direto" value={kpis.direct_downline} color="purple" hint="1ª geração da rede Equipe" />
           <KpiCard icon={Trophy} label="Pontos acumulados" value={kpis.points_total} color="amber" />
           <KpiCard icon={Clock} label="Cadastrado em" value={u.created_at ? formatDateTime(u.created_at).split(' ')[0] : '-'} color="slate" />
         </div>
@@ -264,7 +264,7 @@ function OrdersTab({ list }) {
 }
 
 /* ============================================================================ */
-/* TAB: Rede MMN                                                                */
+/* TAB: Equipe                                                                */
 /* ============================================================================ */
 function NetworkTab({ network, u }) {
   const { sponsor, network_sponsor, referrals, downline } = network;
@@ -283,7 +283,7 @@ function NetworkTab({ network, u }) {
           ) : <div className="text-xs text-txt-secondary">Sem patrocinador.</div>}
         </div>
         <div className="bg-white border border-border rounded-xl p-4">
-          <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-3">Líder na rede MMN</div>
+          <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-3">Líder na rede Equipe</div>
           {network_sponsor ? (
             <div>
               <div className="font-semibold">{network_sponsor.name}</div>
@@ -306,10 +306,10 @@ function NetworkTab({ network, u }) {
         <UserMiniList list={referrals} emptyText="Nenhum indicado direto." showProgram />
       </div>
 
-      {/* Downline ate 6 geracoes - rede MMN */}
+      {/* Downline ate 6 geracoes - rede Equipe */}
       <div>
         <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">
-          Downline rede MMN — até 6 gerações ({(network.downline_by_generation || []).reduce((s, g) => s + (g.members_count || 0), 0)} membros total)
+          Downline rede Equipe — até 6 gerações ({(network.downline_by_generation || []).reduce((s, g) => s + (g.members_count || 0), 0)} membros total)
         </div>
         <DownlineByGeneration generations={network.downline_by_generation || []} />
       </div>

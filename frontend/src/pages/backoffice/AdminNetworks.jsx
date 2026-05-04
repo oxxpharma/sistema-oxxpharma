@@ -7,8 +7,8 @@ import { Upload, Users, Network, Loader2, Search, FileSpreadsheet } from 'lucide
 import { toast } from 'sonner';
 
 const TABS = [
-  { id: 'network_1', label: 'Rede 1 (Corporativo)', color: 'brand' },
-  { id: 'network_2', label: 'Rede 2 (Propagandistas)', color: 'success' },
+  { id: 'network_1', label: 'Equipe 1 (Corporativo)', color: 'brand' },
+  { id: 'network_2', label: 'Equipe 2 (Propagandistas)', color: 'success' },
   { id: 'customer', label: 'Indicadores (clientes)', color: 'default' },
 ];
 
@@ -43,11 +43,11 @@ export default function AdminNetworks() {
     <div data-testid="admin-networks">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
-          <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><Network className="w-7 h-7 text-brand-main" /> Redes MMN</h1>
+          <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><Network className="w-7 h-7 text-brand-main" /> Redes Equipe</h1>
           <p className="text-sm text-txt-secondary mt-1">Gerencie usuários por tipo de rede.</p>
         </div>
         {tab === 'network_1' && (
-          <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Rede 1</Button>
+          <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Equipe 1</Button>
         )}
       </div>
 
@@ -198,7 +198,7 @@ function ImportModal({ onClose }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="p-6 border-b border-border">
-          <h2 className="font-heading font-black text-xl flex items-center gap-2"><FileSpreadsheet className="w-6 h-6 text-brand-main" /> Importar Rede 1</h2>
+          <h2 className="font-heading font-black text-xl flex items-center gap-2"><FileSpreadsheet className="w-6 h-6 text-brand-main" /> Importar Equipe 1</h2>
           <p className="text-xs text-txt-secondary mt-1">
             Envie um arquivo <strong>CSV</strong> com colunas: <code>id, nome, email, id_lider, telefone</code>. A primeira linha deve ser o cabeçalho.
           </p>

@@ -33,9 +33,9 @@ const NAV_GROUPS = [
   },
   {
     key: 'mmn',
-    label: 'MMN / Comissões',
+    label: 'Equipe / Comissões',
     items: [
-      { to: '/backoffice/redes', icon: Network, label: 'Redes MMN', testId: 'nav-networks' },
+      { to: '/backoffice/redes', icon: Network, label: 'Redes Equipe', testId: 'nav-networks' },
       { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates' },
       { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments' },
       { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved' },
@@ -43,7 +43,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/recalcular-comissoes', icon: Calculator, label: 'Recalcular comissões', testId: 'nav-recalc-commissions' },
       { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points' },
       { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card' },
-      { to: '/backoffice/maxx', icon: Repeat, label: 'Maxx MMN', testId: 'nav-maxx' },
+      { to: '/backoffice/maxx', icon: Repeat, label: 'Maxx Equipe', testId: 'nav-maxx' },
       { to: '/backoffice/maxx-pendentes', icon: Send, label: 'Pontos pendentes', testId: 'nav-maxx-pending' },
       { to: '/backoffice/melhor-envio', icon: Truck, label: 'Melhor Envio', testId: 'nav-melhor-envio' },
     ],
@@ -77,9 +77,15 @@ const NAV_GROUPS = [
 ];
 
 export default function BackofficeLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, can, role } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Filtra itens que dependem de permissao (comercial, financial, integrations, editProducts)
+  const visibleGroups = NAV_GROUPS.map(g => ({
+    ...g,
+    items: g.items.filter(it => !it.perm || can?.[it.perm]),
+  })).filter(g => g.items.length > 0);
 
   // Estado: quais grupos estão colapsados (default = todos abertos)
   const [collapsed, setCollapsed] = useState(() => {
@@ -117,7 +123,7 @@ export default function BackofficeLayout() {
 
         {/* Nav - SCROLLÁVEL */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 space-y-1 admin-nav-scroll">
-          {NAV_GROUPS.map(group => {
+          {visibleGroups.map(group => {
             const isCollapsed = !!collapsed[group.key];
             return (
               <div key={group.key} className="pb-1">
@@ -174,7 +180,14 @@ export default function BackofficeLayout() {
           >
             <LogOut className="w-4 h-4" /> Sair
           </button>
-          <div className="pt-1 px-3 text-[10px] text-white/40 truncate">{user?.email}</div>
+          <div className="pt-1 px-3 text-[10px] text-white/40 truncate">
+            {user?.email}
+            {role && role !== 'customer' && (
+              <span className="ml-1 px-1.5 py-0.5 rounded bg-brand-main/30 text-white/90 uppercase tracking-wider">
+                {role === 'super_admin' ? 'Super' : role.charAt(0).toUpperCase() + role.slice(1)}
+              </span>
+            )}
+          </div>
         </div>
       </aside>
 

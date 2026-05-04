@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RefProvider } from './contexts/RefContext';
 import { CartProvider } from './contexts/CartContext';
 import BrandHead from './components/branding/BrandHead';
+import ImpersonationBanner from './components/ImpersonationBanner';
 
 // Layouts
 import StoreLayout from './layouts/StoreLayout';
@@ -161,6 +162,7 @@ export default function App() {
         <RefProvider>
           <CartProvider>
             <BrandHead />
+            <ImpersonationBanner />
             <AppRoutes />
             <Toaster richColors position="top-right" />
           </CartProvider>

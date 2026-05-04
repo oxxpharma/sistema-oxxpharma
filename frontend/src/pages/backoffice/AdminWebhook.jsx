@@ -66,7 +66,7 @@ export default function AdminWebhook() {
     <div data-testid="admin-webhook">
       <div className="mb-6">
         <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3">
-          <Webhook className="w-7 h-7 text-brand-main" /> Sync externa (Rede 1)
+          <Webhook className="w-7 h-7 text-brand-main" /> Sync externa (Equipe 1)
         </h1>
         <p className="text-sm text-txt-secondary mt-1">API para o sistema externo enviar criação/atualização de usuários em tempo real.</p>
       </div>

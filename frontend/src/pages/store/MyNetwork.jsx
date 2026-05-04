@@ -12,8 +12,8 @@ import {
 
 const NETWORK_LABELS = {
   customer: { label: 'Indicador', color: 'default' },
-  network_1: { label: 'Rede 1 - Corporativo', color: 'brand' },
-  network_2: { label: 'Rede 2 - Propagandista', color: 'success' },
+  network_1: { label: 'Equipe 1 - Corporativo', color: 'brand' },
+  network_2: { label: 'Equipe 2 - Propagandista', color: 'success' },
 };
 
 export default function MyNetwork() {
@@ -52,7 +52,7 @@ export default function MyNetwork() {
           <h1 className="font-heading font-black text-2xl">Você é um Indicador</h1>
           <p className="text-sm text-txt-secondary mt-2 max-w-md mx-auto">
             Por enquanto você ganha <strong>{Math.round(data.commission_rate_affiliate * 100)}%</strong> sobre toda compra feita através do seu link.
-            Se indicar muitas pessoas com frequência, o admin pode te promover a <strong>Propagandista</strong> e ativar o sistema MMN para você ganhar em até 6 gerações.
+            Se indicar muitas pessoas com frequência, o admin pode te promover a <strong>Propagandista</strong> e ativar o sistema Equipe para você ganhar em até 6 gerações.
           </p>
           <Link to="/indique-ganhe"><Button className="mt-6">Ver meu link de indicação</Button></Link>
         </div>
@@ -65,7 +65,7 @@ export default function MyNetwork() {
       <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
         <div>
           <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3">
-            <Network className="w-8 h-8 text-brand-main" /> Minha Rede
+            <Network className="w-8 h-8 text-brand-main" /> Minha Equipe
           </h1>
           <div className="mt-2 flex items-center gap-3">
             <Badge variant={label.color}>{label.label}</Badge>
@@ -100,6 +100,30 @@ export default function MyNetwork() {
           <div className="text-xs text-txt-secondary mt-0.5">Membros na rede</div>
         </div>
       </div>
+
+      {/* Iter 35: Breakdown por origem */}
+      {data.by_source && (
+        <div className="grid sm:grid-cols-3 gap-3 mb-8" data-testid="commissions-by-source">
+          <SourceCard
+            label="Indicações diretas"
+            sub="Afiliado (1ª venda)"
+            data={data.by_source.affiliate || {}}
+            color="from-emerald-500/10 to-emerald-500/5 text-emerald-700 border-emerald-200"
+          />
+          <SourceCard
+            label="Equipe 1"
+            sub="Estrutura propagandista (até 6ª gen)"
+            data={data.by_source.network_1 || {}}
+            color="from-brand-main/15 to-brand-main/5 text-brand-main border-brand-main/30"
+          />
+          <SourceCard
+            label="Equipe 2"
+            sub="Rede corporativa (até 6ª gen)"
+            data={data.by_source.network_2 || {}}
+            color="from-sky-500/10 to-sky-500/5 text-sky-700 border-sky-200"
+          />
+        </div>
+      )}
 
       {/* Gerações com lista nominal */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
@@ -147,8 +171,8 @@ export default function MyNetwork() {
                   <div className="bg-bg-secondary/40 px-4 pb-4 pt-1">
                     <ul className="bg-white border border-border rounded-lg divide-y divide-border">
                       {(g.members || []).map(m => {
-                        const netLabel = m.network_type === 'network_1' ? 'Rede 1'
-                          : m.network_type === 'network_2' ? 'Rede 2' : null;
+                        const netLabel = m.network_type === 'network_1' ? 'Equipe 1'
+                          : m.network_type === 'network_2' ? 'Equipe 2' : null;
                         return (
                           <li key={m.user_id} className="flex items-center justify-between gap-3 p-3 text-sm" data-testid={`gen-${g.generation}-member-${m.user_id}`}>
                             <div className="flex items-center gap-3 min-w-0">
@@ -181,6 +205,28 @@ export default function MyNetwork() {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+function SourceCard({ label, sub, data, color }) {
+  const total = (data.paid || 0) + (data.pending || 0);
+  return (
+    <div className={`rounded-xl border p-4 bg-gradient-to-br ${color}`}>
+      <div className="text-xs font-bold uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-[11px] opacity-70 mb-3">{sub}</div>
+      <div className="font-heading font-black text-2xl">{formatCurrency(total)}</div>
+      <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+        <div>
+          <div className="opacity-70">Recebido</div>
+          <div className="font-bold">{formatCurrency(data.paid || 0)}</div>
+        </div>
+        <div>
+          <div className="opacity-70">Pendente</div>
+          <div className="font-bold">{formatCurrency(data.pending || 0)}</div>
+        </div>
+      </div>
+      <div className="text-[10px] opacity-60 mt-2">{data.count || 0} comissões</div>
     </div>
   );
 }

@@ -91,7 +91,7 @@ export default function AdminRecalcCommissions() {
         <p className="text-sm text-txt-secondary mt-1 max-w-3xl">
           Útil para pedidos que foram pagos <strong>antes</strong> da sincronização Maxx ter informado o líder.
           Esta ferramenta encontra pedidos pagos <strong>sem nenhuma comissão</strong> registrada, simula o cálculo
-          com a cadeia atual (afiliado + MMN até a 6ª geração) e, depois de você confirmar, grava as comissões
+          com a cadeia atual (afiliado + Equipe até a 6ª geração) e, depois de você confirmar, grava as comissões
           marcadas como retroativas.
         </p>
       </div>
@@ -103,7 +103,7 @@ export default function AdminRecalcCommissions() {
           <div className="font-bold mb-1">Como funciona</div>
           <ul className="list-disc pl-4 space-y-0.5">
             <li>Considera apenas pedidos com <strong>payment_status = paid</strong> e <strong>sem comissão</strong> existente.</li>
-            <li>Aplica a regra atual: afiliado (sponsor_id direto) + MMN até 6 gerações via cadeia <code className="font-mono">sponsor_id → network_sponsor_id</code>.</li>
+            <li>Aplica a regra atual: afiliado (sponsor_id direto) + Equipe até 6 gerações via cadeia <code className="font-mono">sponsor_id → network_sponsor_id</code>.</li>
             <li>Comissões geradas ficam com flag <code className="font-mono">retroactive=true</code> e <code className="font-mono">recalc_batch_id</code> para auditoria.</li>
             <li>Status inicial das comissões: <strong>pending</strong> (mesmo comportamento dos pedidos novos).</li>
           </ul>
@@ -204,8 +204,8 @@ export default function AdminRecalcCommissions() {
                         </td>
                         <td className="p-2 text-xs">{b.email}</td>
                         <td className="p-2 text-xs">
-                          {b.network_type === 'network_1' && <Badge variant="brand">Rede 1</Badge>}
-                          {b.network_type === 'network_2' && <Badge variant="success">Rede 2</Badge>}
+                          {b.network_type === 'network_1' && <Badge variant="brand">Equipe 1</Badge>}
+                          {b.network_type === 'network_2' && <Badge variant="success">Equipe 2</Badge>}
                           {(!b.network_type || b.network_type === 'customer') && <Badge>Cliente</Badge>}
                         </td>
                         <td className="p-2 text-right">{b.count}</td>
@@ -265,7 +265,7 @@ export default function AdminRecalcCommissions() {
                           {o.commissions_breakdown.map((c, i) => (
                             <li key={i} className="flex items-center justify-between gap-2 py-1">
                               <span className="flex items-center gap-2">
-                                <Badge>{c.type === 'affiliate' ? 'Afiliado' : `MMN gen ${c.generation}`}</Badge>
+                                <Badge>{c.type === 'affiliate' ? 'Afiliado' : `Equipe gen ${c.generation}`}</Badge>
                                 <span className="font-mono text-[11px] text-txt-secondary">{c.user_id}</span>
                               </span>
                               <span className="font-bold">{formatCurrency(c.amount)} <span className="font-normal text-txt-secondary">({(c.rate * 100).toFixed(2)}%)</span></span>

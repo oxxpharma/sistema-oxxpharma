@@ -173,9 +173,47 @@ async def get_optional_user(request: Request):
         return None
 
 def require_admin():
+    """Admin-level: qualquer role com acesso ao /backoffice (super_admin, admin, financeiro, comercial)."""
     async def dep(user: dict = Depends(get_current_user)):
-        if user.get("role") != "admin" and user.get("access_level", 99) > 1:
+        if not _is_admin_level(user):
             raise HTTPException(status_code=403, detail="Acesso negado")
+        return user
+    return dep
+
+
+ADMIN_ROLES = {"admin", "super_admin", "financeiro", "comercial"}
+
+
+def _is_admin_level(user: dict) -> bool:
+    """Retorna True se o user tem acesso ao backoffice (qualquer role admin)."""
+    r = user.get("role")
+    return r in ADMIN_ROLES or user.get("access_level", 99) <= 1
+
+
+def _role_of(user: dict) -> str:
+    """Normaliza a role do usuario. Legacy 'admin' continua como super_admin a menos
+    que tenha role explicito diferente."""
+    return user.get("role") or "customer"
+
+
+def require_role(*allowed_roles):
+    """Restringe a um conjunto especifico de roles. Super_admin sempre passa."""
+    async def dep(user: dict = Depends(get_current_user)):
+        r = _role_of(user)
+        if r == "super_admin" or r == "admin" or r in allowed_roles:
+            # 'admin' legado = super_admin
+            if r in ("super_admin", "admin") or r in allowed_roles:
+                return user
+        raise HTTPException(status_code=403, detail="Acesso negado para este papel")
+    return dep
+
+
+def require_super_admin():
+    """So super_admin (ou 'admin' legado = super_admin)."""
+    async def dep(user: dict = Depends(get_current_user)):
+        r = _role_of(user)
+        if r not in ("super_admin", "admin"):
+            raise HTTPException(status_code=403, detail="Apenas Super Admin")
         return user
     return dep
 
@@ -249,6 +287,7 @@ class CheckoutData(BaseModel):
     shipping_carrier: Optional[str] = None
     shipping_service_id: Optional[str] = None
     shipping_delivery_days: Optional[int] = None
+    voucher_amount: Optional[float] = None  # Iter 36: usa saldo de voucher pre-pago (parcial ou total)
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -479,8 +518,8 @@ async def login(request: Request, response: Response, data: AuthLogin):
     if user.get("status") in ("cancelled", "inactive", "deleted"):
         raise HTTPException(status_code=401, detail="Conta desativada")
     role = user.get("role", "customer")
-    if user.get("access_level", 99) <= 1:
-        role = "admin"
+    if user.get("access_level", 99) <= 1 and role not in ADMIN_ROLES:
+        role = "super_admin"
     token = create_token(user["user_id"], user["email"], role)
     set_cookie(response, token)
     user.pop("password_hash", None)
@@ -881,6 +920,19 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
 
     commission_amount = round(subtotal * affiliate_rate, 2) if affiliate_id else 0
 
+    # Iter 36: Voucher pre-pago (deduzido do total)
+    voucher_used = 0.0
+    user_fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "voucher_balance": 1})
+    user_voucher = float((user_fresh or {}).get("voucher_balance") or 0)
+    grand_total = round(subtotal + shipping - discount_amount, 2)
+    requested_voucher = float(data.voucher_amount or 0)
+    if requested_voucher > 0:
+        # Limita ao saldo do user E ao total do pedido
+        voucher_used = round(min(requested_voucher, user_voucher, grand_total), 2)
+        if voucher_used <= 0:
+            voucher_used = 0.0
+    final_total = round(grand_total - voucher_used, 2)
+
     order = {
         "order_id": gen_id("ord_"), "user_id": user["user_id"],
         "customer_name": user.get("name"), "customer_email": user.get("email"),
@@ -889,7 +941,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         **shipping_meta,
         "discount_amount": round(discount_amount, 2),
         "coupon_code": coupon_code_applied,
-        "total": round(subtotal + shipping - discount_amount, 2),
+        "voucher_used": voucher_used,
+        "voucher_balance_before": round(user_voucher, 2),
+        "total": final_total,
+        "total_before_voucher": grand_total,
         "shipping_address": addr, "payment_method": data.payment_method,
         "payment_status": "pending", "order_status": "pending",
         "payment_provider": "mock",  # Sera "mercadopago" quando integrado
@@ -899,6 +954,19 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+
+    # Iter 36: Debita o voucher do user agora (lock-in para evitar consumir 2x)
+    if voucher_used > 0:
+        await db.users.update_one(
+            {"user_id": user["user_id"]},
+            {"$inc": {"voucher_balance": -voucher_used},
+             "$push": {"voucher_history": {
+                 "delta": -voucher_used,
+                 "source": "checkout",
+                 "order_id": order["order_id"],
+                 "received_at": now_iso(),
+             }}},
+        )
 
     # Atualiza usage_count do cupom (apos criar a ordem)
     if coupon_id_applied:
@@ -1582,6 +1650,30 @@ async def admin_user_details(request: Request, user_id: str, user: dict = Depend
         "direct_referrals": direct_referrals,
         "last_order_at": last_order.get("created_at") if last_order else None,
     }
+
+    # Iter 35: breakdown de comissoes por origem (Indicacao / Equipe 1 / Equipe 2)
+    by_source_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id}},
+        {"$group": {
+            "_id": {"type": "$type", "network_type": "$network_type", "status": "$status"},
+            "total": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(50)
+    commissions_by_source = {
+        "affiliate": {"pending": 0, "paid": 0, "paid_out": 0, "count": 0},
+        "network_1": {"pending": 0, "paid": 0, "paid_out": 0, "count": 0},
+        "network_2": {"pending": 0, "paid": 0, "paid_out": 0, "count": 0},
+    }
+    for s in by_source_agg:
+        key = "affiliate" if s["_id"].get("type") == "affiliate" else (s["_id"].get("network_type") or "network_1")
+        if key not in commissions_by_source:
+            commissions_by_source[key] = {"pending": 0, "paid": 0, "paid_out": 0, "count": 0}
+        st = s["_id"].get("status") or "pending"
+        if st in ("pending", "paid", "paid_out"):
+            commissions_by_source[key][st] = round(commissions_by_source[key].get(st, 0) + (s["total"] or 0), 2)
+        commissions_by_source[key]["count"] += s["count"]
+    kpis["commissions_by_source"] = commissions_by_source
 
     # ---- Comissoes (ate 200 mais recentes) ----
     commissions = await db.commissions.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
@@ -2343,6 +2435,44 @@ async def register_points_from_order(db, order_id: str):
         })
     if logs:
         await db.points_log.insert_many(logs)
+
+        # Iter 37: Pontos espelhados para o sponsor direto (1a geracao) se ele for Equipe 1.
+        # Cada produto comprado pelo cliente final tambem gera os mesmos pontos no sponsor
+        # de Equipe 1, para ser enviado a Maxx no nome do leader.
+        sponsor_id = user.get("sponsor_id")
+        if sponsor_id:
+            sponsor = await db.users.find_one({"user_id": sponsor_id}, {"_id": 0, "password_hash": 0})
+            if sponsor and sponsor.get("network_type") == NETWORK_1:
+                mirrored = []
+                for it in o.get("items", []):
+                    pv = float(it.get("points_value") or 0)
+                    if pv <= 0:
+                        continue
+                    qty = int(it.get("quantity") or 1)
+                    total_points = round(pv * qty, 2)
+                    mirrored.append({
+                        "log_id": gen_id("pts_"),
+                        "user_id": sponsor["user_id"],
+                        "user_name": sponsor.get("name"),
+                        "user_email": sponsor.get("email"),
+                        "user_external_id": sponsor.get("external_id"),
+                        "order_id": order_id,
+                        "product_id": it.get("product_id"),
+                        "product_name": it.get("name"),
+                        "quantity": qty,
+                        "points_per_unit": pv,
+                        "points_total": total_points,
+                        "registered_at": now_iso(),
+                        "applied_externally": False,
+                        # Marca a origem para auditoria
+                        "source": "team1_indicated",
+                        "indicated_user_id": user["user_id"],
+                        "indicated_user_name": user.get("name"),
+                    })
+                if mirrored:
+                    await db.points_log.insert_many(mirrored)
+                    logs = logs + mirrored  # consolida para envio a Maxx
+
         # Realtime sync para Maxx (best-effort, nao bloqueia)
         try:
             await maxx_service.trigger_realtime(db, [l["log_id"] for l in logs])
@@ -2401,11 +2531,11 @@ async def mp_webhook(request: Request):
 # ==================== SETTINGS (ADMIN) ====================
 
 @app.get("/api/admin/settings")
-async def get_admin_settings(request: Request, user: dict = Depends(require_admin())):
+async def get_admin_settings(request: Request, user: dict = Depends(require_super_admin())):
     return await get_settings(request.app.db)
 
 @app.put("/api/admin/settings")
-async def update_admin_settings(request: Request, user: dict = Depends(require_admin())):
+async def update_admin_settings(request: Request, user: dict = Depends(require_super_admin())):
     db = request.app.db
     body = await request.json()
     allowed_keys = {
@@ -2514,11 +2644,35 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
     for s in totals_agg:
         totals[s["_id"] or "pending"] = round(s["total"], 2)
 
+    # Iter 35: separar por origem (afiliado / Equipe 1 / Equipe 2)
+    by_source_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"]}},
+        {"$group": {
+            "_id": {"type": "$type", "network_type": "$network_type", "status": "$status"},
+            "total": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(50)
+    by_source = {
+        "affiliate": {"pending": 0, "paid": 0, "count": 0},
+        "network_1": {"pending": 0, "paid": 0, "count": 0},
+        "network_2": {"pending": 0, "paid": 0, "count": 0},
+    }
+    for s in by_source_agg:
+        key = "affiliate" if s["_id"].get("type") == "affiliate" else (s["_id"].get("network_type") or "network_1")
+        if key not in by_source:
+            by_source[key] = {"pending": 0, "paid": 0, "count": 0}
+        st = s["_id"].get("status") or "pending"
+        if st in ("pending", "paid"):
+            by_source[key][st] = round(by_source[key].get(st, 0) + (s["total"] or 0), 2)
+        by_source[key]["count"] += s["count"]
+
     return {
         "network_type": network_type,
         "referral_code": user.get("referral_code"),
         "generations": generations,
         "totals": totals,
+        "by_source": by_source,
         "commission_rate_affiliate": settings["affiliate_commission_rate"],
     }
 
@@ -2844,36 +2998,95 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
 
 @app.get("/api/admin/commissions-report")
 async def admin_commissions_report(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
-    """Relatorio agregado por usuario para envio a empresa de cartao de beneficios."""
+    """Relatorio agregado por usuario para envio a empresa de cartao de beneficios.
+    Inclui breakdown por origem (Iter 35): Indicacao (afiliado), Equipe 1, Equipe 2.
+    """
     db = request.app.db
     match = {"status": status}
     if start:
         match.setdefault("created_at", {})["$gte"] = start
     if end:
         match.setdefault("created_at", {})["$lte"] = end
+    # Agrupa por (user_id, origem) onde origem = (type + network_type)
     pipeline = [
         {"$match": match},
-        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        {"$sort": {"total": -1}},
+        {"$group": {
+            "_id": {
+                "user_id": "$user_id",
+                "type": "$type",
+                "network_type": "$network_type",
+            },
+            "total": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+        }},
     ]
-    agg = await db.commissions.aggregate(pipeline).to_list(10000)
-    # Enriquecer com dados do usuario
-    uids = [a["_id"] for a in agg]
+    agg = await db.commissions.aggregate(pipeline).to_list(20000)
+
+    # Combina por user_id em uma estrutura final
+    by_user = {}
+    for a in agg:
+        uid = a["_id"]["user_id"]
+        if not uid:
+            continue
+        row = by_user.setdefault(uid, {
+            "user_id": uid, "amount": 0.0, "commissions_count": 0,
+            "by_source": {
+                "affiliate": {"amount": 0.0, "count": 0},
+                "network_1": {"amount": 0.0, "count": 0},
+                "network_2": {"amount": 0.0, "count": 0},
+            },
+        })
+        amt = round(a["total"] or 0, 2)
+        cnt = a["count"]
+        row["amount"] = round(row["amount"] + amt, 2)
+        row["commissions_count"] += cnt
+        if a["_id"].get("type") == "affiliate":
+            row["by_source"]["affiliate"]["amount"] = round(row["by_source"]["affiliate"]["amount"] + amt, 2)
+            row["by_source"]["affiliate"]["count"] += cnt
+        else:
+            net = a["_id"].get("network_type") or "network_1"
+            if net not in row["by_source"]:
+                row["by_source"][net] = {"amount": 0.0, "count": 0}
+            row["by_source"][net]["amount"] = round(row["by_source"][net]["amount"] + amt, 2)
+            row["by_source"][net]["count"] += cnt
+
+    # Hidrata dados dos usuarios
+    uids = list(by_user.keys())
     users = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "password_hash": 0}).to_list(len(uids))
     umap = {u["user_id"]: u for u in users}
     rows = []
-    for a in agg:
-        u = umap.get(a["_id"], {})
+    for uid, r in by_user.items():
+        u = umap.get(uid, {})
+        bs = r["by_source"]
         rows.append({
-            "user_id": a["_id"],
+            "user_id": uid,
             "cpf": u.get("cpf"),
             "name": u.get("name"),
             "email": u.get("email"),
             "pix_key": u.get("pix_key"),
-            "amount": round(a["total"], 2),
-            "commissions_count": a["count"],
+            "amount": r["amount"],
+            "commissions_count": r["commissions_count"],
+            "amount_affiliate": bs["affiliate"]["amount"],
+            "count_affiliate": bs["affiliate"]["count"],
+            "amount_network_1": bs["network_1"]["amount"],
+            "count_network_1": bs["network_1"]["count"],
+            "amount_network_2": bs["network_2"]["amount"],
+            "count_network_2": bs["network_2"]["count"],
         })
-    return {"rows": rows, "status": status, "period": {"start": start, "end": end}}
+    rows.sort(key=lambda r: -r["amount"])
+
+    # Totais agregados (KPIs do relatorio)
+    totals = {
+        "total": round(sum(r["amount"] for r in rows), 2),
+        "by_source": {
+            "affiliate": round(sum(r["amount_affiliate"] for r in rows), 2),
+            "network_1": round(sum(r["amount_network_1"] for r in rows), 2),
+            "network_2": round(sum(r["amount_network_2"] for r in rows), 2),
+        },
+        "users_count": len(rows),
+        "commissions_count": sum(r["commissions_count"] for r in rows),
+    }
+    return {"rows": rows, "status": status, "period": {"start": start, "end": end}, "totals": totals}
 
 
 _COMMISSIONS_COLS = [
@@ -2882,12 +3095,16 @@ _COMMISSIONS_COLS = [
     {"key": "name", "label": "Nome", "width": 28},
     {"key": "email", "label": "Email", "width": 30},
     {"key": "pix_key", "label": "Chave PIX", "width": 24},
-    {"key": "amount", "label": "Valor (R$)", "type": "money", "width": 14},
+    {"key": "amount", "label": "Valor total (R$)", "type": "money", "width": 16},
+    {"key": "amount_affiliate", "label": "Indicação (R$)", "type": "money", "width": 16},
+    {"key": "amount_network_1", "label": "Equipe 1 (R$)", "type": "money", "width": 14},
+    {"key": "amount_network_2", "label": "Equipe 2 (R$)", "type": "money", "width": 14},
     {"key": "commissions_count", "label": "Qtd. comissões", "type": "int", "width": 14},
 ]
 
 
 async def _commissions_rows(db, status: str, start: Optional[str], end: Optional[str]):
+    """Linhas para export, agora incluindo amount_affiliate, amount_network_1, amount_network_2."""
     match = {"status": status}
     if start:
         match.setdefault("created_at", {})["$gte"] = start
@@ -2895,22 +3112,53 @@ async def _commissions_rows(db, status: str, start: Optional[str], end: Optional
         match.setdefault("created_at", {})["$lte"] = end
     pipeline = [
         {"$match": match},
-        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        {"$sort": {"total": -1}},
+        {"$group": {
+            "_id": {"user_id": "$user_id", "type": "$type", "network_type": "$network_type"},
+            "total": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+        }},
     ]
-    agg = await db.commissions.aggregate(pipeline).to_list(10000)
-    uids = [a["_id"] for a in agg]
+    agg = await db.commissions.aggregate(pipeline).to_list(20000)
+    by_user = {}
+    for a in agg:
+        uid = a["_id"]["user_id"]
+        if not uid:
+            continue
+        row = by_user.setdefault(uid, {
+            "user_id": uid, "amount": 0.0, "commissions_count": 0,
+            "amount_affiliate": 0.0, "amount_network_1": 0.0, "amount_network_2": 0.0,
+        })
+        amt = round(a["total"] or 0, 2)
+        row["amount"] = round(row["amount"] + amt, 2)
+        row["commissions_count"] += a["count"]
+        if a["_id"].get("type") == "affiliate":
+            row["amount_affiliate"] = round(row["amount_affiliate"] + amt, 2)
+        else:
+            net = a["_id"].get("network_type") or "network_1"
+            if net == "network_1":
+                row["amount_network_1"] = round(row["amount_network_1"] + amt, 2)
+            elif net == "network_2":
+                row["amount_network_2"] = round(row["amount_network_2"] + amt, 2)
+    uids = list(by_user.keys())
     users = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "password_hash": 0}).to_list(len(uids))
     umap = {u["user_id"]: u for u in users}
-    return [{
-        "user_id": a["_id"],
-        "cpf": (umap.get(a["_id"]) or {}).get("cpf"),
-        "name": (umap.get(a["_id"]) or {}).get("name"),
-        "email": (umap.get(a["_id"]) or {}).get("email"),
-        "pix_key": (umap.get(a["_id"]) or {}).get("pix_key"),
-        "amount": round(a["total"], 2),
-        "commissions_count": a["count"],
-    } for a in agg]
+    out = []
+    for uid, r in by_user.items():
+        u = umap.get(uid, {})
+        out.append({
+            "user_id": uid,
+            "cpf": u.get("cpf"),
+            "name": u.get("name"),
+            "email": u.get("email"),
+            "pix_key": u.get("pix_key"),
+            "amount": r["amount"],
+            "amount_affiliate": r["amount_affiliate"],
+            "amount_network_1": r["amount_network_1"],
+            "amount_network_2": r["amount_network_2"],
+            "commissions_count": r["commissions_count"],
+        })
+    out.sort(key=lambda x: -x["amount"])
+    return out
 
 
 @app.get("/api/admin/commissions-report/export.csv")
@@ -3491,6 +3739,7 @@ class ExternalSyncUser(BaseModel):
     leader_external_id: Optional[str] = None
     phone: Optional[str] = None
     cpf: Optional[str] = None
+    voucher: Optional[float] = None  # Iter 36: saldo pre-pago em R$ vindo da Maxx
 
 class ExternalSyncPayload(BaseModel):
     action: str = "upsert"   # "upsert" | "delete"
@@ -3548,6 +3797,22 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                             update_fields["cpf_digits"] = match_cpf
                     if not existing.get("email") or existing.get("email") == str(row.email).lower():
                         update_fields["email"] = str(row.email).lower()
+                    # Iter 36: Voucher (saldo pre-pago)
+                    # Acumula incrementos: cada chamada com voucher>0 ADICIONA ao saldo,
+                    # cada chamada com voucher=0 nao zera o saldo (mantem o que tem).
+                    # Usa unique key (external_id + voucher_token) para evitar duplicacao.
+                    if row.voucher is not None and row.voucher > 0:
+                        # Soma ao saldo existente
+                        await db.users.update_one(
+                            {"user_id": existing["user_id"]},
+                            {"$inc": {"voucher_balance": float(row.voucher)},
+                             "$push": {"voucher_history": {
+                                 "delta": float(row.voucher),
+                                 "source": "maxx_sync",
+                                 "external_id": row.external_id,
+                                 "received_at": now_iso(),
+                             }}},
+                        )
                     await db.users.update_one(
                         {"user_id": existing["user_id"]},
                         {"$set": update_fields},
@@ -3559,6 +3824,7 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                 else:
                     uid = gen_id("user_")
                     cpf_clean = _clean_cpf(row.cpf)
+                    voucher_init = float(row.voucher) if (row.voucher and row.voucher > 0) else 0.0
                     await db.users.insert_one({
                         "user_id": uid, "email": row.email.lower(),
                         "password_hash": pw_hash, "name": row.name,
@@ -3571,6 +3837,13 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
                         "leader_external_id": row.leader_external_id or None,
                         "cpf": row.cpf or None,
                         "cpf_digits": cpf_clean,
+                        "voucher_balance": voucher_init,
+                        "voucher_history": ([{
+                            "delta": voucher_init,
+                            "source": "maxx_sync",
+                            "external_id": row.external_id,
+                            "received_at": now_iso(),
+                        }] if voucher_init > 0 else []),
                         "must_set_password": True,  # primeiro acesso obriga a definir senha
                         "referral_program_active": False,
                         "created_at": now_iso(),
@@ -3606,7 +3879,7 @@ async def external_network1_sync(request: Request, data: ExternalSyncPayload, x_
     return stats
 
 @app.get("/api/admin/webhook-logs")
-async def list_webhook_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+async def list_webhook_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_super_admin())):
     db = request.app.db
     # Lista nao retorna o payload completo (economiza banda) - so resumo
     logs = await db.webhook_logs.find(
@@ -3618,7 +3891,7 @@ async def list_webhook_logs(request: Request, page: int = 1, limit: int = 50, us
 
 
 @app.get("/api/admin/webhook-logs/{log_id}")
-async def get_webhook_log_detail(request: Request, log_id: str, user: dict = Depends(require_admin())):
+async def get_webhook_log_detail(request: Request, log_id: str, user: dict = Depends(require_super_admin())):
     """Retorna o log completo com payload, headers e mapeamento de IDs."""
     db = request.app.db
     log = await db.webhook_logs.find_one({"log_id": log_id}, {"_id": 0})
@@ -3628,7 +3901,7 @@ async def get_webhook_log_detail(request: Request, log_id: str, user: dict = Dep
 
 
 @app.post("/api/admin/webhook-token/regenerate")
-async def regenerate_webhook_token(request: Request, user: dict = Depends(require_admin())):
+async def regenerate_webhook_token(request: Request, user: dict = Depends(require_super_admin())):
     db = request.app.db
     token = gen_referral_code() + gen_referral_code()
     await db.settings.update_one({"_id": "global"}, {"$set": {"external_webhook_token": token, "updated_at": now_iso()}})
@@ -3735,7 +4008,7 @@ async def admin_correios_logs(request: Request, page: int = 1, limit: int = 50, 
 
 # ============ Melhor Envio ============
 @app.get("/api/admin/melhorenvio/config")
-async def me_admin_get_config(request: Request, user: dict = Depends(require_admin())):
+async def me_admin_get_config(request: Request, user: dict = Depends(require_super_admin())):
     db = request.app.db
     cfg = await melhorenvio_service.get_config(db)
     connected = await melhorenvio_service.is_connected(db)
@@ -3764,7 +4037,7 @@ async def me_admin_get_config(request: Request, user: dict = Depends(require_adm
 
 
 @app.put("/api/admin/melhorenvio/config")
-async def me_admin_put_config(request: Request, user: dict = Depends(require_admin())):
+async def me_admin_put_config(request: Request, user: dict = Depends(require_super_admin())):
     db = request.app.db
     body = await request.json() or {}
     # Client secret vazio/mascarado nao deve sobrescrever - proteger
@@ -3779,7 +4052,7 @@ async def me_admin_put_config(request: Request, user: dict = Depends(require_adm
 
 
 @app.post("/api/admin/melhorenvio/authorize-url")
-async def me_admin_authorize_url(request: Request, user: dict = Depends(require_admin())):
+async def me_admin_authorize_url(request: Request, user: dict = Depends(require_super_admin())):
     """Gera URL para o admin autorizar a integracao."""
     db = request.app.db
     cfg = await melhorenvio_service.get_config(db)
@@ -3829,14 +4102,14 @@ async def me_admin_callback(request: Request, code: Optional[str] = None, state:
 
 
 @app.post("/api/admin/melhorenvio/disconnect")
-async def me_admin_disconnect(request: Request, user: dict = Depends(require_admin())):
+async def me_admin_disconnect(request: Request, user: dict = Depends(require_super_admin())):
     db = request.app.db
     await melhorenvio_service.clear_tokens(db)
     return {"success": True}
 
 
 @app.post("/api/admin/melhorenvio/refresh")
-async def me_admin_refresh(request: Request, user: dict = Depends(require_admin())):
+async def me_admin_refresh(request: Request, user: dict = Depends(require_super_admin())):
     db = request.app.db
     try:
         await melhorenvio_service.refresh_access_token(db)
@@ -3846,7 +4119,7 @@ async def me_admin_refresh(request: Request, user: dict = Depends(require_admin(
 
 
 @app.post("/api/admin/melhorenvio/test-calculate")
-async def me_admin_test(request: Request, user: dict = Depends(require_admin())):
+async def me_admin_test(request: Request, user: dict = Depends(require_super_admin())):
     """Teste rapido: {cep_origin, cep_destination, weight_kg, length_cm, width_cm, height_cm, insurance_value}."""
     db = request.app.db
     body = await request.json() or {}
@@ -3868,7 +4141,7 @@ async def me_admin_test(request: Request, user: dict = Depends(require_admin()))
 
 
 @app.get("/api/admin/melhorenvio/logs")
-async def me_admin_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+async def me_admin_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_super_admin())):
     db = request.app.db
     total = await db.melhorenvio_logs.count_documents({})
     logs = await db.melhorenvio_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
@@ -4041,7 +4314,7 @@ def _mask_secret(v: str) -> str:
 
 
 @app.get("/api/admin/maxx-config")
-async def admin_maxx_config(request: Request, user: dict = Depends(require_admin())):
+async def admin_maxx_config(request: Request, user: dict = Depends(require_super_admin())):
     cfg = await maxx_service.get_config(request.app.db)
     # Mascara segredo para nao vazar em screenshots/print
     raw = cfg.get("maxx_auth_value") or ""
@@ -4052,7 +4325,7 @@ async def admin_maxx_config(request: Request, user: dict = Depends(require_admin
 
 
 @app.put("/api/admin/maxx-config")
-async def admin_update_maxx_config(request: Request, user: dict = Depends(require_admin())):
+async def admin_update_maxx_config(request: Request, user: dict = Depends(require_super_admin())):
     body = await request.json() or {}
     try:
         cfg = await maxx_service.update_config(request.app.db, body)
@@ -4067,13 +4340,13 @@ async def admin_update_maxx_config(request: Request, user: dict = Depends(requir
 
 
 @app.post("/api/admin/maxx-sync-points")
-async def admin_maxx_sync(request: Request, user: dict = Depends(require_admin())):
+async def admin_maxx_sync(request: Request, user: dict = Depends(require_super_admin())):
     """Dispara envio manual de TODOS os pontos pendentes para o Maxx."""
     return await maxx_service.send_pending_batch(request.app.db, kind="manual")
 
 
 @app.post("/api/admin/maxx-test-send")
-async def admin_maxx_test_send(request: Request, user: dict = Depends(require_admin())):
+async def admin_maxx_test_send(request: Request, user: dict = Depends(require_super_admin())):
     """Envia um ponto de TESTE para a API Maxx referenciando um usuario real,
     SEM persistir no points_log. Body: {user_id, points_value?, product_name?}.
     """
@@ -4090,7 +4363,7 @@ async def admin_maxx_test_send(request: Request, user: dict = Depends(require_ad
 
 
 @app.get("/api/admin/maxx-test-users")
-async def admin_maxx_test_users(request: Request, q: str = "", limit: int = 30, user: dict = Depends(require_admin())):
+async def admin_maxx_test_users(request: Request, q: str = "", limit: int = 30, user: dict = Depends(require_super_admin())):
     """Busca usuarios para o seletor do teste Maxx. Filtra por nome/email/cpf/external_id."""
     db = request.app.db
     query = {}
@@ -4106,7 +4379,7 @@ async def admin_maxx_test_users(request: Request, q: str = "", limit: int = 30, 
 
 
 @app.post("/api/admin/maxx-sync-points/{log_id}")
-async def admin_maxx_sync_one(request: Request, log_id: str, user: dict = Depends(require_admin())):
+async def admin_maxx_sync_one(request: Request, log_id: str, user: dict = Depends(require_super_admin())):
     """Reenviar um registro especifico."""
     db = request.app.db
     p = await db.points_log.find_one({"log_id": log_id}, {"_id": 0})
@@ -4116,7 +4389,7 @@ async def admin_maxx_sync_one(request: Request, log_id: str, user: dict = Depend
 
 
 @app.get("/api/admin/maxx-pending-by-user")
-async def admin_maxx_pending_by_user(request: Request, user: dict = Depends(require_admin())):
+async def admin_maxx_pending_by_user(request: Request, user: dict = Depends(require_super_admin())):
     """Agrega points_log pendentes (sent_to_maxx=false AND applied_externally=false)
     por usuario. Usado para o admin enviar em massa por pessoa usuarios que foram
     vinculados via sync CPF apos ja terem gerado pontos."""
@@ -4165,7 +4438,7 @@ async def admin_maxx_pending_by_user(request: Request, user: dict = Depends(requ
 
 
 @app.post("/api/admin/maxx-sync-user/{user_id}")
-async def admin_maxx_sync_user(request: Request, user_id: str, user: dict = Depends(require_admin())):
+async def admin_maxx_sync_user(request: Request, user_id: str, user: dict = Depends(require_super_admin())):
     """Envia ao Maxx todos os points_log pendentes de um unico usuario.
     Antes de enviar, atualiza user_external_id/user_name/user_email nos logs
     com os dados atuais do user (uteis para users vinculados depois via CPF)."""
@@ -4239,7 +4512,7 @@ async def my_points_history(request: Request, user: dict = Depends(get_current_u
 
 
 @app.get("/api/admin/maxx-logs")
-async def admin_maxx_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+async def admin_maxx_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_super_admin())):
     db = request.app.db
     total = await db.maxx_logs.count_documents({})
     logs = await db.maxx_logs.find({}, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
@@ -4349,7 +4622,7 @@ async def public_site_settings(request: Request):
 
 
 @app.put("/api/admin/site-settings")
-async def admin_site_settings(request: Request, user: dict = Depends(require_admin())):
+async def admin_site_settings(request: Request, user: dict = Depends(require_super_admin())):
     body = await request.json() or {}
     body["updated_at"] = now_iso()
     db = request.app.db
@@ -4597,6 +4870,190 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     await db.users.update_one({"user_id": user_id}, {"$set": update})
     fresh = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
     return fresh
+
+
+@app.post("/api/admin/users/{user_id}/set-role")
+async def admin_set_user_role(request: Request, user_id: str, payload: dict, user: dict = Depends(require_super_admin())):
+    """Define/altera a role administrativa de um usuario.
+    Apenas super_admin pode usar. Roles permitidas: customer, comercial, financeiro, admin, super_admin.
+    """
+    db = request.app.db
+    new_role = (payload.get("role") or "").strip()
+    if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
+        raise HTTPException(status_code=400, detail="Role invalida")
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    # Protecao: nao permite super_admin rebaixar a si mesmo (evita ficar sem super_admin)
+    if target.get("user_id") == user["user_id"] and new_role != "super_admin":
+        raise HTTPException(status_code=400, detail="Voce nao pode rebaixar a propria conta")
+    update = {"role": new_role, "updated_at": now_iso()}
+    # Alinha access_level pra compat com codigo legado
+    if new_role in ("super_admin", "admin"):
+        update["access_level"] = 1
+    elif new_role in ("comercial", "financeiro"):
+        update["access_level"] = 2
+    else:
+        update["access_level"] = 10
+    await db.users.update_one({"user_id": user_id}, {"$set": update})
+    return {"ok": True, "user_id": user_id, "role": new_role}
+
+
+# ==================== IMPERSONATION (#6) ====================
+#
+# Fluxo: super_admin/admin/comercial lista usuarios, clica em "Entrar como"
+# -> gera token especial com flag impersonated=True + impersonated_by=<admin_id>
+# -> frontend guarda o token original em sessionStorage.impersonation_return_token
+# -> quando termina, chama /api/auth/impersonate/stop -> retorna o token original
+
+IMPERSONATE_ALLOWED_ROLES = {"super_admin", "admin", "comercial"}
+
+
+@app.post("/api/admin/users/{user_id}/impersonate")
+async def admin_impersonate_user(request: Request, user_id: str, user: dict = Depends(get_current_user)):
+    """Gera token JWT para acessar a conta do usuario-alvo.
+    Apenas super_admin, admin e comercial podem usar."""
+    r = _role_of(user)
+    if r not in IMPERSONATE_ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="Seu papel nao permite entrar em outras contas")
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if target.get("status") in ("cancelled", "deleted"):
+        raise HTTPException(status_code=400, detail="Conta alvo desativada")
+    # Protecao: nao se pode impersonar outro admin/super_admin (so customers)
+    target_role = target.get("role") or "customer"
+    if target_role in ADMIN_ROLES and r != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super_admin pode impersonar outro membro da equipe")
+    # Cria token especial
+    payload = {
+        "sub": target["user_id"],
+        "email": target.get("email"),
+        "role": target_role,
+        "impersonated": True,
+        "impersonator_user_id": user.get("user_id"),
+        "impersonator_email": user.get("email"),
+        "impersonator_role": r,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=8),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    # Audit log
+    try:
+        await db.impersonation_audit_log.insert_one({
+            "event_id": gen_id("imp_"),
+            "impersonator_user_id": user.get("user_id"),
+            "impersonator_email": user.get("email"),
+            "impersonator_role": r,
+            "target_user_id": target["user_id"],
+            "target_email": target.get("email"),
+            "target_role": target_role,
+            "action": "start",
+            "created_at": now_iso(),
+        })
+    except Exception as e:
+        logger.warning(f"impersonation audit insert failed: {e}")
+    target.pop("password_hash", None)
+    return {
+        "token": token,
+        "user": target,
+        "impersonator": {"user_id": user.get("user_id"), "email": user.get("email"), "role": r},
+    }
+
+
+@app.post("/api/auth/impersonate/stop")
+async def stop_impersonation(request: Request, user: dict = Depends(get_current_user)):
+    """Endpoint para registrar o fim da impersonation (o frontend retoma o token original).
+    O token impersonado so vive no cliente; aqui so logamos o fim."""
+    db = request.app.db
+    payload = getattr(request.state, "jwt_payload", None)
+    try:
+        # Recupera do header pra saber se era impersonado
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            tok = auth.split(" ", 1)[1]
+            data = jwt.decode(tok, JWT_SECRET, algorithms=["HS256"])
+            if data.get("impersonated"):
+                await db.impersonation_audit_log.insert_one({
+                    "event_id": gen_id("imp_"),
+                    "impersonator_user_id": data.get("impersonator_user_id"),
+                    "impersonator_email": data.get("impersonator_email"),
+                    "target_user_id": data.get("sub"),
+                    "target_email": data.get("email"),
+                    "action": "stop",
+                    "created_at": now_iso(),
+                })
+    except Exception as e:
+        logger.warning(f"stop impersonation log failed: {e}")
+    return {"ok": True}
+
+
+@app.get("/api/admin/impersonation-audit-log")
+async def admin_impersonation_audit_log(request: Request, limit: int = 100, user: dict = Depends(require_role("financeiro"))):
+    """Historico de impersonations (para auditoria)."""
+    db = request.app.db
+    rows = await db.impersonation_audit_log.find({}, {"_id": 0}).sort("created_at", -1).limit(int(limit)).to_list(int(limit))
+    return {"items": rows, "total": len(rows)}
+
+
+@app.get("/api/users/me/voucher")
+async def me_voucher(request: Request, user: dict = Depends(get_current_user)):
+    """Saldo + historico de voucher do usuario logado."""
+    db = request.app.db
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "voucher_balance": 1, "voucher_history": 1})
+    return {
+        "balance": round(u.get("voucher_balance") or 0, 2) if u else 0,
+        "history": (u.get("voucher_history") or [])[-50:] if u else [],
+    }
+
+
+@app.post("/api/admin/users/{user_id}/voucher-adjust")
+async def admin_voucher_adjust(request: Request, user_id: str, payload: dict, user: dict = Depends(require_admin())):
+    """Admin/Comercial/Financeiro ajusta o saldo de voucher (credit ou debit).
+    Body: {"delta": float, "note": str}
+    """
+    if _role_of(user) not in ("super_admin", "admin", "financeiro", "comercial"):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    db = request.app.db
+    try:
+        delta = float(payload.get("delta") or 0)
+    except Exception:
+        raise HTTPException(status_code=400, detail="delta invalido")
+    if delta == 0:
+        raise HTTPException(status_code=400, detail="delta nao pode ser zero")
+    note = (payload.get("note") or "").strip()
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    new_balance = round((target.get("voucher_balance") or 0) + delta, 2)
+    if new_balance < 0:
+        raise HTTPException(status_code=400, detail=f"Saldo ficaria negativo (R$ {new_balance:.2f})")
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"voucher_balance": new_balance},
+         "$push": {"voucher_history": {
+             "delta": delta,
+             "source": "admin_adjust",
+             "note": note,
+             "performed_by": user.get("email"),
+             "received_at": now_iso(),
+         }}},
+    )
+    return {"ok": True, "balance": new_balance, "delta": delta}
+
+
+@app.get("/api/admin/users/{user_id}/voucher")
+async def admin_user_voucher(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "voucher_balance": 1, "voucher_history": 1, "name": 1, "email": 1})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    return {
+        "balance": round(u.get("voucher_balance") or 0, 2),
+        "history": u.get("voucher_history") or [],
+        "name": u.get("name"),
+        "email": u.get("email"),
+    }
 
 
 @app.delete("/api/admin/users/{user_id}")

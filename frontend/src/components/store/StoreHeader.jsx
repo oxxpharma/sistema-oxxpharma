@@ -10,7 +10,7 @@ import BrandLogo from '../branding/BrandLogo';
 
 export default function StoreHeader() {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
-  // Mostra "Minha rede" só para usuarios que pertencem a alguma rede MMN
+  // Mostra "Minha rede" só para usuarios que pertencem a alguma rede Equipe
   // (network_1 corporativa, network_2 propagandista, ou admin pra inspeção).
   const networkType = user?.network_type;
   const showMyNetwork = isAuthenticated && (isAdmin || (networkType && networkType !== 'customer'));
@@ -100,7 +100,7 @@ export default function StoreHeader() {
                     </Link>
                     {showMyNetwork && (
                       <Link to="/minha-rede" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="my-network-link">
-                        <Network className="w-4 h-4" /> Minha Rede
+                        <Network className="w-4 h-4" /> Minha Equipe
                       </Link>
                     )}
                     {isAdmin && (
@@ -160,7 +160,7 @@ export default function StoreHeader() {
                 <Link to="/minha-conta" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha conta</Link>
                 <Link to="/meus-pedidos" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Meus pedidos</Link>
                 <Link to="/indique-ganhe" className="block py-2 text-sm text-brand-main font-semibold" onClick={() => setMobileOpen(false)}>{settings?.referral_menu_label || 'Indique e ganhe benefícios'}</Link>
-                {showMyNetwork && <Link to="/minha-rede" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha Rede</Link>}
+                {showMyNetwork && <Link to="/minha-rede" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha Equipe</Link>}
                 {isAdmin && <Link to="/backoffice" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Painel Admin</Link>}
                 <button onClick={async () => { await logout(); setMobileOpen(false); navigate('/'); }} className="block w-full text-left py-2 text-sm text-red-600">Sair</button>
               </div>

@@ -6,8 +6,8 @@ import { toast } from 'sonner';
 
 const NETWORK_OPTIONS = [
   { value: 'customer', label: 'Cliente' },
-  { value: 'network_1', label: 'Rede 1 (Corporativa)' },
-  { value: 'network_2', label: 'Rede 2 (Propagandista)' },
+  { value: 'network_1', label: 'Equipe 1 (Corporativa)' },
+  { value: 'network_2', label: 'Equipe 2 (Propagandista)' },
 ];
 const ROLE_OPTIONS = [
   { value: 'customer', label: 'Cliente' },
@@ -114,10 +114,10 @@ export default function UserCreateModal({ onClose, onCreated }) {
             <Select label="Status" value={form.status} onChange={(v) => set('status', v)} options={STATUS_OPTIONS} testId="create-status" />
           </Section>
 
-          {/* MMN */}
-          <Section title="MMN / Indicação">
-            <Select label="Rede MMN" value={form.network_type} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="create-network" />
-            <Field label="ID do líder na rede MMN" value={form.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v)} testId="create-network-sponsor" placeholder="user_xxx" />
+          {/* Equipe */}
+          <Section title="Equipe / Indicação">
+            <Select label="Equipe" value={form.network_type} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="create-network" />
+            <Field label="ID do líder na rede Equipe" value={form.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v)} testId="create-network-sponsor" placeholder="user_xxx" />
             <Field label="Código do patrocinador (referral)" value={form.sponsor_code} onChange={(v) => set('sponsor_code', v.toUpperCase())} testId="create-sponsor-code" placeholder="ABC123" />
           </Section>
 

@@ -308,8 +308,8 @@ function BroadcastTab() {
         <select value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} className="w-full h-11 px-3 bg-white border border-border rounded-lg" data-testid="broadcast-target">
           <option value="all">Todos os usuários ativos</option>
           <option value="customer">Apenas Indicadores (customer)</option>
-          <option value="network_1">Apenas Rede 1 (Corporativo)</option>
-          <option value="network_2">Apenas Propagandistas (Rede 2)</option>
+          <option value="network_1">Apenas Equipe 1 (Corporativo)</option>
+          <option value="network_2">Apenas Propagandistas (Equipe 2)</option>
           <option value="admin">Apenas admins</option>
           <option value="emails">Lista específica de emails</option>
         </select>

@@ -116,7 +116,7 @@ export default function AdminMaxx() {
     <div data-testid="admin-maxx">
       <div className="mb-6">
         <h1 className="font-heading font-black text-2xl flex items-center gap-3">
-          <Network className="w-7 h-7 text-brand-main" /> Integração Maxx MMN
+          <Network className="w-7 h-7 text-brand-main" /> Integração Maxx Equipe
         </h1>
         <p className="text-sm text-txt-secondary mt-1">Envia pontos da OxxPharma para o sistema externo Maxx.</p>
       </div>

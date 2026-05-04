@@ -444,15 +444,15 @@ export default function AdminAppearance() {
                 <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'audiences'} onChange={() => set('free_shipping_mode', 'audiences')} className="mt-1" data-testid="fs-audiences" />
                 <div className="flex-1">
                   <div className="font-bold text-sm">Frete grátis para públicos selecionados</div>
-                  <div className="text-xs text-txt-secondary mb-2">Escolha redes MMN e/ou categorias de usuário que receberão frete grátis.</div>
+                  <div className="text-xs text-txt-secondary mb-2">Escolha redes Equipe e/ou categorias de usuário que receberão frete grátis.</div>
                   {s.free_shipping_mode === 'audiences' && (
                     <div className="mt-2 space-y-3">
                       <AudienceGroup
                         title="Por tipo de conta"
                         options={[
                           { token: 'customer', label: 'Cliente (customer)' },
-                          { token: 'network_1', label: 'Rede 1 (Corporativa)' },
-                          { token: 'network_2', label: 'Rede 2 (Propagandista)' },
+                          { token: 'network_1', label: 'Equipe 1 (Corporativa)' },
+                          { token: 'network_2', label: 'Equipe 2 (Propagandista)' },
                         ]}
                         selected={s.free_shipping_audiences || []}
                         onToggle={(token) => toggleFsAudience(s, set, token)}
@@ -539,8 +539,8 @@ export default function AdminAppearance() {
                         title="Por tipo de conta"
                         options={[
                           { token: 'customer', label: 'Cliente (customer)' },
-                          { token: 'network_1', label: 'Rede 1 (Corporativa)' },
-                          { token: 'network_2', label: 'Rede 2 (Propagandista)' },
+                          { token: 'network_1', label: 'Equipe 1 (Corporativa)' },
+                          { token: 'network_2', label: 'Equipe 2 (Propagandista)' },
                         ]}
                         selected={s.points_visibility_audiences || []}
                         onToggle={(token) => toggleAudience(s, set, token)}

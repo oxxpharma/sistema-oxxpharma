@@ -58,7 +58,7 @@ export default function AdminOrders() {
       `• O registro do pedido\n` +
       `• Comissões geradas por este pedido\n` +
       `• Pontos atribuídos por este pedido\n` +
-      `• Logs de webhook (pagamento + MMN)\n\n` +
+      `• Logs de webhook (pagamento + Equipe)\n\n` +
       `E REVERTERÁ:\n` +
       `• Estoque dos produtos\n` +
       `• Contador de uso do cupom (se houver)\n\n` +

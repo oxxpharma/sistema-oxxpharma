@@ -21,8 +21,8 @@ const STATUS = {
 };
 
 const NETWORK_BADGE = {
-  network_1: { label: 'Rede 1', variant: 'brand' },
-  network_2: { label: 'Rede 2', variant: 'success' },
+  network_1: { label: 'Equipe 1', variant: 'brand' },
+  network_2: { label: 'Equipe 2', variant: 'success' },
   customer: { label: 'Cliente', variant: 'default' },
 };
 

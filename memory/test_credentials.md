@@ -3,7 +3,23 @@
 ## Admin (criado automaticamente)
 - **Email**: admin@oxxpharma.com
 - **Password**: admin123
-- Role: admin (access_level 0) → acessa `/backoffice`
+- Role: **super_admin** (access_level 0) → acessa tudo, incluindo integrações
+
+## Roles disponíveis (Iter 34 — Fev/2026)
+- **super_admin** → acesso total (tudo, incl. Maxx, Melhor Envio, webhooks, settings)
+- **admin** → tudo, EXCETO endpoints críticos de integração (Maxx, webhook, melhorenvio, site-settings/settings PUT)
+- **financeiro** → leitura de pedidos, comissões, saques, cartão; NÃO vê integrações nem edita users
+- **comercial** → usuários + pedidos + impersonation; NÃO vê integrações nem financeiro
+- **customer** → loja + minha conta
+- Super admin define roles via `POST /api/admin/users/{user_id}/set-role` ou pelo modal "Editar usuário"
+
+## Impersonation (entrar como outro usuário)
+- Disponível para roles: `super_admin`, `admin`, `comercial`
+- Endpoint: `POST /api/admin/users/{user_id}/impersonate` → retorna token JWT do alvo
+- Endpoint: `POST /api/auth/impersonate/stop` → registra fim no audit log
+- Banner amarelo fixo no topo mostra "você está logado como X" + botão "Voltar à minha conta"
+- Token impersonado vive 8h; não pode impersonar outro admin (exceto super_admin)
+- Auditoria em `db.impersonation_audit_log`
 
 ## Rede 1 (importada via CSV para testes)
 - joao@rede1.com.br / oxx@pharma (topo da rede, EXT001)

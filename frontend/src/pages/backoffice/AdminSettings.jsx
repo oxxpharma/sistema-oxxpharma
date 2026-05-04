@@ -92,10 +92,10 @@ export default function AdminSettings() {
         </div>
       </div>
 
-      {/* Rede 1 & 2 */}
+      {/* Equipe 1 & 2 */}
       <div className="grid lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-white rounded-xl border border-border p-6">
-          <h2 className="font-heading font-black text-lg mb-1">Rede 1 — Corporativa (importada)</h2>
+          <h2 className="font-heading font-black text-lg mb-1">Equipe 1 — Corporativa (importada)</h2>
           <p className="text-xs text-txt-secondary mb-4">Percentuais sobre subtotal da venda, por geração.</p>
           <div className="grid grid-cols-2 gap-3">
             {[0, 1, 2, 3, 4, 5].map(i => (
@@ -111,7 +111,7 @@ export default function AdminSettings() {
           </div>
         </div>
         <div className="bg-white rounded-xl border border-border p-6">
-          <h2 className="font-heading font-black text-lg mb-1">Rede 2 — Propagandistas</h2>
+          <h2 className="font-heading font-black text-lg mb-1">Equipe 2 — Propagandistas</h2>
           <p className="text-xs text-txt-secondary mb-4">Percentuais para usuários promovidos organicamente.</p>
           <div className="grid grid-cols-2 gap-3">
             {[0, 1, 2, 3, 4, 5].map(i => (

@@ -15,12 +15,15 @@ const FIELDS = [
 
 const NETWORK_OPTIONS = [
   { value: 'customer', label: 'Cliente' },
-  { value: 'network_1', label: 'Rede 1 (Corporativa)' },
-  { value: 'network_2', label: 'Rede 2 (Propagandista)' },
+  { value: 'network_1', label: 'Equipe 1 (Corporativa)' },
+  { value: 'network_2', label: 'Equipe 2 (Propagandista)' },
 ];
 const ROLE_OPTIONS = [
   { value: 'customer', label: 'Cliente' },
-  { value: 'admin', label: 'Admin' },
+  { value: 'comercial', label: 'Comercial' },
+  { value: 'financeiro', label: 'Financeiro' },
+  { value: 'admin', label: 'Admin (limitado)' },
+  { value: 'super_admin', label: 'Super Admin' },
 ];
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Ativo' },
@@ -140,9 +143,9 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         ))}
         <Select label="Status" value={u.status || 'active'} onChange={(v) => set('status', v)} options={STATUS_OPTIONS} testId="edit-status" />
         <Select label="Perfil" value={u.role || 'customer'} onChange={(v) => set('role', v)} options={ROLE_OPTIONS} testId="edit-role" />
-        <Select label="Rede MMN" value={u.network_type || 'customer'} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="edit-network" />
+        <Select label="Equipe" value={u.network_type || 'customer'} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="edit-network" />
         <Field label="ID externo do líder (leader_external_id)" value={u.leader_external_id} onChange={(v) => set('leader_external_id', v || null)} testId="edit-leader-external-id" />
-        <Field label="ID do líder na rede MMN (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />
+        <Field label="ID do líder na rede Equipe (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />
       </div>
 
       {/* Categorias do usuário (multi-select) */}
