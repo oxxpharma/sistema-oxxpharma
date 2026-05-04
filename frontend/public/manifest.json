@@ -3,7 +3,6 @@
   "name": "OxxPharma — Magistral",
   "description": "OxxPharma — Sistema de franquias farmacêuticas com programa de indicação e benefícios.",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "icon-72x72.png", "sizes": "72x72", "type": "image/png", "purpose": "any" },
     { "src": "icon-96x96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
     { "src": "icon-128x128.png", "sizes": "128x128", "type": "image/png", "purpose": "any" },
