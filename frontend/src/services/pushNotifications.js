@@ -163,7 +163,7 @@ export function showLocalNotification(title, options = {}) {
     icon: '/icon-192x192.png',
     badge: '/icon-72x72.png',
     vibrate: [100, 50, 100],
-    tag: 'vanguard-local',
+    tag: 'oxxpharma-local',
     ...options
   };
 

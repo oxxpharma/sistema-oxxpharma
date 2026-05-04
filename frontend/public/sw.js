@@ -1,6 +1,6 @@
-// Service Worker for Vanguard MLM PWA
-const CACHE_NAME = 'vanguard-mlm-v1';
-const STATIC_CACHE = 'vanguard-static-v1';
+// Service Worker for OxxPharma PWA
+const CACHE_NAME = 'oxxpharma-v2-1777854515';
+const STATIC_CACHE = 'oxxpharma-static-v2-1777854515';
 
 // Files to cache immediately
 const STATIC_FILES = [
@@ -69,11 +69,11 @@ self.addEventListener('push', (event) => {
   console.log('[SW] Push notification received');
   
   let data = {
-    title: 'Vanguard MLM',
+    title: 'OxxPharma',
     body: 'Você tem uma nova notificação!',
     icon: '/icon-192x192.png',
     badge: '/icon-72x72.png',
-    tag: 'vanguard-notification',
+    tag: 'oxxpharma-notification',
     data: {}
   };
   
@@ -90,7 +90,7 @@ self.addEventListener('push', (event) => {
     body: data.body,
     icon: data.icon || '/icon-192x192.png',
     badge: data.badge || '/icon-72x72.png',
-    tag: data.tag || 'vanguard-notification',
+    tag: data.tag || 'oxxpharma-notification',
     vibrate: [100, 50, 100],
     data: data.data || {},
     actions: data.actions || [
