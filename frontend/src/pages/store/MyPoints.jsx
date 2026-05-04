@@ -33,7 +33,7 @@ export default function MyPoints() {
         <Award className="w-7 h-7 text-brand-main" /> Meus {pointsLabel}
       </h1>
       <p className="text-sm text-txt-secondary mb-6">
-        Acompanhe os {pointsLabel} acumulados nas suas compras. Eles são creditados no {programName}.
+        Acompanhe os {pointsLabel} acumulados nas suas compras. Eles são creditados na <strong>Ozoxx</strong>.
       </p>
 
       {/* Resumo */}
@@ -46,7 +46,7 @@ export default function MyPoints() {
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
           <div className="text-xs font-semibold uppercase tracking-wider text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Já enviados</div>
           <div className="text-3xl font-heading font-black text-emerald-900 mt-1" data-testid="my-points-sent">{fmtPoints(data.sent_total)}</div>
-          <div className="text-xs text-emerald-700 mt-1">disponíveis no {programName}</div>
+          <div className="text-xs text-emerald-700 mt-1">disponíveis na Ozoxx</div>
         </div>
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
           <div className="text-xs font-semibold uppercase tracking-wider text-amber-700 flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Pendentes</div>

@@ -1,7 +1,7 @@
 {
   "short_name": "OxxPharma",
   "name": "OxxPharma — Magistral",
-  "description": "OxxPharma — Sistema de franquias farmacêuticas com programa de indicação e benefícios.",
+  "description": "OxxPharma — Farmácia Magistral - Produtos com alta tecnologia e inovação. Inscreva-se no Programa de Benefícios OxxClube",
   "icons": [
     { "src": "icon-72x72-v2.png", "sizes": "72x72", "type": "image/png", "purpose": "any" },
     { "src": "icon-96x96-v2.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
