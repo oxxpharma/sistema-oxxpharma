@@ -67,8 +67,8 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" data-testid="enroll-form-modal">
-      <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl my-8">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center py-6 sm:py-12 px-4 overflow-y-auto overscroll-contain" data-testid="enroll-form-modal">
+      <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl mb-6">
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div className="flex items-center gap-2 text-txt-primary">
             <CreditCard className="w-5 h-5 text-brand-main" />
