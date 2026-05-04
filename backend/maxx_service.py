@@ -99,24 +99,60 @@ def _build_headers(cfg: Dict) -> Dict[str, str]:
 
 
 def _build_payload(cfg: Dict, points: List[Dict]) -> Dict:
-    """Monta payload com a lista de pontos.
+    """Monta payload AGREGANDO pontos por (user_id + order_id).
 
-    Default: {"points": [{user_id, external_id, name, email, points, registered_at, order_id, product_name, quantity}]}
+    Iter 38: Antes enviavamos 1 item por produto -> a Maxx criava 1 log por linha.
+    Agora consolidamos por pedido: 1 entrada por (usuario, pedido), com soma dos
+    pontos, lista de produtos comprados e quantidade total.
+
+    Default: {"points": [{user_id, external_id, name, email, points, registered_at,
+                          order_id, products: [...], product_name (resumo), quantity (total)}]}
     Custom: usa maxx_payload_template substituindo {{batch_json}} pelos points serializados.
     """
-    items = []
+    grouped: Dict[tuple, Dict] = {}
+    order_index: List[tuple] = []  # preserva ordem de chegada
     for p in points:
-        items.append({
-            "user_id": p.get("user_id"),
-            "external_id": p.get("user_external_id"),
-            "name": p.get("user_name"),
-            "email": p.get("user_email"),
-            "points": float(p.get("points_total") or 0),
-            "registered_at": p.get("registered_at"),
-            "order_id": p.get("order_id"),
+        uid = p.get("user_id")
+        oid = p.get("order_id")
+        key = (uid, oid)
+        if key not in grouped:
+            order_index.append(key)
+            grouped[key] = {
+                "user_id": uid,
+                "external_id": p.get("user_external_id"),
+                "name": p.get("user_name"),
+                "email": p.get("user_email"),
+                "points": 0.0,
+                "registered_at": p.get("registered_at"),
+                "order_id": oid,
+                "products": [],
+                "quantity": 0,
+            }
+        agg = grouped[key]
+        # Mantem a ultima identificacao do user (pode ter sido atualizada entre logs)
+        agg["external_id"] = p.get("user_external_id") or agg.get("external_id")
+        agg["name"] = p.get("user_name") or agg.get("name")
+        agg["email"] = p.get("user_email") or agg.get("email")
+        # Mantem o registered_at mais antigo (data do pedido)
+        if p.get("registered_at") and (not agg.get("registered_at") or p["registered_at"] < agg["registered_at"]):
+            agg["registered_at"] = p["registered_at"]
+        qty = int(p.get("quantity") or 1)
+        agg["points"] = round(agg["points"] + float(p.get("points_total") or 0), 4)
+        agg["quantity"] += qty
+        agg["products"].append({
+            "product_id": p.get("product_id"),
             "product_name": p.get("product_name"),
-            "quantity": int(p.get("quantity") or 1),
+            "quantity": qty,
+            "points": float(p.get("points_total") or 0),
         })
+
+    items = []
+    for key in order_index:
+        agg = grouped[key]
+        # Resumo textual dos produtos para sistemas que so leem product_name
+        names = [f"{prod.get('product_name') or '?'} x{prod.get('quantity') or 1}" for prod in agg["products"]]
+        agg["product_name"] = "; ".join(names) if names else None
+        items.append(agg)
     template = (cfg.get("maxx_payload_template") or "").strip()
     if template:
         try:

@@ -2304,6 +2304,19 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
     if order.get("payment_status") == "paid":
         raise HTTPException(status_code=400, detail="Pedido ja pago")
 
+    # Iter 38: Pedido com total <= 0 (totalmente pago via voucher) eh marcado pago direto,
+    # sem criar preferencia no MercadoPago.
+    order_total = float(order.get("total") or 0)
+    if order_total <= 0.005:
+        await mark_order_paid(db, order_id, payment_id=f"voucher_{uuid.uuid4().hex[:10]}", source="voucher")
+        return {
+            "order_id": order_id,
+            "payment_id": None,
+            "payment_url": None,
+            "provider": "voucher",
+            "paid": True,
+        }
+
     if not await payments_service.is_mp_configured(db):
         # Sem MP configurado: continua mock (auto-aprovavel via /mock/confirm)
         payment_id = f"mock_{uuid.uuid4().hex[:12]}"
@@ -2315,6 +2328,19 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
 
     items_full = order.get("items", []) + [{"product_id": "shipping", "name": "Frete", "price": float(order.get("shipping_cost") or 0), "quantity": 1}]
     items_full = [it for it in items_full if (it.get("price") or 0) > 0]
+
+    # Iter 38: Se houver voucher utilizado ou desconto de cupom, consolida os itens em
+    # uma unica linha com o valor real a cobrar (order.total). Caso contrario o MP
+    # cobraria o subtotal + frete sem considerar abatimentos.
+    voucher_used = float(order.get("voucher_used") or 0)
+    discount_amount = float(order.get("discount_amount") or 0)
+    if (voucher_used > 0 or discount_amount > 0) and order_total > 0:
+        items_full = [{
+            "product_id": order.get("order_id"),
+            "name": f"Pedido #{order.get('order_id')}",
+            "price": round(order_total, 2),
+            "quantity": 1,
+        }]
 
     frontend_url = get_app_url()
     backend_url = os.environ.get("BACKEND_URL") or frontend_url

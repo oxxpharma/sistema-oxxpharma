@@ -6,7 +6,7 @@ import { useReferral } from '../../contexts/RefContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import AddressForm from '../../components/store/AddressForm';
-import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2 } from 'lucide-react';
+import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
@@ -25,6 +25,18 @@ export default function CheckoutPage() {
   const [showNewAddr, setShowNewAddr] = useState(false);
   const [newAddr, setNewAddr] = useState(emptyAddr);
   const [selectedShipping, setSelectedShipping] = useState(() => loadSelectedShipping());
+  // Iter 38: Voucher pre-pago vindo da Maxx
+  const [voucherBalance, setVoucherBalance] = useState(0);
+  const [useVoucher, setUseVoucher] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const v = await api.get('/api/users/me/voucher');
+        setVoucherBalance(Number(v?.balance || 0));
+      } catch { /* noop */ }
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -76,18 +88,25 @@ export default function CheckoutPage() {
         payment_method: paymentMethod,
         ref_code: refCode || undefined,
         coupon_code: couponCode,
+        voucher_amount: voucherToUse > 0 ? Number(voucherToUse.toFixed(2)) : undefined,
         shipping_price: selectedShipping?.free_shipping ? 0 : (selectedShipping ? Number(selectedShipping.price) : undefined),
         shipping_service_name: selectedShipping?.name,
         shipping_carrier: selectedShipping?.carrier,
         shipping_service_id: selectedShipping?.id,
         shipping_delivery_days: selectedShipping?.delivery_days,
       });
-      // Cria preferencia de pagamento
+      // Cria preferencia de pagamento (ou marca pago direto se voucher cobriu tudo)
       const pay = await api.post(`/api/payments/create/${order.order_id}`);
       clear();
       clearRef();
       try { localStorage.removeItem('oxx_coupon_v1'); } catch { /* noop */ }
       try { saveSelectedShipping(null); } catch { /* noop */ }
+      // Iter 38: Pagamento totalmente coberto pelo voucher -> sem redirecionar a MP
+      if (pay.provider === 'voucher' || pay.paid) {
+        toast.success('Pedido pago com saldo voucher!');
+        navigate(`/pedido/${order.order_id}`);
+        return;
+      }
       // Se MP ativo e tem URL de pagamento, redireciona pro checkout do MP
       if (pay.provider === 'mercadopago' && pay.payment_url) {
         toast.success('Redirecionando para o pagamento...');
@@ -119,7 +138,11 @@ export default function CheckoutPage() {
       return Number(c?.discount || 0);
     } catch { return 0; }
   })();
-  const total = Math.max(0, subtotal + shipping - couponDiscount);
+  const grandBeforeVoucher = Math.max(0, subtotal + shipping - couponDiscount);
+  // Iter 38: Voucher abate ate o valor total. Se cobrir tudo, total = 0 e nao vai ao MP.
+  const voucherToUse = useVoucher ? Math.min(voucherBalance, grandBeforeVoucher) : 0;
+  const total = Math.max(0, grandBeforeVoucher - voucherToUse);
+  const fullyCoveredByVoucher = useVoucher && voucherToUse >= grandBeforeVoucher && grandBeforeVoucher > 0;
 
   // CEP do endereço selecionado (para auto-cotação ao entrar no checkout / trocar endereço)
   const selectedAddrObj = addresses.find(a => a.address_id === selectedAddr);
@@ -194,7 +217,63 @@ export default function CheckoutPage() {
           {/* Pagamento */}
           <section className="bg-white rounded-xl border border-border p-6">
             <h2 className="font-heading font-black text-lg mb-4 flex items-center gap-2"><CreditCard className="w-5 h-5 text-brand-main" /> Forma de pagamento</h2>
-            <div className="space-y-2">
+
+            {/* Iter 38: Saldo Voucher pre-pago */}
+            {voucherBalance > 0 && (
+              <div
+                className={`mb-4 rounded-xl border p-4 transition ${useVoucher ? 'border-emerald-400 bg-emerald-50' : 'border-border bg-bg-secondary/40'}`}
+                data-testid="voucher-card"
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${useVoucher ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-600'}`}>
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="font-bold text-sm">Saldo Voucher disponível</div>
+                      <div className="font-heading font-black text-emerald-600 text-lg" data-testid="voucher-balance">
+                        {formatCurrency(voucherBalance)}
+                      </div>
+                    </div>
+                    <p className="text-xs text-txt-secondary mt-0.5">
+                      Use seu saldo pré-pago para abater do total. Se não cobrir tudo, o restante é cobrado pelo Mercado Pago.
+                    </p>
+                    <label className="mt-3 flex items-center gap-2 cursor-pointer select-none" data-testid="voucher-toggle-label">
+                      <input
+                        type="checkbox"
+                        checked={useVoucher}
+                        onChange={(e) => setUseVoucher(e.target.checked)}
+                        className="w-4 h-4 accent-emerald-500"
+                        data-testid="voucher-toggle"
+                      />
+                      <span className="text-sm font-semibold">
+                        Usar saldo voucher neste pedido
+                      </span>
+                    </label>
+                    {useVoucher && (
+                      <div className="mt-2 text-xs bg-white rounded-lg border border-emerald-200 p-2">
+                        <div className="flex justify-between">
+                          <span className="text-txt-secondary">Voucher aplicado</span>
+                          <span className="font-bold text-emerald-600">−{formatCurrency(voucherToUse)}</span>
+                        </div>
+                        <div className="flex justify-between mt-0.5">
+                          <span className="text-txt-secondary">Restante a pagar</span>
+                          <span className="font-bold">{formatCurrency(total)}</span>
+                        </div>
+                        {fullyCoveredByVoucher && (
+                          <div className="mt-1 text-emerald-700 font-semibold">
+                            ✓ Voucher cobre todo o pedido — sem cobrança no cartão.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!fullyCoveredByVoucher && (
+              <div className="space-y-2">
               {[
                 { id: 'pix', icon: QrCode, name: 'PIX', desc: 'Pagamento instantâneo' },
                 { id: 'credit_card', icon: CreditCard, name: 'Cartão de crédito', desc: 'Parcele em até 6x' },
@@ -215,8 +294,11 @@ export default function CheckoutPage() {
                 </button>
               ))}
             </div>
+            )}
             <p className="text-xs text-txt-secondary mt-3 bg-bg-secondary p-3 rounded-lg">
-              <strong>Nota:</strong> O pagamento real será processado via Mercado Pago assim que integrado. Por ora, o pedido é criado em modo de desenvolvimento.
+              <strong>Nota:</strong> {fullyCoveredByVoucher
+                ? 'Como o saldo voucher cobre todo o pedido, nenhuma cobrança será feita no cartão.'
+                : 'O pagamento será processado via Mercado Pago.'}
             </p>
           </section>
         </div>
@@ -271,6 +353,12 @@ export default function CheckoutPage() {
               </div>
               {couponDiscount > 0 && (
                 <div className="flex justify-between text-emerald-600"><span>Cupom</span><span className="font-semibold">−{formatCurrency(couponDiscount)}</span></div>
+              )}
+              {voucherToUse > 0 && (
+                <div className="flex justify-between text-emerald-600" data-testid="summary-voucher-line">
+                  <span>Voucher aplicado</span>
+                  <span className="font-semibold">−{formatCurrency(voucherToUse)}</span>
+                </div>
               )}
             </div>
             <div className="flex justify-between items-baseline pt-3 border-t border-border">

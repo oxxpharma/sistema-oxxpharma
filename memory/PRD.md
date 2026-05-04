@@ -118,6 +118,13 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **`GET /api/admin/recalc-commissions/history`**: lista lotes anteriores para rastreabilidade.
   - **UI `/backoffice/recalcular-comissoes`** (`AdminRecalcCommissions.jsx`): banner de regras, 3 filtros (datas + email cliente), botão "Simular recálculo" → 4 KPI cards de sumário + tabela de beneficiários + lista expandível de pedidos afetados com breakdown por linha, botão "Confirmar e gravar" com modal de confirmação irreversível, toggle "Ver histórico" com tabela de auditoria. Item de menu adicionado em "MMN / Comissões".
   - Testes pytest: 5/5 passing (`test_recalc_commissions.py`: preview não persiste, apply grava com flags, idempotência, history endpoint, exige admin). Total da suíte: **25/25 passing**.
+- ✅ Iter 34-37 (Fev/2026): Pacote 6 features (Roles, Impersonation, Equipe, Voucher, Pontos espelho Equipe 1, Comissões por origem) — backend e frontend completos.
+- ✅ Iter 38 (Fev/2026): Voucher no checkout + Maxx por pedido + Pagamento full-voucher
+  - **Frontend Checkout (`CheckoutPage.jsx`):** novo bloco "Saldo Voucher disponível" (busca via `GET /api/users/me/voucher`); checkbox "Usar saldo voucher"; cálculo dinâmico do total com voucher abatendo (`min(saldo, total)`); ao marcar, mostra linhas "Voucher aplicado" e "Restante a pagar"; quando voucher cobre 100%, esconde métodos PIX/Cartão/Boleto, troca o aviso e marca pedido como pago direto sem MercadoPago.
+  - **Backend `/api/payments/create/{order_id}`:** se `order.total <= 0` (totalmente coberto pelo voucher), chama `mark_order_paid(... source="voucher")` retornando `{provider: "voucher", paid: true}` — pula MP, dispara emissão de NF, comissões → paid, registro de pontos e e-mails normalmente.
+  - **MercadoPago:** quando há voucher_used > 0 ou cupom, agora envia uma única linha consolidada `Pedido #ord_xxx` com `order.total` real (antes mandaria subtotal+frete sem desconto, cobrando demais).
+  - **Maxx — agregação por pedido (`maxx_service.py::_build_payload`):** antes 1 entrada por produto (gerava N logs na Maxx por compra). Agora agrupa por `(user_id, order_id)`: soma pontos, soma quantidade total, lista produtos em `products[]` e gera resumo `product_name = "Vit C x2; Omega 3 x1"`. Cliente + sponsor espelhado de Equipe 1 do mesmo pedido continuam como 2 entradas (chaves distintas).
+  - Testes: 38/38 passing (`test_iter38_maxx_per_order.py` 2 novos + 36 pré-existentes inalterados).
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
