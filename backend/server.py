@@ -2723,7 +2723,7 @@ async def admin_users_by_network(request: Request, network_type: str, search: Op
         q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"email": {"$regex": search, "$options": "i"}}, {"external_id": search}]
     total = await db.users.count_documents(q)
     users = await db.users.find(q, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"users": users, "total": total, "page": page}
+    return {"users": users, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit), "limit": limit}
 
 @app.get("/api/admin/users/{user_id}/tree")
 async def admin_user_tree(request: Request, user_id: str, user: dict = Depends(require_admin())):
@@ -3306,7 +3306,7 @@ async def admin_list_invoices(request: Request, search: Optional[str] = None, pa
         {"$group": {"_id": None, "total": {"$sum": "$total"}, "subtotal": {"$sum": "$subtotal"}}},
     ]).to_list(1)
     totals = {"total": round((agg[0]["total"] if agg else 0), 2), "subtotal": round((agg[0]["subtotal"] if agg else 0), 2), "count": total}
-    return {"invoices": orders, "total": total, "page": page, "totals": totals}
+    return {"invoices": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit), "totals": totals}
 
 
 _INVOICE_COLS = [
@@ -3922,7 +3922,7 @@ async def list_webhook_logs(request: Request, page: int = 1, limit: int = 50, us
         {"_id": 0, "payload": 0},
     ).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
     total = await db.webhook_logs.count_documents({})
-    return {"logs": logs, "total": total, "page": page, "limit": limit}
+    return {"logs": logs, "total": total, "page": page, "limit": limit, "pages": max(1, (total + limit - 1) // limit)}
 
 
 @app.get("/api/admin/webhook-logs/{log_id}")
@@ -5296,6 +5296,8 @@ async def admin_points_report(request: Request, start: Optional[str] = None, end
         "logs": logs,
         "total": total,
         "page": page,
+        "pages": max(1, (total + limit - 1) // limit),
+        "limit": limit,
         "summary": {
             "total_points": round((summary[0]["total_points"] if summary else 0), 2),
             "count": summary[0]["count"] if summary else 0,

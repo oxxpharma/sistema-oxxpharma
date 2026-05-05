@@ -5,6 +5,9 @@ import { Badge } from '../../components/ui/Badge';
 import { Award, Loader2, Download, RefreshCw, CheckCircle2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime } from '../../lib/utils';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 50;
 
 export default function AdminPoints() {
   const [logs, setLogs] = useState([]);
@@ -14,23 +17,30 @@ export default function AdminPoints() {
   const [end, setEnd] = useState('');
   const [appliedFilter, setAppliedFilter] = useState('');
   const [selected, setSelected] = useState(new Set());
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
+  const load = async (targetPage = page) => {
     setLoading(true);
     try {
       const q = new URLSearchParams();
       if (start) q.set('start', start);
       if (end) q.set('end', end);
       if (appliedFilter !== '') q.set('applied', appliedFilter);
-      q.set('limit', '500');
+      q.set('page', String(targetPage));
+      q.set('limit', String(PAGE_LIMIT));
       const r = await api.get(`/api/admin/points-report?${q}`);
       setLogs(r.logs || []);
       setSummary(r.summary || { total_points: 0, count: 0 });
+      setPages(r.pages || 1);
+      setTotal(r.total || 0);
+      setPage(r.page || targetPage);
       setSelected(new Set());
     } catch (e) { toast.error(e?.message); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, []);
 
   const downloadXlsx = () => {
     const token = localStorage.getItem('token');
@@ -53,7 +63,7 @@ export default function AdminPoints() {
     try {
       await api.post('/api/admin/points-report/mark-applied', { log_ids: Array.from(selected) });
       toast.success('Marcados');
-      load();
+      load(page);
     } catch (e) { toast.error(e?.message); }
   };
 
@@ -103,9 +113,9 @@ export default function AdminPoints() {
             <option value="true">Aplicados</option>
           </select>
         </div>
-        <Button variant="outline" onClick={load}><Search className="w-4 h-4" /> Filtrar</Button>
+        <Button variant="outline" onClick={() => load(1)}><Search className="w-4 h-4" /> Filtrar</Button>
         <div className="flex-1" />
-        <Button variant="outline" onClick={load}><RefreshCw className="w-4 h-4" /> Atualizar</Button>
+        <Button variant="outline" onClick={() => load(page)}><RefreshCw className="w-4 h-4" /> Atualizar</Button>
         <Button variant="outline" onClick={downloadXlsx} data-testid="export-xlsx-btn"><Download className="w-4 h-4" /> Exportar XLSX</Button>
         <Button onClick={markApplied} disabled={selected.size === 0} data-testid="mark-applied-btn">
           <CheckCircle2 className="w-4 h-4" /> Marcar como aplicado ({selected.size})
@@ -150,6 +160,9 @@ export default function AdminPoints() {
             </table>
           </div>
         )}
+        <div className="px-4 pb-4">
+          <Pagination page={page} pages={pages} total={total} limit={PAGE_LIMIT} onChange={(p) => load(p)} testId="points-pagination" />
+        </div>
       </div>
     </div>
   );

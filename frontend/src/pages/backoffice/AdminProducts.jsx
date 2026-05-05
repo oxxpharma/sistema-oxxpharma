@@ -6,6 +6,9 @@ import { Input, Select, Textarea } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
 import { Plus, Edit, Trash2, Search, X, Upload, Loader2, ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 20;
 
 const emptyForm = {
   name: '', description: '', price: 0, discount_price: null,
@@ -26,16 +29,25 @@ export default function AdminProducts() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (targetPage) => {
     setLoading(true);
+    const tp = typeof targetPage === 'number' ? targetPage : 1;
     try {
+      const q = new URLSearchParams({ page: String(tp), limit: String(PAGE_LIMIT) });
+      if (search) q.set('search', search);
       const [p, c, uc] = await Promise.all([
-        api.get(`/api/admin/products?limit=100${search ? `&search=${encodeURIComponent(search)}` : ''}`),
+        api.get(`/api/admin/products?${q}`),
         api.get('/api/categories'),
         api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
       ]);
       setProducts(p.products || []);
+      setPages(p.pages || 1);
+      setTotal(p.total || 0);
+      setPage(p.page || tp);
       setCategories(c.categories || []);
       setUserCats(uc.categories || []);
       if (!form.category && c.categories?.[0]) {
@@ -45,7 +57,7 @@ export default function AdminProducts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(1); }, [load]);
 
   const openNew = () => {
     setEditing(null);
@@ -88,13 +100,13 @@ export default function AdminProducts() {
       else await api.post('/api/admin/products', payload);
       toast.success('Produto salvo');
       setShowForm(false);
-      load();
+      load(page);
     } catch (err) { toast.error(err.message); } finally { setSaving(false); }
   };
 
   const del = async (id) => {
     if (!window.confirm('Excluir produto?')) return;
-    try { await api.del(`/api/admin/products/${id}`); toast.success('Produto excluído'); load(); } catch (err) { toast.error(err.message); }
+    try { await api.del(`/api/admin/products/${id}`); toast.success('Produto excluído'); load(page); } catch (err) { toast.error(err.message); }
   };
 
   // Upload image as base64 (MVP - quando houver uma API de upload real, trocar)
@@ -187,6 +199,9 @@ export default function AdminProducts() {
                 {products.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-txt-secondary">Nenhum produto cadastrado.</td></tr>}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 pb-4">
+            <Pagination page={page} pages={pages} total={total} limit={PAGE_LIMIT} onChange={(p) => load(p)} testId="products-pagination" />
           </div>
         </div>
       )}

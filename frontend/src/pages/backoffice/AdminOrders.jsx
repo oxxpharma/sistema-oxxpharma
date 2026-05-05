@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Search, Eye, Loader2, X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import Pagination from '../../components/admin/Pagination';
 
 const STATUSES = [
   { value: '', label: 'Todos' },
@@ -22,25 +23,34 @@ const STATUS_LABELS = {
   cancelled: { label: 'Cancelado', variant: 'error' },
 };
 
+const PAGE_LIMIT = 20;
+
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
+  const load = async (targetPage = page) => {
     setLoading(true);
     try {
       const q = new URLSearchParams();
       if (status) q.set('status', status);
       if (search) q.set('search', search);
-      q.set('limit', '100');
+      q.set('page', String(targetPage));
+      q.set('limit', String(PAGE_LIMIT));
       const d = await api.get(`/api/admin/orders?${q}`);
       setOrders(d.orders || []);
+      setPages(d.pages || 1);
+      setTotal(d.total || 0);
+      setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status]);
 
   const updateStatus = async (orderId, newStatus) => {
     try {
@@ -85,14 +95,14 @@ export default function AdminOrders() {
             placeholder="Buscar por ID, cliente ou email..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && load()}
+            onKeyDown={e => e.key === 'Enter' && load(1)}
             className="w-full h-10 pl-10 pr-4 bg-bg-secondary border border-border rounded-lg text-sm"
           />
         </div>
         <select value={status} onChange={e => setStatus(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" data-testid="status-filter">
           {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
-        <Button variant="outline" onClick={load}>Buscar</Button>
+        <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
 
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (
@@ -132,6 +142,9 @@ export default function AdminOrders() {
                 {orders.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-txt-secondary">Nenhum pedido.</td></tr>}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 pb-4">
+            <Pagination page={page} pages={pages} total={total} limit={PAGE_LIMIT} onChange={(p) => load(p)} testId="orders-pagination" />
           </div>
         </div>
       )}
@@ -191,12 +204,8 @@ export default function AdminOrders() {
                   try {
                     await api.post(`/api/admin/orders/${selected.order_id}/issue-invoice`);
                     toast.success('Nota emitida');
-                    const q = new URLSearchParams();
-                    if (status) q.set('status', status);
-                    q.set('limit', '100');
-                    const d = await api.get(`/api/admin/orders?${q}`);
-                    setOrders(d.orders || []);
-                    const updated = (d.orders || []).find(x => x.order_id === selected.order_id);
+                    await load(page);
+                    const updated = orders.find(x => x.order_id === selected.order_id);
                     if (updated) setSelected(updated);
                   } catch (err) { toast.error(err.message); }
                 }} data-testid="issue-invoice-btn">Emitir nota de faturamento</Button>

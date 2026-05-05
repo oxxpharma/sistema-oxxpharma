@@ -5,6 +5,9 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Upload, Users, Network, Loader2, Search, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 20;
 
 const TABS = [
   { id: 'network_1', label: 'Equipe 1 (Corporativo)', color: 'brand' },
@@ -18,25 +21,31 @@ export default function AdminNetworks() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
+  const load = async (targetPage = page) => {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ network_type: tab, limit: '100' });
+      const q = new URLSearchParams({ network_type: tab, page: String(targetPage), limit: String(PAGE_LIMIT) });
       if (search) q.set('search', search);
       const d = await api.get(`/api/admin/users-by-network?${q}`);
       setUsers(d.users || []);
+      setPages(d.pages || 1);
+      setTotal(d.total || 0);
+      setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [tab]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [tab]);
 
   const promote = async (uid) => {
     if (!window.confirm('Promover este cliente a Propagandista?')) return;
-    try { await api.post(`/api/admin/users/${uid}/promote-to-propagandista`); toast.success('Promovido'); load(); } catch (err) { toast.error(err.message); }
+    try { await api.post(`/api/admin/users/${uid}/promote-to-propagandista`); toast.success('Promovido'); load(page); } catch (err) { toast.error(err.message); }
   };
   const revoke = async (uid) => {
     if (!window.confirm('Revogar status de Propagandista?')) return;
-    try { await api.post(`/api/admin/users/${uid}/revoke-network`); toast.success('Revogado'); load(); } catch (err) { toast.error(err.message); }
+    try { await api.post(`/api/admin/users/${uid}/revoke-network`); toast.success('Revogado'); load(page); } catch (err) { toast.error(err.message); }
   };
 
   return (
@@ -74,11 +83,11 @@ export default function AdminNetworks() {
             placeholder="Buscar por nome, email ou ID externo..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && load()}
+            onKeyDown={e => e.key === 'Enter' && load(1)}
             className="w-full h-10 pl-10 pr-4 bg-bg-secondary border border-border rounded-lg text-sm"
           />
         </div>
-        <Button variant="outline" onClick={load}>Buscar</Button>
+        <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
 
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (
@@ -126,10 +135,13 @@ export default function AdminNetworks() {
               </tbody>
             </table>
           </div>
+          <div className="px-4 pb-4">
+            <Pagination page={page} pages={pages} total={total} limit={PAGE_LIMIT} onChange={(p) => load(p)} testId="networks-pagination" />
+          </div>
         </div>
       )}
 
-      {showImport && <ImportModal onClose={() => { setShowImport(false); load(); }} />}
+      {showImport && <ImportModal onClose={() => { setShowImport(false); load(1); }} />}
     </div>
   );
 }

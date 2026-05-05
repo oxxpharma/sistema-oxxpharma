@@ -5,22 +5,27 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import ExportButton from '../../components/ExportButton';
 import { Search, Eye, Loader2, Receipt } from 'lucide-react';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 20;
 
 export default function AdminInvoices() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
-  const load = async () => {
+  const load = async (targetPage = page) => {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ limit: '100' });
+      const q = new URLSearchParams({ page: String(targetPage), limit: String(PAGE_LIMIT) });
       if (search) q.set('search', search);
       const d = await api.get(`/api/admin/invoices?${q}`);
       setData(d);
+      setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, []);
 
   const exportQuery = search ? `?search=${encodeURIComponent(search)}` : '';
 
@@ -65,11 +70,11 @@ export default function AdminInvoices() {
             placeholder="Buscar por número da nota, cliente ou email..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && load()}
+            onKeyDown={e => e.key === 'Enter' && load(1)}
             className="w-full h-10 pl-10 pr-4 bg-bg-secondary border border-border rounded-lg text-sm"
           />
         </div>
-        <Button variant="outline" onClick={load}>Buscar</Button>
+        <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
 
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (
@@ -107,6 +112,9 @@ export default function AdminInvoices() {
                 {(!data?.invoices || data.invoices.length === 0) && <tr><td colSpan={6} className="p-10 text-center text-txt-secondary">Nenhuma nota emitida ainda.</td></tr>}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 pb-4">
+            <Pagination page={page} pages={data?.pages || 1} total={data?.total || 0} limit={PAGE_LIMIT} onChange={(p) => load(p)} testId="invoices-pagination" />
           </div>
         </div>
       )}

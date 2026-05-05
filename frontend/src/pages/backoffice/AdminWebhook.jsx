@@ -4,6 +4,9 @@ import { Button } from '../../components/ui/Button';
 import { Webhook, Copy, RefreshCcw, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime } from '../../lib/utils';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 20;
 
 export default function AdminWebhook() {
   const [settings, setSettings] = useState(null);
@@ -13,19 +16,36 @@ export default function AdminWebhook() {
   const [regenerating, setRegenerating] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
+  const load = async (targetPage = 1) => {
     setLoading(true);
     try {
       const [s, l] = await Promise.all([
         api.get('/api/admin/settings'),
-        api.get('/api/admin/webhook-logs'),
+        api.get(`/api/admin/webhook-logs?page=${targetPage}&limit=${PAGE_LIMIT}`),
       ]);
       setSettings(s);
       setLogs(l.logs || []);
+      setPages(l.pages || 1);
+      setTotal(l.total || 0);
+      setPage(l.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(1); }, []);
+
+  const loadLogsOnly = async (targetPage) => {
+    setLoading(true);
+    try {
+      const l = await api.get(`/api/admin/webhook-logs?page=${targetPage}&limit=${PAGE_LIMIT}`);
+      setLogs(l.logs || []);
+      setPages(l.pages || 1);
+      setTotal(l.total || 0);
+      setPage(l.page || targetPage);
+    } finally { setLoading(false); }
+  };
 
   const openDetail = async (logId) => {
     setDetailLoading(true);
@@ -128,7 +148,7 @@ export default function AdminWebhook() {
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <div className="p-4 border-b border-border flex items-center justify-between">
           <h2 className="font-heading font-black text-lg">Histórico de chamadas</h2>
-          <Button variant="outline" size="sm" onClick={load} data-testid="reload-logs"><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
+          <Button variant="outline" size="sm" onClick={() => loadLogsOnly(page)} data-testid="reload-logs"><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -176,6 +196,9 @@ export default function AdminWebhook() {
               {logs.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-txt-secondary">Nenhuma chamada ainda.</td></tr>}
             </tbody>
           </table>
+        </div>
+        <div className="px-4 pb-4">
+          <Pagination page={page} pages={pages} total={total} limit={PAGE_LIMIT} onChange={(p) => loadLogsOnly(p)} testId="webhook-pagination" />
         </div>
       </div>
 

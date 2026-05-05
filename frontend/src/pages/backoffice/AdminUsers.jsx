@@ -9,6 +9,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import UserEditModal from '../../components/UserEditModal';
 import UserCreateModal from '../../components/UserCreateModal';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 20;
 
 export default function AdminUsers() {
   const { can, startImpersonation } = useAuth();
@@ -18,19 +21,26 @@ export default function AdminUsers() {
   const [role, setRole] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = async () => {
+  const load = async (targetPage = page) => {
     setLoading(true);
     try {
       const q = new URLSearchParams();
       if (search) q.set('search', search);
       if (role) q.set('role', role);
-      q.set('limit', '100');
+      q.set('page', String(targetPage));
+      q.set('limit', String(PAGE_LIMIT));
       const d = await api.get(`/api/admin/users?${q}`);
       setUsers(d.users || []);
+      setPages(d.pages || 1);
+      setTotal(d.total || 0);
+      setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [role]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [role]);
 
   const onImpersonate = async (u) => {
     const ok = window.confirm(`Entrar na conta de "${u.name || u.email}"?\n\nVocê poderá navegar como esse usuário, criar pedidos em nome dele, etc. Um banner amarelo ficará visível no topo. Use o botão "Voltar à minha conta" para sair a qualquer momento.`);
@@ -84,16 +94,19 @@ export default function AdminUsers() {
             placeholder="Buscar por nome ou email..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && load()}
+            onKeyDown={e => e.key === 'Enter' && load(1)}
             className="w-full h-10 pl-10 pr-4 bg-bg-secondary border border-border rounded-lg text-sm"
           />
         </div>
         <select value={role} onChange={e => setRole(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm">
           <option value="">Todos</option>
           <option value="customer">Clientes</option>
-          <option value="admin">Admins</option>
+          <option value="comercial">Comercial</option>
+          <option value="financeiro">Financeiro</option>
+          <option value="admin">Admin</option>
+          <option value="super_admin">Super Admin</option>
         </select>
-        <Button variant="outline" onClick={load}>Buscar</Button>
+        <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
 
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (
@@ -169,6 +182,9 @@ export default function AdminUsers() {
                 {users.length === 0 && <tr><td colSpan={8} className="p-10 text-center text-txt-secondary">Nenhum usuário.</td></tr>}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 pb-4">
+            <Pagination page={page} pages={pages} total={total} limit={PAGE_LIMIT} onChange={(p) => load(p)} testId="users-pagination" />
           </div>
         </div>
       )}
