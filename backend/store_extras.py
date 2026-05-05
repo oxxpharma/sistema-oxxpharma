@@ -212,13 +212,30 @@ def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> 
 
 
 def apply_pricing_to_product(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Decora o produto com 'effective_price' e 'tier_applied' sem mutar o documento original."""
+    """Decora o produto com 'effective_price' e 'tier_applied' sem mutar o documento original.
+
+    Iter 39: tambem expoe `club_price` (menor preco para tier `referral_active`),
+    sempre visivel mesmo para visitantes/clientes nao-aderidos, para incentivar
+    inscricao no Clube de Beneficios.
+    """
     p = {**product}
     p.pop("_id", None)
     info = effective_price(product, user)
     p["effective_price"] = info["price"]
     p["original_price"] = info["original_price"]
     p["tier_applied"] = info["applied_tier"]
+
+    # club_price: menor preco entre tiers do tipo `referral_active`
+    club_candidates = []
+    for t in (product.get("pricing_tiers") or []):
+        if (t.get("type") or "").lower() == "referral_active":
+            try:
+                tp = float(t.get("price"))
+                if tp > 0:
+                    club_candidates.append(tp)
+            except (TypeError, ValueError):
+                continue
+    p["club_price"] = min(club_candidates) if club_candidates else None
     return p
 
 

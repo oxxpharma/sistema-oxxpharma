@@ -105,6 +105,16 @@ export default function ProductDetails() {
               Economize {formatCurrency((product.price || 0) - price)}
             </div>
           )}
+          {/* Iter 39: preco do clube de beneficios sempre visivel */}
+          {typeof product.club_price === 'number' && product.club_price > 0 && product.club_price < price && (
+            <div className="mt-3 inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm" data-testid="product-club-price">
+              <Award className="w-4 h-4 text-emerald-600" />
+              <span className="text-txt-secondary">Preço para participante do</span>
+              <span className="font-bold text-emerald-700">Clube do Benefícios</span>
+              <span className="text-txt-secondary">:</span>
+              <span className="font-heading font-black text-emerald-700">{formatCurrency(product.club_price)}</span>
+            </div>
+          )}
           {canSeeProductPoints(user, settings) && product.points_value > 0 && (
             <div className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg" data-testid="product-points">
               <Award className="w-4 h-4" />

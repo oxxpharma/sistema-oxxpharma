@@ -71,6 +71,15 @@ export default function ProductCard({ product }) {
             <span className="text-xs text-txt-secondary line-through">{formatCurrency(original)}</span>
           )}
         </div>
+        {/* Iter 39: preco do clube de beneficios visivel para todos */}
+        {typeof product.club_price === 'number' && product.club_price > 0 && product.club_price < effective && (
+          <div className="mt-1 text-xs leading-tight" data-testid={`product-club-price-${product.product_id}`}>
+            <span className="text-txt-secondary">Preço para participante do </span>
+            <span className="font-semibold text-emerald-700">Clube do Benefícios</span>
+            <span className="text-txt-secondary">: </span>
+            <span className="font-bold text-emerald-700">{formatCurrency(product.club_price)}</span>
+          </div>
+        )}
         {canSeeProductPoints(user, settings) && product.points_value > 0 && (
           <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-700" data-testid={`product-points-${product.product_id}`}>
             <Award className="w-3 h-3" />
