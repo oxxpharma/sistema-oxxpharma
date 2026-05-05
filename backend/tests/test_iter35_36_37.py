@@ -181,7 +181,8 @@ def test_voucher_used_in_checkout(db, admin_token):
                             json={"email": email, "password": "oxx@pharma"}, timeout=15).json()["token"]
         h = {"Authorization": f"Bearer {tok}"}
         # Pega um produto
-        prods = requests.get(f"{API_URL}/api/products?limit=1", timeout=15).json().get("products", [])
+        prods = requests.get(f"{API_URL}/api/products?limit=20", timeout=15).json().get("products", [])
+        prods = [p for p in prods if (p.get("stock") or 0) > 0 and (p.get("price") or 0) > 0]
         if not prods:
             pytest.skip("sem produtos")
         pid = prods[0]["product_id"]
@@ -192,21 +193,23 @@ def test_voucher_used_in_checkout(db, admin_token):
                       json={"label":"casa","zip_code":"01000000","street":"X","number":"1",
                             "neighborhood":"C","city":"SP","state":"SP"}, headers=h, timeout=15)
         addr = requests.get(f"{API_URL}/api/users/me/addresses", headers=h, timeout=15).json()["addresses"][-1]["address_id"]
-        # Checkout COM voucher 50
+        # Checkout COM voucher (limita ao subtotal pra cobrir produtos baratos)
+        subtotal = float(prods[0]["price"])
+        voucher_to_use = min(50.0, subtotal)
         r = requests.post(f"{API_URL}/api/checkout",
                           json={"address_id": addr, "payment_method": "pix",
                                 "shipping_price": 0, "shipping_carrier": "t", "shipping_service": "t",
-                                "voucher_amount": 50.0},
+                                "voucher_amount": voucher_to_use},
                           headers=h, timeout=30)
         assert r.status_code == 200, r.text
         order_id = r.json().get("order_id") or r.json().get("order", {}).get("order_id") or r.json().get("id")
         order = db.orders.find_one({"order_id": order_id})
         assert order is not None, f"order nao encontrada: {r.json()}"
-        assert order["voucher_used"] == 50.0
+        assert abs(order["voucher_used"] - voucher_to_use) < 0.01
         assert abs((order["total_before_voucher"] - order["voucher_used"]) - order["total"]) < 0.02
         # Saldo no user diminuiu
         u2 = db.users.find_one({"user_id": uid})
-        assert abs(u2["voucher_balance"] - 150.0) < 0.01
+        assert abs(u2["voucher_balance"] - (200.0 - voucher_to_use)) < 0.01
     finally:
         db.orders.delete_many({"user_id": uid})
         db.carts.delete_many({"user_id": uid})

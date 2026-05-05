@@ -134,11 +134,12 @@ def test_mmn_receives_commission_through_affiliate_chain_up_to_6_gen(db, admin_t
     assert r.status_code == 200, r.text
     f_token = r.json()["token"]
 
-    # Pega um produto qualquer ativo do catalogo
-    r = requests.get(f"{API_URL}/api/products?limit=1", timeout=15)
-    products = r.json().get("products") or r.json().get("items") or []
+    # Pega um produto com estoque
+    r = requests.get(f"{API_URL}/api/products?limit=20", timeout=15)
+    products = [p for p in (r.json().get("products") or [])
+                if (p.get("stock") or 0) > 0 and (p.get("price") or 0) > 0]
     if not products:
-        pytest.skip("Nao ha produtos no catalogo para testar checkout")
+        pytest.skip("Nao ha produtos com estoque para testar checkout")
     product = products[0]
     pid = product["product_id"]
     price = float(product["price"])
@@ -252,10 +253,10 @@ def test_two_mmn_in_chain_each_gets_their_generation(db, admin_token):
     assert r.status_code == 200, r.text
     y_token = r.json()["token"]
 
-    r = requests.get(f"{API_URL}/api/products?limit=1", timeout=15)
-    products = r.json().get("products") or []
+    r = requests.get(f"{API_URL}/api/products?limit=20", timeout=15)
+    products = [p for p in (r.json().get("products") or []) if (p.get("stock") or 0) > 0 and (p.get("price") or 0) > 0]
     if not products:
-        pytest.skip("sem produtos")
+        pytest.skip("sem produtos com estoque")
     pid = products[0]["product_id"]
 
     requests.post(f"{API_URL}/api/cart/items", json={"product_id": pid, "quantity": 1},
@@ -329,10 +330,10 @@ def test_mmn_without_program_active_does_not_receive(db):
     assert r.status_code == 200
     tok = r.json()["token"]
 
-    r = requests.get(f"{API_URL}/api/products?limit=1", timeout=15)
-    products = r.json().get("products") or []
+    r = requests.get(f"{API_URL}/api/products?limit=20", timeout=15)
+    products = [p for p in (r.json().get("products") or []) if (p.get("stock") or 0) > 0 and (p.get("price") or 0) > 0]
     if not products:
-        pytest.skip("sem produtos")
+        pytest.skip("sem produtos com estoque")
     pid = products[0]["product_id"]
 
     requests.post(f"{API_URL}/api/cart/items", json={"product_id": pid, "quantity": 1},

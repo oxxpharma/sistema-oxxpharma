@@ -1008,17 +1008,15 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         })
 
     # 2) Comissoes de rede MMN (ate 6 geracoes)
-    # NOVA REGRA (Iter 31): subir pela cadeia ATE 6 niveis. O "ancestral imediato" de
-    # um usuario eh sponsor_id (cadeia de afiliados, da loja) OU network_sponsor_id
-    # (cadeia MMN importada da Maxx) - prefere sponsor_id quando ambos existem.
-    # A cada nivel, se o ancestor for network_1 ou network_2, ele recebe comissao da
-    # geracao N usando a taxa DA SUA REDE, INDEPENDENTE de inscricao no programa.
-    # Iter 40: removido filtro `referral_program_active`. Comissoes sao sempre criadas;
-    # se o beneficiario nao esta inscrito, fica em pending_enrollment ate ele ativar.
+    # Iter 40: comissoes sao SEMPRE geradas (sem filtrar por programa de beneficios).
+    # Beneficiarios nao inscritos ficam com status='pending_enrollment' e a comissao eh
+    # liberada quando se inscrevem. A geracao incrementa a cada passo da cadeia,
+    # mesmo quando o ancestral nao eh MMN (nao paga, mas "gasta" a geracao,
+    # preservando a topologia da rede).
     network1_pcts = settings.get("network1_generations", []) or []
     network2_pcts = settings.get("network2_generations", []) or []
     current_id = user.get("sponsor_id") or user.get("network_sponsor_id")
-    visited = {user["user_id"]}  # evita ciclo
+    visited = {user["user_id"]}
     generation = 1
     while generation <= 6 and current_id and current_id not in visited:
         visited.add(current_id)
@@ -1049,7 +1047,6 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                         "program_active_at_creation": a_active,
                         "created_at": now_iso(),
                     })
-        # Sobe pela cadeia: prefere sponsor_id, fallback para network_sponsor_id
         current_id = ancestor.get("sponsor_id") or ancestor.get("network_sponsor_id")
         generation += 1
 
@@ -1849,7 +1846,9 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                 doc["recalc_batch_id"] = batch_id
             out.append(doc)
 
-    # 2) MMN ate 6 geracoes (Iter 40: sem filtro de inscricao)
+    # 2) MMN ate 6 geracoes (Iter 40: sem filtro de inscricao; cadeia em estrutura linear)
+    # Importante: cliente regular no meio da cadeia GASTA geracao (so nao recebe comissao).
+    # Isso preserva a topologia da rede MMN exatamente como cadastrada.
     network1_pcts = settings.get("network1_generations", []) or []
     network2_pcts = settings.get("network2_generations", []) or []
     current_id = customer.get("sponsor_id") or customer.get("network_sponsor_id")
@@ -1888,6 +1887,8 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                         doc["retroactive"] = True
                         doc["recalc_batch_id"] = batch_id
                     out.append(doc)
+        # Avanca para o proximo ancestral E para a proxima geracao,
+        # mesmo quando o atual nao for MMN (nao quebra a cadeia)
         current_id = ancestor.get("sponsor_id") or ancestor.get("network_sponsor_id")
         generation += 1
 
@@ -2062,12 +2063,14 @@ class _RecalcBody(BaseModel):
     user_id: Optional[str] = None    # filtra por user_id (comprador)
     customer_email: Optional[str] = None  # filtra por email do comprador
     order_ids: Optional[List[str]] = None  # opcional, lista especifica
+    force: bool = False              # Iter 41: se True, apaga comissoes existentes e recalcula
 
 
-async def _list_orders_missing_commissions(db, body: _RecalcBody):
-    """Retorna orders pagos SEM nenhuma comissao registrada hoje, aplicando filtros."""
+async def _list_orders_for_recalc(db, body: _RecalcBody):
+    """Retorna orders pagos. Se body.force, retorna TODOS no filtro (mesmo que ja tenham
+    comissoes — elas serao apagadas no apply). Caso contrario, apenas os que estao SEM
+    comissao (comportamento original)."""
     q = {"payment_status": "paid"}
-    # Periodo
     if body.date_from:
         q.setdefault("created_at", {})["$gte"] = body.date_from + "T00:00:00"
     if body.date_to:
@@ -2075,7 +2078,6 @@ async def _list_orders_missing_commissions(db, body: _RecalcBody):
     if body.user_id:
         q["user_id"] = body.user_id
     if body.customer_email:
-        # resolve user_id
         cust = await db.users.find_one({"email": body.customer_email.strip().lower()}, {"_id": 0, "user_id": 1})
         if not cust:
             return []
@@ -2084,14 +2086,19 @@ async def _list_orders_missing_commissions(db, body: _RecalcBody):
         q["order_id"] = {"$in": body.order_ids}
 
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).limit(2000).to_list(2000)
-
-    # Filtra apenas os que NAO tem comissao
     if not orders:
         return []
+    if body.force:
+        return orders
     order_ids = [o["order_id"] for o in orders]
     have = await db.commissions.distinct("order_id", {"order_id": {"$in": order_ids}})
     have_set = set(have)
     return [o for o in orders if o["order_id"] not in have_set]
+
+
+# Mantem nome antigo para compatibilidade com chamadas existentes
+async def _list_orders_missing_commissions(db, body: _RecalcBody):
+    return await _list_orders_for_recalc(db, body)
 
 
 async def _build_recalc_preview(db, body: _RecalcBody):
@@ -2202,14 +2209,32 @@ async def admin_recalc_apply(request: Request, body: _RecalcBody, user: dict = D
     batch_id = gen_id("recalc_")
     all_docs = []
     processed_ids = []
+    deleted_count = 0
     for o in orders:
         cust = await db.users.find_one({"user_id": o.get("user_id")}, {"_id": 0}) if o.get("user_id") else None
         if not cust:
             continue
-        # Re-checa que ainda nao tem comissao (proteção race-condition)
-        if await db.commissions.count_documents({"order_id": o["order_id"]}) > 0:
-            continue
+        if body.force:
+            # Iter 41: apaga TODAS as comissoes existentes deste pedido para recriar com a regra atual.
+            # Comissoes ja PAGAS sao preservadas (somente pending e pending_enrollment sao apagadas).
+            del_res = await db.commissions.delete_many({
+                "order_id": o["order_id"],
+                "status": {"$in": ["pending", "pending_enrollment"]},
+            })
+            deleted_count += del_res.deleted_count
+        else:
+            if await db.commissions.count_documents({"order_id": o["order_id"]}) > 0:
+                continue
         comms = await compute_order_commissions(db, o, cust, settings, mark_retroactive=True, batch_id=batch_id)
+        if body.force:
+            # Em modo force, nao recriar comissoes que ja foram pagas (preserva historico)
+            paid_keys = set()
+            async for paid in db.commissions.find(
+                {"order_id": o["order_id"], "status": "paid"},
+                {"_id": 0, "user_id": 1, "type": 1, "generation": 1}
+            ):
+                paid_keys.add((paid["user_id"], paid["type"], paid.get("generation")))
+            comms = [c for c in comms if (c["user_id"], c["type"], c.get("generation")) not in paid_keys]
         if comms:
             all_docs.extend(comms)
             processed_ids.append(o["order_id"])

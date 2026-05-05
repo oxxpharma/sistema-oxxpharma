@@ -50,7 +50,8 @@ def test_mmn_commission_created_even_without_enrollment_and_hidden_from_user():
         cust_tok = requests.post(f"{API_URL}/api/auth/login",
                                  json={"email": cust_email, "password": "test@123"}, timeout=15).json()["token"]
         h = {"Authorization": f"Bearer {cust_tok}"}
-        prods = requests.get(f"{API_URL}/api/products?limit=1", timeout=15).json()["products"]
+        prods = requests.get(f"{API_URL}/api/products?limit=20", timeout=15).json()["products"]
+        prods = [p for p in prods if (p.get("stock") or 0) > 0 and (p.get("price") or 0) > 0]
         pid = prods[0]["product_id"]
         requests.post(f"{API_URL}/api/cart/items",
                       json={"product_id": pid, "quantity": 1}, headers=h, timeout=15)

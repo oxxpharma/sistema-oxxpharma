@@ -15,6 +15,7 @@ export default function AdminRecalcCommissions() {
     date_from: '',
     date_to: '',
     customer_email: '',
+    force: false,
   });
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -29,6 +30,7 @@ export default function AdminRecalcCommissions() {
     if (filters.date_from) b.date_from = filters.date_from;
     if (filters.date_to) b.date_to = filters.date_to;
     if (filters.customer_email.trim()) b.customer_email = filters.customer_email.trim().toLowerCase();
+    if (filters.force) b.force = true;
     return b;
   };
 
@@ -149,6 +151,22 @@ export default function AdminRecalcCommissions() {
             </div>
           </Field>
         </div>
+        {/* Iter 41: modo force - reprocessa pedidos que ja tem comissao */}
+        <label className={`mt-4 flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${filters.force ? 'border-amber-400 bg-amber-50' : 'border-border bg-bg-secondary/40'}`} data-testid="force-toggle-label">
+          <input
+            type="checkbox"
+            checked={filters.force}
+            onChange={e => { setFilters({ ...filters, force: e.target.checked }); setPreview(null); }}
+            className="mt-0.5 w-4 h-4 accent-amber-500"
+            data-testid="force-toggle"
+          />
+          <div className="text-xs">
+            <div className="font-bold text-amber-900">Reprocessar pedidos que já têm comissão (modo force)</div>
+            <div className="text-amber-800/80 mt-0.5 leading-relaxed">
+              Apaga as comissões <strong>pendentes</strong> e <strong>aguardando inscrição</strong> dos pedidos no filtro e recalcula tudo com a regra atual. Comissões <strong>pagas</strong> são preservadas (não duplicam). Útil para corrigir histórico após mudanças nas regras de cálculo MMN.
+            </div>
+          </div>
+        </label>
         <div className="flex gap-2 mt-4">
           <Button onClick={onSimulate} disabled={loading} data-testid="btn-simulate">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
