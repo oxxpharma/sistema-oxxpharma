@@ -2233,7 +2233,7 @@ async def admin_recalc_apply(request: Request, body: _RecalcBody, user: dict = D
                 {"order_id": o["order_id"], "status": "paid"},
                 {"_id": 0, "user_id": 1, "type": 1, "generation": 1}
             ):
-                paid_keys.add((paid["user_id"], paid["type"], paid.get("generation")))
+                paid_keys.add((paid.get("user_id"), paid.get("type"), paid.get("generation")))
             comms = [c for c in comms if (c["user_id"], c["type"], c.get("generation")) not in paid_keys]
         if comms:
             all_docs.extend(comms)
