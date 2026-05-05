@@ -31,6 +31,8 @@ def test_build_payload_aggregates_by_order():
     assert len(aaa["products"]) == 2
     # Resumo concatenado
     assert "Vit C" in aaa["product_name"] and "Omega 3" in aaa["product_name"]
+    # Iter 39: produtos em linhas separadas
+    assert "\n" in aaa["product_name"]
     bbb = by_order["ord_BBB"]
     assert abs(bbb["points"] - 7.5) < 0.001
     assert bbb["quantity"] == 3

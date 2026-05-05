@@ -149,9 +149,12 @@ def _build_payload(cfg: Dict, points: List[Dict]) -> Dict:
     items = []
     for key in order_index:
         agg = grouped[key]
-        # Resumo textual dos produtos para sistemas que so leem product_name
+        # Iter 39: cada produto em uma linha separada (\n) para que sistemas que renderizam
+        # o campo "Produto" como string (Maxx) exibam um produto por linha em vez de
+        # concatenar tudo numa unica linha. O array `products[]` continua disponivel
+        # para sistemas que querem renderizar tabela.
         names = [f"{prod.get('product_name') or '?'} x{prod.get('quantity') or 1}" for prod in agg["products"]]
-        agg["product_name"] = "; ".join(names) if names else None
+        agg["product_name"] = "\n".join(names) if names else None
         items.append(agg)
     template = (cfg.get("maxx_payload_template") or "").strip()
     if template:
