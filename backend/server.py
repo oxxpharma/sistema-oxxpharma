@@ -401,6 +401,9 @@ async def lifespan(app: FastAPI):
     await app.db.card_batches.create_index("created_at")
     await app.db.card_api_logs.create_index("log_id", unique=True)
     await app.db.card_api_logs.create_index("created_at")
+    # Iter 39: cliques no link de indicacao
+    await app.db.referral_clicks.create_index("owner_user_id")
+    await app.db.referral_clicks.create_index("created_at")
     # Migracao: se ainda nao rodou, reseta referral_codes -> None e marca referral_program_active=False
     migration = await app.db.migrations.find_one({"_id": "reset_referrals_for_card_program"})
     if not migration:
@@ -2208,13 +2211,138 @@ async def admin_recalc_history(request: Request, limit: int = 50, user: dict = D
 
 @app.get("/api/referrals/validate/{code}")
 async def validate_referral_code(request: Request, code: str):
-    """Valida codigo de indicacao publico - usado pela loja antes do checkout."""
+    """Valida codigo de indicacao publico - usado pela loja antes do checkout.
+    Iter 39: tambem registra um click na collection `referral_clicks` para
+    estatisticas do indicador na pagina /indique-ganhe.
+    """
     db = request.app.db
     code_norm = code.strip().upper()
     u = await db.users.find_one({"referral_code": code_norm, "status": "active"}, {"_id": 0, "password_hash": 0})
     if not u:
         return {"valid": False}
+    # Registra clique (best-effort, nao bloqueia resposta)
+    try:
+        await db.referral_clicks.insert_one({
+            "click_id": gen_id("clk_"),
+            "code": code_norm,
+            "owner_user_id": u.get("user_id"),
+            "ip": (request.client.host if request.client else None),
+            "user_agent": request.headers.get("user-agent", "")[:300],
+            "referer": request.headers.get("referer", "")[:300],
+            "created_at": now_iso(),
+        })
+    except Exception as e:
+        logger.debug(f"referral_clicks insert error: {e}")
     return {"valid": True, "code": code_norm, "affiliate_name": u.get("name")}
+
+@app.get("/api/users/me/referrals")
+async def my_referrals_list(request: Request, page: int = 1, limit: int = 20, user: dict = Depends(get_current_user)):
+    """Iter 39: lista quem entrou pelo link do usuario logado, com status agregado:
+    cadastrou, comprou (qtd/total), aderiu ao programa de beneficios.
+    Tambem retorna sumario de cliques (total + ultimos 30 dias).
+    """
+    db = request.app.db
+    uid = user["user_id"]
+
+    # Cliques no link
+    clicks_total = await db.referral_clicks.count_documents({"owner_user_id": uid})
+    from datetime import timedelta
+    since_30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    clicks_30 = await db.referral_clicks.count_documents({
+        "owner_user_id": uid, "created_at": {"$gte": since_30}
+    })
+
+    # Lista de pessoas indicadas (sponsor_id = uid). Ordena por mais recente.
+    q = {"sponsor_id": uid}
+    total = await db.users.count_documents(q)
+    skip = max(0, (page - 1) * limit)
+    cursor = db.users.find(
+        q,
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "created_at": 1,
+         "referral_program_active": 1, "referral_enrollment_status": 1}
+    ).sort("created_at", -1).skip(skip).limit(limit)
+    indicated = await cursor.to_list(limit)
+
+    # Para cada usuario, agrega pedidos pagos e total gasto
+    paid_filter = {"$in": ["paid", "shipped", "delivered"]}
+    enriched = []
+    enrolled_total = 0
+    purchasers_total = 0
+    for u in indicated:
+        agg = await db.orders.aggregate([
+            {"$match": {"user_id": u["user_id"], "payment_status": paid_filter}},
+            {"$group": {"_id": None, "count": {"$sum": 1}, "total": {"$sum": "$total"}}},
+        ]).to_list(1)
+        orders_count = agg[0]["count"] if agg else 0
+        orders_total = round(agg[0]["total"], 2) if agg else 0
+        if orders_count > 0:
+            purchasers_total += 1
+        enrolled = bool(u.get("referral_program_active") or u.get("referral_enrollment_status") in ("approved", "pending_approval"))
+        if enrolled:
+            enrolled_total += 1
+        # Mascara o email para privacidade (ex.: ma****@gmail.com)
+        email = u.get("email") or ""
+        masked_email = email
+        if email and "@" in email:
+            local, _, domain = email.partition("@")
+            if len(local) > 3:
+                masked_email = local[:2] + "*" * max(2, len(local) - 4) + local[-2:] + "@" + domain
+        enriched.append({
+            "user_id": u["user_id"],
+            "name": (u.get("name") or "").split(" ")[0] + (" " + (u.get("name") or "").split(" ")[-1][:1] + "." if len((u.get("name") or "").split(" ")) > 1 else ""),
+            "email_masked": masked_email,
+            "registered_at": u.get("created_at"),
+            "orders_count": orders_count,
+            "orders_total": orders_total,
+            "has_purchases": orders_count > 0,
+            "enrolled_in_program": enrolled,
+            "enrollment_status": u.get("referral_enrollment_status"),
+        })
+
+    # Totais agregados (independente da paginacao)
+    enrolled_count_full = await db.users.count_documents({
+        "sponsor_id": uid,
+        "$or": [
+            {"referral_program_active": True},
+            {"referral_enrollment_status": {"$in": ["approved", "pending_approval"]}},
+        ],
+    })
+    # Compradores: precisa de aggregation (orders join) - faz lookup compacto
+    purchasers_pipeline = [
+        {"$match": {"sponsor_id": uid}},
+        {"$lookup": {
+            "from": "orders",
+            "let": {"uid": "$user_id"},
+            "pipeline": [
+                {"$match": {"$expr": {"$and": [
+                    {"$eq": ["$user_id", "$$uid"]},
+                    {"$in": ["$payment_status", ["paid", "shipped", "delivered"]]},
+                ]}}},
+                {"$limit": 1},
+            ],
+            "as": "paid_orders",
+        }},
+        {"$match": {"paid_orders.0": {"$exists": True}}},
+        {"$count": "n"},
+    ]
+    pres = await db.users.aggregate(purchasers_pipeline).to_list(1)
+    purchasers_count_full = pres[0]["n"] if pres else 0
+
+    return {
+        "summary": {
+            "clicks_total": clicks_total,
+            "clicks_30d": clicks_30,
+            "registered_count": total,
+            "purchasers_count": purchasers_count_full,
+            "enrolled_in_program_count": enrolled_count_full,
+        },
+        "users": enriched,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": max(1, (total + limit - 1) // limit),
+    }
+
 
 @app.get("/api/users/me/referral")
 async def my_referral(request: Request, user: dict = Depends(get_current_user)):

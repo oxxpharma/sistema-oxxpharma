@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet, CreditCard, Send, Gift } from 'lucide-react';
+import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet, CreditCard, Send, Gift, MousePointerClick, UserPlus, ShoppingBag, Award } from 'lucide-react';
 import { toast } from 'sonner';
 import ReferralEnrollmentForm from '../../components/ReferralEnrollmentForm';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
@@ -12,17 +12,20 @@ import { getIcon } from '../../lib/iconLibrary';
 export default function MyReferral() {
   const [data, setData] = useState(null);
   const [commissions, setCommissions] = useState([]);
+  const [referrals, setReferrals] = useState(null); // Iter 39
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const settings = useSiteSettings();
 
   const load = async () => {
-    const [ref, comms] = await Promise.all([
+    const [ref, comms, refs] = await Promise.all([
       api.get('/api/users/me/referral'),
       api.get('/api/users/me/commissions'),
+      api.get('/api/users/me/referrals?limit=50').catch(() => null),
     ]);
     setData(ref);
     setCommissions(comms.commissions || []);
+    setReferrals(refs);
   };
 
   useEffect(() => {
@@ -340,6 +343,105 @@ export default function MyReferral() {
         </div>
       </div>
 
+      {/* Iter 39: Resumo de quem entrou pelo link */}
+      {referrals && (
+        <div className="bg-white rounded-xl border border-border overflow-hidden mb-8" data-testid="referral-people">
+          <div className="p-6 border-b border-border flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="font-heading font-black text-lg flex items-center gap-2">
+                <Users className="w-5 h-5 text-brand-main" /> Pessoas que vieram pelo seu link
+              </h2>
+              <p className="text-xs text-txt-secondary mt-1">Veja quem clicou, se cadastrou, comprou e aderiu ao programa.</p>
+            </div>
+          </div>
+
+          {/* Funil de cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-6 pt-4 border-b border-border bg-bg-secondary/40">
+            <FunnelCard
+              icon={MousePointerClick}
+              color="indigo"
+              label="Cliques no link"
+              value={referrals.summary?.clicks_total ?? 0}
+              hint={`${referrals.summary?.clicks_30d ?? 0} nos últimos 30 dias`}
+              testId="funnel-clicks"
+            />
+            <FunnelCard
+              icon={UserPlus}
+              color="brand"
+              label="Cadastros"
+              value={referrals.summary?.registered_count ?? 0}
+              hint="Criaram conta"
+              testId="funnel-registered"
+            />
+            <FunnelCard
+              icon={ShoppingBag}
+              color="emerald"
+              label="Compraram"
+              value={referrals.summary?.purchasers_count ?? 0}
+              hint="≥1 pedido pago"
+              testId="funnel-purchasers"
+            />
+            <FunnelCard
+              icon={Award}
+              color="amber"
+              label="Aderiram ao programa"
+              value={referrals.summary?.enrolled_in_program_count ?? 0}
+              hint="Indicam também"
+              testId="funnel-enrolled"
+            />
+          </div>
+
+          {/* Lista detalhada */}
+          {referrals.users?.length === 0 ? (
+            <div className="p-10 text-center text-txt-secondary text-sm">
+              Ainda ninguém se cadastrou pelo seu link. Compartilhe e acompanhe aqui!
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm" data-testid="referral-people-table">
+                <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
+                  <tr>
+                    <th className="text-left p-3">Pessoa</th>
+                    <th className="text-left p-3">Cadastro</th>
+                    <th className="text-center p-3">Comprou?</th>
+                    <th className="text-right p-3">Pedidos</th>
+                    <th className="text-right p-3">Total gasto</th>
+                    <th className="text-center p-3">Programa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {referrals.users.map(u => (
+                    <tr key={u.user_id} className="border-t border-border" data-testid={`ref-row-${u.user_id}`}>
+                      <td className="p-3">
+                        <div className="font-semibold">{u.name || 'Sem nome'}</div>
+                        <div className="text-xs text-txt-secondary">{u.email_masked}</div>
+                      </td>
+                      <td className="p-3 text-xs whitespace-nowrap">{formatDateTime(u.registered_at)}</td>
+                      <td className="p-3 text-center">
+                        {u.has_purchases
+                          ? <Badge variant="success">Sim</Badge>
+                          : <span className="text-xs text-txt-secondary">—</span>}
+                      </td>
+                      <td className="p-3 text-right font-bold">{u.orders_count}</td>
+                      <td className="p-3 text-right text-emerald-600 font-bold">
+                        {u.has_purchases ? formatCurrency(u.orders_total) : '—'}
+                      </td>
+                      <td className="p-3 text-center">
+                        {u.enrollment_status === 'pending_approval'
+                          ? <Badge variant="warning">Em análise</Badge>
+                          : u.enrolled_in_program
+                            ? <Badge variant="brand">Aderiu</Badge>
+                            : <span className="text-xs text-txt-secondary">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Histórico */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <div className="p-6 border-b border-border">
@@ -392,6 +494,27 @@ export default function MyReferral() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const FUNNEL_PALETTE = {
+  indigo: { bg: 'bg-indigo-100', text: 'text-indigo-600', accent: 'text-indigo-700' },
+  brand: { bg: 'bg-brand-light', text: 'text-brand-main', accent: 'text-brand-main' },
+  emerald: { bg: 'bg-emerald-100', text: 'text-emerald-600', accent: 'text-emerald-700' },
+  amber: { bg: 'bg-amber-100', text: 'text-amber-600', accent: 'text-amber-700' },
+};
+
+function FunnelCard({ icon: Icon, color = 'brand', label, value, hint, testId }) {
+  const c = FUNNEL_PALETTE[color] || FUNNEL_PALETTE.brand;
+  return (
+    <div className="bg-white rounded-xl border border-border p-4" data-testid={testId}>
+      <div className={`w-9 h-9 ${c.bg} rounded-lg flex items-center justify-center mb-2`}>
+        <Icon className={`w-5 h-5 ${c.text}`} />
+      </div>
+      <div className={`text-2xl font-heading font-black ${c.accent}`}>{value}</div>
+      <div className="text-xs text-txt-secondary leading-tight">{label}</div>
+      {hint && <div className="text-[11px] text-txt-secondary/70 mt-0.5">{hint}</div>}
     </div>
   );
 }
