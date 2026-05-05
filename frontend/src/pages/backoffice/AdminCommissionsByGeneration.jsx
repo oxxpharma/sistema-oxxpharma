@@ -14,6 +14,7 @@ const STATUS_OPTIONS = [
   { value: '', label: 'Todos os status' },
   { value: 'paid', label: 'Pagas' },
   { value: 'pending', label: 'Pendentes' },
+  { value: 'pending_enrollment', label: 'Aguardando inscrição no programa' },
   { value: 'cancelled', label: 'Canceladas' },
 ];
 
@@ -313,6 +314,7 @@ function ChainTable({ chain, subtotal }) {
               <td className="p-2 text-center">
                 {c.status === 'paid' ? <Badge variant="success">Pago</Badge>
                   : c.status === 'pending' ? <Badge variant="warning">Pendente</Badge>
+                  : c.status === 'pending_enrollment' ? <Badge variant="default" title="Beneficiário não está inscrito no Clube. Será liberado quando ele se inscrever.">Aguardando inscrição</Badge>
                   : <Badge variant="default">{c.status}</Badge>}
               </td>
             </tr>

@@ -351,12 +351,16 @@ def test_mmn_without_program_active_does_not_receive(db):
     assert r.status_code == 200, r.text
     order_id = (r.json().get("order_id") or r.json().get("order", {}).get("order_id"))
 
-    # Boss eh sponsor DIRETO do cust, entao ainda recebe comissao de afiliado (gen 0).
-    # Mas NAO deve receber comissao MMN (network_gen) porque programa nao esta ativo.
+    # Iter 40: Comissao MMN AGORA eh sempre criada, mesmo sem programa ativo,
+    # porem com status='pending_enrollment' e program_active_at_creation=False.
+    # Quando o beneficiario ativa o programa, sao promovidas para 'pending'.
     mmn_comms = list(db.commissions.find(
         {"order_id": order_id, "user_id": boss_id, "type": "network_gen"}
     ))
-    assert len(mmn_comms) == 0, f"Boss N1 sem programa ativo NAO deveria receber MMN: {mmn_comms}"
+    assert len(mmn_comms) == 1, f"Boss N1 deveria receber 1 MMN (pending_enrollment): {mmn_comms}"
+    c = mmn_comms[0]
+    assert c["status"] == "pending_enrollment"
+    assert c.get("program_active_at_creation") is False
 
     db.commissions.delete_many({"order_id": order_id})
     db.orders.delete_many({"order_id": order_id})

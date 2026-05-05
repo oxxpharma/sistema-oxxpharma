@@ -985,7 +985,11 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     commissions_to_insert = []
 
     # 1) Comissao de afiliado (8% configuravel) - pago a quem indicou via link
+    # Iter 40: sempre cria. Se afiliado nao esta inscrito no programa, status=pending_enrollment
+    # e fica oculto ate ele se inscrever.
     if affiliate_id and commission_amount > 0:
+        affiliate_user = await db.users.find_one({"user_id": affiliate_id}, {"_id": 0})
+        aff_active = bool(affiliate_user and affiliate_user.get("referral_program_active"))
         commissions_to_insert.append({
             "commission_id": gen_id("com_"),
             "user_id": affiliate_id,
@@ -998,7 +1002,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             "amount": commission_amount,
             "rate": affiliate_rate,
             "order_subtotal": round(subtotal, 2),
-            "status": "pending",
+            "status": "pending" if aff_active else "pending_enrollment",
+            "program_active_at_creation": aff_active,
             "created_at": now_iso(),
         })
 
@@ -1006,9 +1011,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     # NOVA REGRA (Iter 31): subir pela cadeia ATE 6 niveis. O "ancestral imediato" de
     # um usuario eh sponsor_id (cadeia de afiliados, da loja) OU network_sponsor_id
     # (cadeia MMN importada da Maxx) - prefere sponsor_id quando ambos existem.
-    # A cada nivel, se o ancestor for network_1 ou network_2 E tiver programa de
-    # indicacao ativo, ele recebe comissao da geracao N usando a taxa DA SUA REDE.
-    # Multiplos MMN na mesma cadeia recebem cada um sua geracao relativa ao comprador.
+    # A cada nivel, se o ancestor for network_1 ou network_2, ele recebe comissao da
+    # geracao N usando a taxa DA SUA REDE, INDEPENDENTE de inscricao no programa.
+    # Iter 40: removido filtro `referral_program_active`. Comissoes sao sempre criadas;
+    # se o beneficiario nao esta inscrito, fica em pending_enrollment ate ele ativar.
     network1_pcts = settings.get("network1_generations", []) or []
     network2_pcts = settings.get("network2_generations", []) or []
     current_id = user.get("sponsor_id") or user.get("network_sponsor_id")
@@ -1020,13 +1026,13 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         if not ancestor:
             break
         a_net = ancestor.get("network_type")
-        a_active = bool(ancestor.get("referral_program_active"))
-        if a_net in (NETWORK_1, NETWORK_2) and a_active:
+        if a_net in (NETWORK_1, NETWORK_2):
             pcts = network1_pcts if a_net == NETWORK_1 else network2_pcts
             pct = pcts[generation - 1] if generation - 1 < len(pcts) else 0
             if pct > 0:
                 amt = round(subtotal * pct / 100, 2)
                 if amt > 0:
+                    a_active = bool(ancestor.get("referral_program_active"))
                     commissions_to_insert.append({
                         "commission_id": gen_id("com_"),
                         "user_id": ancestor["user_id"],
@@ -1039,7 +1045,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                         "amount": amt,
                         "rate": pct / 100,
                         "order_subtotal": round(subtotal, 2),
-                        "status": "pending",
+                        "status": "pending" if a_active else "pending_enrollment",
+                        "program_active_at_creation": a_active,
                         "created_at": now_iso(),
                     })
         # Sobe pela cadeia: prefere sponsor_id, fallback para network_sponsor_id
@@ -1786,10 +1793,17 @@ async def admin_user_details(request: Request, user_id: str, user: dict = Depend
 async def compute_order_commissions(db, order, customer, settings, *, mark_retroactive=False, batch_id=None):
     """Calcula a lista de comissoes (afiliado + MMN ate 6 geracoes) para um pedido.
 
-    Reproduz EXATAMENTE a regra do /api/checkout (Iter 31):
+    Iter 40: Comissoes sao SEMPRE geradas para todos os usuarios na cadeia (afiliado +
+    network_1/network_2 ate 6 geracoes). O programa de beneficios controla apenas a
+    *visibilidade e o pagamento*: se o beneficiario nao esta com `referral_program_active=True`
+    no momento da geracao, a comissao fica com status='pending_enrollment' e nao aparece
+    para ele em `/api/users/me/commissions` ate ele se inscrever. Quando ele ativa o
+    programa, todas as comissoes pendentes dele sao promovidas para 'pending'.
+
+    Reproduz a regra do /api/checkout (Iter 31), removendo apenas o filtro de inscricao:
       - afiliado: sponsor_id direto do customer recebe affiliate_commission_rate (gen 0)
       - MMN: sobe pela cadeia sponsor_id -> network_sponsor_id ate 6 niveis. Em cada nivel,
-        ancestor recebe se for network_1/network_2 E referral_program_active=True.
+        ancestor recebe se for network_1 ou network_2 (independente de inscricao).
       - Se mark_retroactive=True, marca cada doc com retroactive + recalc_batch_id.
 
     Retorna lista de dicts prontos para inserir em db.commissions (NAO insere).
@@ -1802,11 +1816,18 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
 
     out = []
 
+    def _status_for(beneficiary: dict) -> tuple:
+        """Retorna (status, program_active) baseado na inscricao do beneficiario."""
+        active = bool(beneficiary.get("referral_program_active"))
+        return ("pending" if active else "pending_enrollment", active)
+
     # 1) Afiliado
     sp_id = customer.get("sponsor_id")
     if sp_id and sp_id != customer_id:
         amt = round(subtotal * affiliate_rate, 2)
         if amt > 0:
+            sponsor = await db.users.find_one({"user_id": sp_id}, {"_id": 0})
+            status, program_active = _status_for(sponsor or {})
             doc = {
                 "commission_id": gen_id("com_"),
                 "user_id": sp_id,
@@ -1819,7 +1840,8 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                 "amount": amt,
                 "rate": affiliate_rate,
                 "order_subtotal": round(subtotal, 2),
-                "status": "pending",
+                "status": status,
+                "program_active_at_creation": program_active,
                 "created_at": now_iso(),
             }
             if mark_retroactive:
@@ -1827,7 +1849,7 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                 doc["recalc_batch_id"] = batch_id
             out.append(doc)
 
-    # 2) MMN ate 6 geracoes
+    # 2) MMN ate 6 geracoes (Iter 40: sem filtro de inscricao)
     network1_pcts = settings.get("network1_generations", []) or []
     network2_pcts = settings.get("network2_generations", []) or []
     current_id = customer.get("sponsor_id") or customer.get("network_sponsor_id")
@@ -1839,13 +1861,13 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
         if not ancestor:
             break
         a_net = ancestor.get("network_type")
-        a_active = bool(ancestor.get("referral_program_active"))
-        if a_net in (NETWORK_1, NETWORK_2) and a_active:
+        if a_net in (NETWORK_1, NETWORK_2):
             pcts = network1_pcts if a_net == NETWORK_1 else network2_pcts
             pct = pcts[generation - 1] if generation - 1 < len(pcts) else 0
             if pct > 0:
                 amt = round(subtotal * pct / 100, 2)
                 if amt > 0:
+                    status, program_active = _status_for(ancestor)
                     doc = {
                         "commission_id": gen_id("com_"),
                         "user_id": ancestor["user_id"],
@@ -1858,7 +1880,8 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                         "amount": amt,
                         "rate": pct / 100,
                         "order_subtotal": round(subtotal, 2),
-                        "status": "pending",
+                        "status": status,
+                        "program_active_at_creation": program_active,
                         "created_at": now_iso(),
                     }
                     if mark_retroactive:
@@ -2103,7 +2126,8 @@ async def _build_recalc_preview(db, body: _RecalcBody):
             "commissions_total": order_total,
             "commissions_breakdown": [
                 {"user_id": c["user_id"], "type": c["type"], "generation": c["generation"],
-                 "amount": c["amount"], "rate": c["rate"]}
+                 "amount": c["amount"], "rate": c["rate"], "status": c.get("status"),
+                 "program_active_at_creation": c.get("program_active_at_creation")}
                 for c in comms
             ],
         })
@@ -2124,12 +2148,30 @@ async def _build_recalc_preview(db, body: _RecalcBody):
 
     by_user_list = sorted(by_user.values(), key=lambda x: -x["total"])
 
+    # Iter 40: split por status (pending = inscrito; pending_enrollment = aguardando)
+    pending_count = 0
+    pending_enrollment_count = 0
+    pending_amount = 0.0
+    pending_enrollment_amount = 0.0
+    for o in affected_orders:
+        for c in (o.get("commissions_breakdown") or []):
+            if c.get("status") == "pending_enrollment":
+                pending_enrollment_count += 1
+                pending_enrollment_amount = round(pending_enrollment_amount + (c.get("amount") or 0), 2)
+            else:
+                pending_count += 1
+                pending_amount = round(pending_amount + (c.get("amount") or 0), 2)
+
     return {
         "orders_eligible": len(orders),
         "orders_with_commissions": len([o for o in affected_orders if o["commissions_count"] > 0]),
         "orders_without_eligible_chain": len([o for o in affected_orders if o["commissions_count"] == 0]),
         "total_commissions": total_commissions,
         "total_amount": total_amount,
+        "commissions_pending": pending_count,
+        "commissions_pending_amount": pending_amount,
+        "commissions_pending_enrollment": pending_enrollment_count,
+        "commissions_pending_enrollment_amount": pending_enrollment_amount,
         "affected_orders": affected_orders,
         "beneficiaries": by_user_list,
     }
@@ -2417,7 +2459,9 @@ async def my_referral(request: Request, user: dict = Depends(get_current_user)):
 @app.get("/api/users/me/commissions")
 async def my_commissions(request: Request, page: int = 1, limit: int = 20, user: dict = Depends(get_current_user)):
     db = request.app.db
-    q = {"user_id": user["user_id"]}
+    # Iter 40: usuario nao ve comissoes em status pending_enrollment (geradas antes
+    # dele se inscrever no programa). Quando ele ativa, sao promovidas para 'pending'.
+    q = {"user_id": user["user_id"], "status": {"$ne": "pending_enrollment"}}
     total = await db.commissions.count_documents(q)
     comms = await db.commissions.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"commissions": comms, "total": total, "page": page}
@@ -3276,6 +3320,8 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
                 "rate_pct": round((c.get("rate") or 0) * 100, 3),
                 "status": c.get("status"),
                 "retroactive": bool(c.get("retroactive")),
+                "program_active_at_creation": c.get("program_active_at_creation"),
+                "beneficiary_enrolled_now": bool(u.get("referral_program_active")),
             })
         customer = users_map.get(o.get("user_id")) or {}
         recent_orders.append({
@@ -5739,6 +5785,13 @@ async def admin_approve_referral_enrollment(request: Request, user_id: str, user
             "referral_approved_at": now_iso(),
         }},
     )
+    # Iter 40: Promove comissoes pendentes de inscricao para pending (visiveis e pagaveis)
+    promo_result = await db.commissions.update_many(
+        {"user_id": user_id, "status": "pending_enrollment"},
+        {"$set": {"status": "pending", "promoted_on_enrollment_at": now_iso()}},
+    )
+    if promo_result.modified_count > 0:
+        logger.info(f"Iter 40: promovidas {promo_result.modified_count} comissoes pending_enrollment -> pending para {user_id}")
     # best-effort enviar para API do cartao
     try:
         clean = target.get("referral_enrollment") or {}
@@ -5948,7 +6001,12 @@ async def admin_activate_referral(request: Request, user_id: str, user: dict = D
             "referral_activated_by_admin": user["user_id"],
         }},
     )
-    return {"ok": True, "referral_code": code}
+    # Iter 40: promove comissoes pendentes de inscricao
+    promo_result = await db.commissions.update_many(
+        {"user_id": user_id, "status": "pending_enrollment"},
+        {"$set": {"status": "pending", "promoted_on_enrollment_at": now_iso()}},
+    )
+    return {"ok": True, "referral_code": code, "promoted_commissions": promo_result.modified_count}
 
 
 @app.post("/api/admin/users/{user_id}/deactivate-referral")

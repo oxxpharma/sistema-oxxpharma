@@ -176,6 +176,22 @@ export default function AdminRecalcCommissions() {
             <SumCard label="Valor total" value={formatCurrency(preview.total_amount)} color="text-brand-main bg-brand-light" big testId="sum-amount" />
           </div>
 
+          {/* Iter 40: Split inscritos vs aguardando inscricao */}
+          {(preview.commissions_pending_enrollment > 0 || preview.commissions_pending > 0) && (
+            <div className="grid sm:grid-cols-2 gap-3" data-testid="enrollment-split">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                <div className="text-xs uppercase font-bold text-emerald-700 mb-1">Liberadas (inscritos)</div>
+                <div className="text-2xl font-heading font-black text-emerald-700">{preview.commissions_pending}</div>
+                <div className="text-xs text-emerald-700/80">{formatCurrency(preview.commissions_pending_amount)} — pagáveis imediatamente</div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="text-xs uppercase font-bold text-amber-700 mb-1">Aguardando inscrição no programa</div>
+                <div className="text-2xl font-heading font-black text-amber-700">{preview.commissions_pending_enrollment}</div>
+                <div className="text-xs text-amber-700/80">{formatCurrency(preview.commissions_pending_enrollment_amount)} — liberadas quando o beneficiário se inscrever</div>
+              </div>
+            </div>
+          )}
+
           {/* Beneficiários */}
           {preview.beneficiaries?.length > 0 && (
             <div className="bg-white rounded-2xl border border-border p-5" data-testid="beneficiaries-card">
