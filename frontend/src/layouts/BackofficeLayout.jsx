@@ -46,6 +46,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments', perm: 'commercial' },
       { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved', perm: 'commercial' },
       { to: '/backoffice/relatorio-comissoes', icon: FileText, label: 'Rel. comissões', testId: 'nav-commissions-report', perm: 'financial' },
+      { to: '/backoffice/comissoes-por-geracao', icon: Network, label: 'Comissões por geração', testId: 'nav-commissions-by-gen', perm: 'financial' },
       { to: '/backoffice/recalcular-comissoes', icon: Calculator, label: 'Recalcular comissões', testId: 'nav-recalc-commissions', perm: 'financial' },
       { to: '/backoffice/pontos', icon: Star, label: 'Rel. pontos', testId: 'nav-points', perm: 'financial' },
       { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card', perm: 'financial' },

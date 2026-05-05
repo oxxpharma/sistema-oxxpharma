@@ -3159,6 +3159,152 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
 
 # ==================== ADMIN: COMMISSIONS REPORT (BENEFIT CARD) ====================
 
+@app.get("/api/admin/commissions-by-generation")
+async def admin_commissions_by_generation(request: Request, status: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    """Iter 39: Relatorio visual por geracao.
+
+    Retorna:
+      - summary_by_generation: [{generation, label, network_type, total_amount, count, avg_rate_pct, beneficiaries}]
+      - recent_orders: ultimos 30 pedidos com a cadeia completa de comissoes geradas
+        (para validar visualmente se cada geracao recebeu o %% correto)
+      - totals: {total_amount, total_count, orders_with_commission}
+    """
+    db = request.app.db
+    match = {}
+    if status:
+        match["status"] = status
+    if start:
+        match.setdefault("created_at", {})["$gte"] = start
+    if end:
+        match.setdefault("created_at", {})["$lte"] = end
+
+    # Agrega por (generation, type, network_type)
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": {
+                "generation": "$generation",
+                "type": "$type",
+                "network_type": "$network_type",
+            },
+            "total_amount": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+            "avg_rate": {"$avg": "$rate"},
+            "beneficiaries": {"$addToSet": "$user_id"},
+        }},
+        {"$sort": {"_id.generation": 1, "_id.network_type": 1}},
+    ]
+    agg = await db.commissions.aggregate(pipeline).to_list(100)
+    summary = []
+    total_amount_all = 0.0
+    total_count_all = 0
+    for a in agg:
+        gen = a["_id"].get("generation", 0)
+        typ = a["_id"].get("type")
+        net = a["_id"].get("network_type")
+        if typ == "affiliate":
+            label = "Afiliado Direto (cliente indicador)"
+        else:
+            net_label = "Equipe 1" if net == "network_1" else ("Equipe 2" if net == "network_2" else (net or "—"))
+            label = f"{gen}ª geração · {net_label}"
+        amt = round(a["total_amount"] or 0, 2)
+        total_amount_all += amt
+        total_count_all += a["count"]
+        summary.append({
+            "generation": gen,
+            "type": typ,
+            "network_type": net,
+            "label": label,
+            "total_amount": amt,
+            "count": a["count"],
+            "avg_rate_pct": round((a["avg_rate"] or 0) * 100, 3),
+            "beneficiaries_count": len(a.get("beneficiaries") or []),
+        })
+
+    # Pega os 30 pedidos mais recentes que geraram comissoes (usando distinct)
+    recent_order_ids = await db.commissions.distinct("order_id", match)
+    # Limita e pega os ultimos ordenando via orders.created_at
+    if recent_order_ids:
+        orders = await db.orders.find(
+            {"order_id": {"$in": recent_order_ids}},
+            {"_id": 0, "order_id": 1, "user_id": 1, "subtotal": 1, "total": 1,
+             "created_at": 1, "payment_status": 1, "order_number": 1, "invoice_number": 1}
+        ).sort("created_at", -1).limit(30).to_list(30)
+    else:
+        orders = []
+
+    # Para cada pedido, busca todas as comissoes + hidrata usuarios
+    order_ids = [o["order_id"] for o in orders]
+    comms_cursor = db.commissions.find(
+        {"order_id": {"$in": order_ids}, **match},
+        {"_id": 0}
+    ).sort("generation", 1)
+    comms_list = await comms_cursor.to_list(5000)
+    # Hidrata nomes/emails
+    user_ids = list({c.get("user_id") for c in comms_list if c.get("user_id")} |
+                    {o.get("user_id") for o in orders if o.get("user_id")})
+    users_map = {}
+    if user_ids:
+        for u in await db.users.find({"user_id": {"$in": user_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1, "referral_code": 1}).to_list(len(user_ids)):
+            users_map[u["user_id"]] = u
+
+    recent_orders = []
+    for o in orders:
+        chain = [c for c in comms_list if c["order_id"] == o["order_id"]]
+        # Ordena: afiliado (gen 0, type=affiliate) primeiro, depois demais por geracao
+        chain.sort(key=lambda c: (
+            0 if (c.get("type") == "affiliate") else (c.get("generation") or 99),
+            c.get("generation") or 99,
+            c.get("network_type") or "",
+        ))
+        chain_rows = []
+        total_chain = 0.0
+        for c in chain:
+            u = users_map.get(c.get("user_id")) or {}
+            amt = round(c.get("amount") or 0, 2)
+            total_chain += amt
+            chain_rows.append({
+                "commission_id": c.get("commission_id"),
+                "generation": c.get("generation"),
+                "type": c.get("type"),
+                "network_type": c.get("network_type"),
+                "beneficiary_id": c.get("user_id"),
+                "beneficiary_name": u.get("name") or "—",
+                "beneficiary_email": u.get("email"),
+                "beneficiary_network": u.get("network_type"),
+                "amount": amt,
+                "rate_pct": round((c.get("rate") or 0) * 100, 3),
+                "status": c.get("status"),
+                "retroactive": bool(c.get("retroactive")),
+            })
+        customer = users_map.get(o.get("user_id")) or {}
+        recent_orders.append({
+            "order_id": o.get("order_id"),
+            "order_number": o.get("order_number"),
+            "invoice_number": o.get("invoice_number"),
+            "created_at": o.get("created_at"),
+            "payment_status": o.get("payment_status"),
+            "subtotal": round(o.get("subtotal") or 0, 2),
+            "total": round(o.get("total") or 0, 2),
+            "customer_id": o.get("user_id"),
+            "customer_name": customer.get("name") or "—",
+            "customer_email": customer.get("email"),
+            "commission_total": round(total_chain, 2),
+            "chain": chain_rows,
+        })
+
+    return {
+        "summary_by_generation": summary,
+        "totals": {
+            "total_amount": round(total_amount_all, 2),
+            "total_count": total_count_all,
+            "orders_with_commission": len(recent_order_ids),
+        },
+        "recent_orders": recent_orders,
+        "filter": {"status": status, "start": start, "end": end},
+    }
+
+
 @app.get("/api/admin/commissions-report")
 async def admin_commissions_report(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
     """Relatorio agregado por usuario para envio a empresa de cartao de beneficios.

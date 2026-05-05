@@ -42,6 +42,7 @@ import AdminSettings from './pages/backoffice/AdminSettings';
 import AdminNetworks from './pages/backoffice/AdminNetworks';
 import AdminCandidates from './pages/backoffice/AdminCandidates';
 import AdminCommissionsReport from './pages/backoffice/AdminCommissionsReport';
+import AdminCommissionsByGeneration from './pages/backoffice/AdminCommissionsByGeneration';
 import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
 import AdminInvoices from './pages/backoffice/AdminInvoices';
 import AdminEmails from './pages/backoffice/AdminEmails';
@@ -131,6 +132,7 @@ function AppRoutes() {
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="adesoes-indicacao" element={<AdminReferralEnrollments />} />
         <Route path="relatorio-comissoes" element={<AdminCommissionsReport />} />
+        <Route path="comissoes-por-geracao" element={<AdminCommissionsByGeneration />} />
         <Route path="recalcular-comissoes" element={<AdminRecalcCommissions />} />
         <Route path="cartao" element={<AdminGiftCards />} />
         <Route path="pontos" element={<AdminPoints />} />
