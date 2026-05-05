@@ -9,6 +9,9 @@ import {
 } from 'recharts';
 import { Loader2, Search, ChevronDown, ChevronRight, DollarSign, TrendingUp, Users, Package } from 'lucide-react';
 import { toast } from 'sonner';
+import Pagination from '../../components/admin/Pagination';
+
+const PAGE_LIMIT = 20;
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Todos os status' },
@@ -28,21 +31,29 @@ export default function AdminCommissionsByGeneration() {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [expanded, setExpanded] = useState(new Set());
+  const [page, setPage] = useState(1);
 
-  const load = async () => {
+  const load = async (targetPage = page) => {
     setLoading(true);
     try {
       const q = new URLSearchParams();
       if (status) q.set('status', status);
       if (start) q.set('start', start);
       if (end) q.set('end', end);
+      q.set('page', String(targetPage));
+      q.set('limit', String(PAGE_LIMIT));
       const r = await api.get(`/api/admin/commissions-by-generation?${q}`);
       setData(r);
+      setPage(r.page || targetPage);
+      setExpanded(new Set()); // colapsa ao trocar pagina
     } catch (e) {
       toast.error(e?.message || 'Erro ao carregar');
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, []);
+
+  // Re-aplica filtros sempre volta pra pagina 1
+  const applyFilters = () => load(1);
 
   const toggle = (id) => {
     const s = new Set(expanded);
@@ -104,7 +115,7 @@ export default function AdminCommissionsByGeneration() {
           <label className="text-xs font-semibold text-txt-secondary block mb-1">Até</label>
           <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" />
         </div>
-        <Button variant="outline" onClick={load} data-testid="apply-filters"><Search className="w-4 h-4" /> Aplicar</Button>
+        <Button variant="outline" onClick={applyFilters} data-testid="apply-filters"><Search className="w-4 h-4" /> Aplicar</Button>
       </div>
 
       {loading ? (
@@ -244,6 +255,16 @@ export default function AdminCommissionsByGeneration() {
                     })}
                 </tbody>
               </table>
+            </div>
+            <div className="px-4 pb-4">
+              <Pagination
+                page={page}
+                pages={data?.pages || 1}
+                total={data?.total_orders || 0}
+                limit={PAGE_LIMIT}
+                onChange={(p) => load(p)}
+                testId="orders-with-commission-pagination"
+              />
             </div>
           </div>
         </>

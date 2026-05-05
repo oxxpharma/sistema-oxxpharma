@@ -3229,7 +3229,7 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
 # ==================== ADMIN: COMMISSIONS REPORT (BENEFIT CARD) ====================
 
 @app.get("/api/admin/commissions-by-generation")
-async def admin_commissions_by_generation(request: Request, status: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+async def admin_commissions_by_generation(request: Request, status: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     """Iter 39: Relatorio visual por geracao.
 
     Retorna:
@@ -3290,15 +3290,16 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
             "beneficiaries_count": len(a.get("beneficiaries") or []),
         })
 
-    # Pega os 30 pedidos mais recentes que geraram comissoes (usando distinct)
+    # Iter 41: pagina os pedidos com comissao
     recent_order_ids = await db.commissions.distinct("order_id", match)
-    # Limita e pega os ultimos ordenando via orders.created_at
+    total_orders = len(recent_order_ids)
+    skip = max(0, (page - 1) * limit)
     if recent_order_ids:
         orders = await db.orders.find(
             {"order_id": {"$in": recent_order_ids}},
             {"_id": 0, "order_id": 1, "user_id": 1, "subtotal": 1, "total": 1,
              "created_at": 1, "payment_status": 1, "order_number": 1, "invoice_number": 1}
-        ).sort("created_at", -1).limit(30).to_list(30)
+        ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     else:
         orders = []
 
@@ -3369,9 +3370,13 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
         "totals": {
             "total_amount": round(total_amount_all, 2),
             "total_count": total_count_all,
-            "orders_with_commission": len(recent_order_ids),
+            "orders_with_commission": total_orders,
         },
         "recent_orders": recent_orders,
+        "page": page,
+        "limit": limit,
+        "total_orders": total_orders,
+        "pages": max(1, (total_orders + limit - 1) // limit),
         "filter": {"status": status, "start": start, "end": end},
     }
 
