@@ -212,7 +212,7 @@ export default function MyReferral() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8" data-testid="my-referral">
       <h1 className="font-heading font-black text-3xl text-txt-primary mb-2 flex items-center gap-3">
-        <Share2 className="w-7 h-7 text-brand-main" /> Indique e ganhe {Math.round(data.commission_rate * 100)}%
+        <Share2 className="w-7 h-7 text-brand-main" /> Indique e ganhe benefícios
       </h1>
       <p className="text-sm text-txt-secondary mb-6">
         Compartilhe seu link personalizado. A cada compra feita através dele, sua comissão entra no seu saldo na conta.
