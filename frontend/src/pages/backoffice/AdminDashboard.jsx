@@ -29,19 +29,26 @@ const NETWORK_BADGE = {
 export default function AdminDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const d = await api.get('/api/admin/dashboard');
-        setData(d);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const load = async (s = start, e = end) => {
+    setLoading(true);
+    try {
+      const q = new URLSearchParams();
+      if (s) q.set('start', s);
+      if (e) q.set('end', e);
+      const url = q.toString() ? `/api/admin/dashboard?${q}` : '/api/admin/dashboard';
+      const d = await api.get(url);
+      setData(d);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  if (loading) {
+  useEffect(() => { load('', ''); /* eslint-disable-next-line */ }, []);
+
+  if (loading && !data) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="w-8 h-8 animate-spin text-brand-main" />
@@ -51,12 +58,65 @@ export default function AdminDashboard() {
   if (!data) return null;
 
   const wc = data.weekly_comparison || {};
+  const hasFilter = !!(start || end);
+  const clearFilter = () => { setStart(''); setEnd(''); load('', ''); };
+  const setQuickRange = (days) => {
+    const today = new Date();
+    const from = new Date();
+    from.setDate(today.getDate() - (days - 1));
+    const e = today.toISOString().slice(0, 10);
+    const s = from.toISOString().slice(0, 10);
+    setStart(s); setEnd(e); load(s, e);
+  };
 
   return (
     <div data-testid="admin-dashboard" className="space-y-5">
-      <div>
-        <h1 className="font-heading font-black text-3xl text-txt-primary">Dashboard</h1>
-        <p className="text-sm text-txt-secondary">Visão geral da operação · últimos 7 dias vs. semana anterior</p>
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+        <div>
+          <h1 className="font-heading font-black text-3xl text-txt-primary">Dashboard</h1>
+          <p className="text-sm text-txt-secondary">
+            {hasFilter
+              ? `Período: ${start || '...'} até ${end || '...'}`
+              : 'Visão geral da operação · últimos 7 dias vs. semana anterior'}
+          </p>
+        </div>
+        {/* Iter 41: filtro de range de data */}
+        <div className="bg-white border border-border rounded-lg p-3 flex flex-wrap items-end gap-2" data-testid="dashboard-period-filter">
+          <div>
+            <label className="text-[10px] uppercase font-bold text-txt-secondary block mb-1">De</label>
+            <input
+              type="date"
+              value={start}
+              onChange={e => setStart(e.target.value)}
+              className="h-9 px-2 text-sm bg-bg-secondary border border-border rounded-md"
+              data-testid="filter-start"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase font-bold text-txt-secondary block mb-1">Até</label>
+            <input
+              type="date"
+              value={end}
+              onChange={e => setEnd(e.target.value)}
+              className="h-9 px-2 text-sm bg-bg-secondary border border-border rounded-md"
+              data-testid="filter-end"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => load(start, end)}
+            className="h-9 px-3 bg-brand-main text-white rounded-md text-xs font-bold hover:opacity-90"
+            data-testid="filter-apply"
+          >Aplicar</button>
+          <div className="flex gap-1 ml-2">
+            <button type="button" onClick={() => setQuickRange(7)} className="h-9 px-2 text-xs font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-7d">7d</button>
+            <button type="button" onClick={() => setQuickRange(30)} className="h-9 px-2 text-xs font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-30d">30d</button>
+            <button type="button" onClick={() => setQuickRange(90)} className="h-9 px-2 text-xs font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-90d">90d</button>
+          </div>
+          {hasFilter && (
+            <button type="button" onClick={clearFilter} className="h-9 px-2 text-xs font-semibold text-txt-secondary hover:text-brand-main" data-testid="filter-clear">Limpar</button>
+          )}
+        </div>
       </div>
 
       {/* Linha 1: 4 KPIs principais */}
@@ -324,10 +384,12 @@ function TopAffiliatesCard({ items }) {
           <Award className="w-5 h-5 text-brand-main" />
           <h2 className="font-heading font-black text-lg">Top 10 indicadores</h2>
         </div>
-        <span className="text-xs text-txt-secondary">por comissões geradas</span>
+        <span className="text-xs text-txt-secondary" title="Soma do subtotal dos pedidos comprados pela primeira pessoa indicada por este usuário (link próprio)">
+          por vendas diretas no link
+        </span>
       </div>
       {items.length === 0 ? (
-        <div className="text-sm text-txt-secondary py-8 text-center">Sem indicadores com comissão ainda.</div>
+        <div className="text-sm text-txt-secondary py-8 text-center">Sem vendas diretas pelo link de indicação ainda.</div>
       ) : (
         <ol className="divide-y divide-border">
           {items.map((a, i) => {
@@ -347,13 +409,15 @@ function TopAffiliatesCard({ items }) {
                   </Link>
                   <div className="text-[11px] text-txt-secondary truncate">
                     {a.referral_code && <span className="font-mono mr-2">#{a.referral_code}</span>}
-                    {a.referrals_count} {a.referrals_count === 1 ? 'indicado' : 'indicados'} · {a.commissions_count} comissões
+                    {a.direct_orders} {a.direct_orders === 1 ? 'pedido' : 'pedidos'} · {a.referrals_count} {a.referrals_count === 1 ? 'indicado' : 'indicados'}
                   </div>
                 </div>
                 <Badge variant={net.variant} className="hidden sm:inline-flex">{net.label}</Badge>
                 <div className="text-right shrink-0">
-                  <div className="font-heading font-black text-sm text-emerald-600">{formatCurrency(a.total_earned)}</div>
-                  <div className="text-[11px] text-txt-secondary">pago: {formatCurrency(a.total_paid)}</div>
+                  <div className="font-heading font-black text-sm text-emerald-600" title="Soma do subtotal dos pedidos pagos pela 1ª pessoa indicada">
+                    {formatCurrency(a.direct_revenue)}
+                  </div>
+                  <div className="text-[11px] text-txt-secondary">comissão: {formatCurrency(a.commission_total)}</div>
                 </div>
               </li>
             );

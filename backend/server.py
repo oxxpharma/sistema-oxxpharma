@@ -1898,7 +1898,9 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
 # ==================== COMMISSION HELPER END ====================
 
 @app.get("/api/admin/dashboard")
-async def admin_dashboard(request: Request, user: dict = Depends(require_admin())):
+async def admin_dashboard(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+    """Iter 41: aceita filtro de periodo (start/end em YYYY-MM-DD). Sem filtro = tudo.
+    Os comparativos semanais e os 30 dias de receita continuam baseados em hoje."""
     db = request.app.db
     n = datetime.now(timezone.utc)
     month_start = n.replace(day=1, hour=0, minute=0, second=0).isoformat()
@@ -1907,11 +1909,23 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
     prev_week_start = (today_start - timedelta(days=14)).isoformat()
     last_30_start = (today_start - timedelta(days=29)).isoformat()
 
+    # Filtro do periodo selecionado (para stats absolutos, top buyers, top indicadores)
+    period_filter: Dict = {}
+    if start:
+        period_filter.setdefault("created_at", {})["$gte"] = start + "T00:00:00"
+    if end:
+        period_filter.setdefault("created_at", {})["$lte"] = end + "T23:59:59"
+    has_period = bool(period_filter)
+
     total_users = await db.users.count_documents({"role": "customer"})
-    total_orders = await db.orders.count_documents({})
+    orders_period_filter = {**period_filter} if has_period else {}
+    total_orders = await db.orders.count_documents(orders_period_filter)
     month_orders = await db.orders.count_documents({"created_at": {"$gte": month_start}})
 
-    revenue_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid"}}, {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}]).to_list(1)
+    rev_match = {"payment_status": "paid"}
+    if has_period:
+        rev_match.update(period_filter)
+    revenue_agg = await db.orders.aggregate([{"$match": rev_match}, {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}]).to_list(1)
     total_revenue = revenue_agg[0]["total"] if revenue_agg else 0
     paid_count = revenue_agg[0]["count"] if revenue_agg else 0
     month_rev_agg = await db.orders.aggregate([{"$match": {"payment_status": "paid", "created_at": {"$gte": month_start}}}, {"$group": {"_id": None, "total": {"$sum": "$total"}}}]).to_list(1)
@@ -1920,13 +1934,14 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
     total_products = await db.products.count_documents({"active": True})
     recent_orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
 
-    # Status breakdown com totais em R$
-    status_agg = await db.orders.aggregate([
+    # Status breakdown (respeita periodo)
+    status_match = period_filter if has_period else {}
+    status_agg = await db.orders.aggregate(([{"$match": status_match}] if status_match else []) + [
         {"$group": {"_id": "$order_status", "count": {"$sum": 1}, "total": {"$sum": "$total"}}}
     ]).to_list(20)
     by_status = [{"status": s["_id"] or "pending", "count": s["count"], "total": round(s["total"] or 0, 2)} for s in status_agg]
 
-    # Comparativo semanal (semana atual vs anterior)
+    # Comparativo semanal (sempre semana atual vs anterior — independente do periodo do filtro)
     cur_week = await db.orders.aggregate([
         {"$match": {"payment_status": "paid", "created_at": {"$gte": week_start}}},
         {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
@@ -1941,10 +1956,10 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
     pw_count = prev_week[0]["count"] if prev_week else 0
     def _pct(cur, prev):
         if not prev:
-            return None  # sem base de comparacao
+            return None
         return round((cur - prev) / prev * 100, 2)
 
-    # Receita por dia (ultimos 30 dias)
+    # Receita por dia (ultimos 30 dias, sempre)
     daily = await db.orders.aggregate([
         {"$match": {"payment_status": "paid", "created_at": {"$gte": last_30_start}}},
         {"$group": {
@@ -1954,7 +1969,6 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
         }},
         {"$sort": {"_id": 1}},
     ]).to_list(60)
-    # Preenche dias faltantes com zero
     daily_map = {d["_id"]: {"revenue": round(d["revenue"], 2), "orders": d["orders"]} for d in daily}
     revenue_by_day = []
     for i in range(30):
@@ -1962,9 +1976,12 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
         d = daily_map.get(day, {"revenue": 0, "orders": 0})
         revenue_by_day.append({"date": day, "revenue": d["revenue"], "orders": d["orders"]})
 
-    # Top 10 compradores (por valor pago)
+    # Top 10 compradores (respeita periodo)
+    buyers_match = {"payment_status": "paid", "user_id": {"$ne": None}}
+    if has_period:
+        buyers_match.update(period_filter)
     top_buyers_agg = await db.orders.aggregate([
-        {"$match": {"payment_status": "paid", "user_id": {"$ne": None}}},
+        {"$match": buyers_match},
         {"$group": {"_id": "$user_id", "total": {"$sum": "$total"}, "orders": {"$sum": 1}}},
         {"$sort": {"total": -1}},
         {"$limit": 10},
@@ -1986,16 +2003,27 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
             "orders": b["orders"],
         })
 
-    # Top 10 indicadores (por comissoes ganhas, tipo affiliate ou network_gen)
+    # Iter 41: Top 10 indicadores — apenas vendas DIRETAS pelo link
+    # (type=affiliate, generation=0). Mede volume vendido em cada link proprio.
+    affiliate_match = {"type": "affiliate", "status": {"$in": ["paid", "pending", "pending_enrollment"]}}
+    if has_period:
+        affiliate_match.update(period_filter)
     top_aff_agg = await db.commissions.aggregate([
-        {"$match": {"status": {"$in": ["paid", "pending"]}}},
+        {"$match": affiliate_match},
         {"$group": {
             "_id": "$user_id",
-            "total": {"$sum": "$amount"},
-            "count": {"$sum": 1},
-            "paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}},
+            "direct_revenue": {"$sum": "$order_subtotal"},
+            "direct_orders": {"$addToSet": "$order_id"},
+            "commission_total": {"$sum": "$amount"},
+            "commission_paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}},
         }},
-        {"$sort": {"total": -1}},
+        {"$project": {
+            "direct_revenue": 1,
+            "commission_total": 1,
+            "commission_paid": 1,
+            "orders_count": {"$size": "$direct_orders"},
+        }},
+        {"$sort": {"direct_revenue": -1}},
         {"$limit": 10},
     ]).to_list(10)
     top_aff_ids = [a["_id"] for a in top_aff_agg]
@@ -2004,7 +2032,6 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
     if top_aff_ids:
         async for u in db.users.find({"user_id": {"$in": top_aff_ids}}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1, "referral_code": 1}):
             aff_users[u["user_id"]] = u
-        # Conta indicacoes diretas (sponsor_id)
         ref_agg = await db.users.aggregate([
             {"$match": {"sponsor_id": {"$in": top_aff_ids}}},
             {"$group": {"_id": "$sponsor_id", "n": {"$sum": 1}}},
@@ -2019,19 +2046,20 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
             "email": u.get("email"),
             "network_type": u.get("network_type") or "customer",
             "referral_code": u.get("referral_code"),
-            "total_earned": round(a["total"] or 0, 2),
-            "total_paid": round(a["paid"] or 0, 2),
-            "commissions_count": a["count"],
+            "direct_revenue": round(a.get("direct_revenue") or 0, 2),
+            "direct_orders": a.get("orders_count") or 0,
+            "commission_total": round(a.get("commission_total") or 0, 2),
+            "commission_paid": round(a.get("commission_paid") or 0, 2),
             "referrals_count": referral_counts.get(a["_id"], 0),
         })
 
-    # Comissoes consolidadas
-    comm_agg = await db.commissions.aggregate([
+    # Comissoes consolidadas (respeita periodo)
+    comm_match = period_filter if has_period else {}
+    comm_agg = await db.commissions.aggregate(([{"$match": comm_match}] if comm_match else []) + [
         {"$group": {"_id": "$status", "total": {"$sum": "$amount"}}}
     ]).to_list(10)
     commissions_summary = {(s["_id"] or "pending"): round(s["total"] or 0, 2) for s in comm_agg}
 
-    # Ticket medio (orders pagos)
     avg_ticket = round(total_revenue / paid_count, 2) if paid_count else 0
 
     return {
@@ -2052,6 +2080,7 @@ async def admin_dashboard(request: Request, user: dict = Depends(require_admin()
         "top_buyers": top_buyers,
         "top_affiliates": top_affiliates,
         "commissions_summary": commissions_summary,
+        "filter": {"start": start, "end": end},
     }
 
 
