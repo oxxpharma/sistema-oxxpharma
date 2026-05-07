@@ -2321,6 +2321,134 @@ async def admin_recalc_history(request: Request, limit: int = 50, user: dict = D
     rows = await db.recalc_audit_log.find({}, {"_id": 0}).sort("performed_at", -1).limit(int(limit)).to_list(int(limit))
     return {"items": rows, "total": len(rows)}
 
+
+# ==================== REVERT COMMISSIONS (super_admin only) ====================
+
+class _RevertCommissionsBody(BaseModel):
+    """Reverter comissoes pagas (paid|paid_out) -> pending.
+
+    Pode receber qualquer combinacao de filtros (pelo menos UM precisa estar setado):
+      - commission_ids: lista de IDs especificos (ex: ['com_xxx','com_yyy'])
+      - order_ids: lista de pedidos (reverte TODAS as comissoes paid/paid_out desses pedidos)
+      - user_id: reverte todas as comissoes do beneficiario
+      - start / end: janela ISO (filtra por created_at)
+      - status_in: por padrao ['paid','paid_out']; pode restringir a um deles
+    Campo `confirm=True` eh obrigatorio para revertes em massa (>1 pedido).
+    """
+    commission_ids: Optional[List[str]] = None
+    order_ids: Optional[List[str]] = None
+    user_id: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    status_in: Optional[List[str]] = None  # default: ["paid","paid_out"]
+    confirm: Optional[bool] = False
+
+
+@app.post("/api/admin/commissions/revert/preview")
+async def admin_commissions_revert_preview(request: Request, body: _RevertCommissionsBody, user: dict = Depends(require_super_admin())):
+    """Mostra o que seria revertido sem persistir."""
+    db = request.app.db
+    q, err = _build_revert_query(body)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    cursor = db.commissions.find(q, {"_id": 0, "commission_id": 1, "user_id": 1, "customer_name": 1,
+                                     "order_id": 1, "type": 1, "generation": 1, "amount": 1,
+                                     "status": 1, "withdrawal_id": 1, "created_at": 1}).limit(2000)
+    items = await cursor.to_list(2000)
+    total = await db.commissions.count_documents(q)
+    total_amount = round(sum(i.get("amount") or 0 for i in items), 2)
+    affected_users = len({i.get("user_id") for i in items})
+    affected_withdrawals = sorted({i.get("withdrawal_id") for i in items if i.get("withdrawal_id")})
+    return {
+        "total": total,
+        "shown": len(items),
+        "total_amount": total_amount,
+        "affected_users": affected_users,
+        "affected_withdrawals": affected_withdrawals,
+        "items": items,
+    }
+
+
+@app.post("/api/admin/commissions/revert/apply")
+async def admin_commissions_revert_apply(request: Request, body: _RevertCommissionsBody, user: dict = Depends(require_super_admin())):
+    """Reverte status para pending e desvincula withdrawal_id.
+
+    Para revertes em massa (>1 pedido afetado), exige confirm=True.
+    """
+    db = request.app.db
+    q, err = _build_revert_query(body)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    # Conta pedidos afetados para regra de confirmacao
+    distinct_orders = await db.commissions.distinct("order_id", q)
+    if len(distinct_orders) > 1 and not body.confirm:
+        raise HTTPException(status_code=400, detail=f"Esta operacao afeta {len(distinct_orders)} pedidos. Reenvie com confirm=true para confirmar.")
+
+    # Snapshot pre-update para auditoria leve
+    pre = await db.commissions.find(q, {"_id": 0, "commission_id": 1, "status": 1,
+                                         "withdrawal_id": 1, "amount": 1}).to_list(5000)
+    if not pre:
+        return {"success": True, "modified": 0, "total_amount": 0, "affected_orders": 0}
+
+    now = now_iso()
+    res = await db.commissions.update_many(
+        {"commission_id": {"$in": [p["commission_id"] for p in pre]}},
+        {
+            "$set": {
+                "status": "pending",
+                "reverted_at": now,
+                "reverted_by_user_id": user.get("user_id"),
+                "reverted_by_email": user.get("email"),
+            },
+            "$unset": {
+                "paid_at": "",
+                "paid_out_at": "",
+                "withdrawal_id": "",
+            },
+        },
+    )
+
+    total_amount = round(sum(p.get("amount") or 0 for p in pre), 2)
+    return {
+        "success": True,
+        "modified": res.modified_count,
+        "total_amount": total_amount,
+        "affected_orders": len(distinct_orders),
+        "affected_withdrawals": sorted({p.get("withdrawal_id") for p in pre if p.get("withdrawal_id")}),
+    }
+
+
+def _build_revert_query(body: _RevertCommissionsBody):
+    """Constroi o filtro Mongo para o revert. Retorna (query, error_msg|None)."""
+    statuses = body.status_in or ["paid", "paid_out"]
+    invalid = [s for s in statuses if s not in ("paid", "paid_out")]
+    if invalid:
+        return {}, f"status_in deve conter apenas 'paid' e/ou 'paid_out' (recebido: {invalid})"
+    q = {"status": {"$in": statuses}}
+    has_filter = False
+    if body.commission_ids:
+        q["commission_id"] = {"$in": body.commission_ids}
+        has_filter = True
+    if body.order_ids:
+        q["order_id"] = {"$in": body.order_ids}
+        has_filter = True
+    if body.user_id:
+        q["user_id"] = body.user_id
+        has_filter = True
+    if body.start or body.end:
+        rng = {}
+        if body.start:
+            rng["$gte"] = body.start if "T" in body.start else body.start + "T00:00:00"
+        if body.end:
+            rng["$lte"] = body.end if "T" in body.end else body.end + "T23:59:59"
+        q["created_at"] = rng
+        has_filter = True
+    if not has_filter:
+        return {}, "Forneca pelo menos um filtro: commission_ids, order_ids, user_id ou intervalo start/end."
+    return q, None
+
+
 # ==================== AFFILIATE / REFERRALS ====================
 
 @app.get("/api/referrals/validate/{code}")

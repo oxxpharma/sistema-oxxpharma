@@ -7,9 +7,11 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend,
   PieChart, Pie, Cell,
 } from 'recharts';
-import { Loader2, Search, ChevronDown, ChevronRight, DollarSign, TrendingUp, Users, Package } from 'lucide-react';
+import { Loader2, Search, ChevronDown, ChevronRight, DollarSign, TrendingUp, Users, Package, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
+import RevertCommissionsModal from '../../components/admin/RevertCommissionsModal';
+import { useAuth } from '../../contexts/AuthContext';
 
 const PAGE_LIMIT = 20;
 
@@ -25,6 +27,7 @@ const GEN_COLORS = ['#f97316', '#0ea5e9', '#22c55e', '#a855f7', '#ec4899', '#eab
 const NETWORK_COLORS = { network_1: '#f97316', network_2: '#0ea5e9', affiliate: '#a855f7' };
 
 export default function AdminCommissionsByGeneration() {
+  const { isSuperAdmin } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('paid');
@@ -32,6 +35,8 @@ export default function AdminCommissionsByGeneration() {
   const [end, setEnd] = useState('');
   const [expanded, setExpanded] = useState(new Set());
   const [page, setPage] = useState(1);
+  const [revertFilters, setRevertFilters] = useState(null); // {commission_ids|order_ids|...}
+  const [revertTitle, setRevertTitle] = useState('');
 
   const load = async (targetPage = page) => {
     setLoading(true);
@@ -116,6 +121,25 @@ export default function AdminCommissionsByGeneration() {
           <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" />
         </div>
         <Button variant="outline" onClick={applyFilters} data-testid="apply-filters"><Search className="w-4 h-4" /> Aplicar</Button>
+        {isSuperAdmin && (status === 'paid' || status === 'paid_out' || status === '') && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              const f = { status_in: status === '' ? ['paid', 'paid_out'] : [status] };
+              if (start) f.start = start;
+              if (end) f.end = end;
+              if (!start && !end && status === '') {
+                if (!window.confirm('Você não selecionou data nem status. Isto reverterá TODAS as comissões pagas/saqueadas. Continuar?')) return;
+              }
+              setRevertFilters(f);
+              setRevertTitle('Reverter por filtro (em massa)');
+            }}
+            data-testid="revert-by-filter-btn"
+            className="text-amber-700 border-amber-300 hover:bg-amber-50"
+          >
+            <Undo2 className="w-4 h-4" /> Reverter por filtro
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -245,7 +269,30 @@ export default function AdminCommissionsByGeneration() {
                             <tr className="bg-bg-secondary/30">
                               <td colSpan={7} className="p-0">
                                 <div className="p-4">
-                                  <ChainTable chain={o.chain} subtotal={o.subtotal} />
+                                  {isSuperAdmin && (
+                                    <div className="flex justify-end mb-2">
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => {
+                                          setRevertFilters({ order_ids: [o.order_id] });
+                                          setRevertTitle(`Reverter pedido ${o.order_number || o.order_id.slice(0, 12)}`);
+                                        }}
+                                        data-testid={`revert-order-${o.order_id}`}
+                                        className="text-amber-700 border-amber-300 hover:bg-amber-50 text-xs"
+                                      >
+                                        <Undo2 className="w-3.5 h-3.5" /> Reverter pedido inteiro
+                                      </Button>
+                                    </div>
+                                  )}
+                                  <ChainTable
+                                    chain={o.chain}
+                                    subtotal={o.subtotal}
+                                    isSuperAdmin={isSuperAdmin}
+                                    onRevertOne={(c) => {
+                                      setRevertFilters({ commission_ids: [c.commission_id] });
+                                      setRevertTitle(`Reverter comissão de ${c.beneficiary_name}`);
+                                    }}
+                                  />
                                 </div>
                               </td>
                             </tr>
@@ -269,11 +316,19 @@ export default function AdminCommissionsByGeneration() {
           </div>
         </>
       )}
+
+      <RevertCommissionsModal
+        open={!!revertFilters}
+        onClose={() => setRevertFilters(null)}
+        filters={revertFilters}
+        title={revertTitle}
+        onSuccess={() => load(page)}
+      />
     </div>
   );
 }
 
-function ChainTable({ chain, subtotal }) {
+function ChainTable({ chain, subtotal, isSuperAdmin, onRevertOne }) {
   const gens = [0, 1, 2, 3, 4, 5, 6];
   return (
     <div className="bg-white rounded-lg border border-border overflow-hidden">
@@ -305,6 +360,7 @@ function ChainTable({ chain, subtotal }) {
             <th className="text-right p-2">Base (subtotal)</th>
             <th className="text-right p-2">Valor recebido</th>
             <th className="text-center p-2">Status</th>
+            {isSuperAdmin && <th className="text-center p-2">Ações</th>}
           </tr>
         </thead>
         <tbody>
@@ -334,14 +390,29 @@ function ChainTable({ chain, subtotal }) {
               <td className="p-2 text-right font-bold text-emerald-700">{formatCurrency(c.amount)}</td>
               <td className="p-2 text-center">
                 {c.status === 'paid' ? <Badge variant="success">Pago</Badge>
+                  : c.status === 'paid_out' ? <Badge variant="info" title="Já saqueado">Saqueado</Badge>
                   : c.status === 'pending' ? <Badge variant="warning">Pendente</Badge>
                   : c.status === 'pending_enrollment' ? <Badge variant="default" title="Beneficiário não está inscrito no Clube. Será liberado quando ele se inscrever.">Aguardando inscrição</Badge>
                   : <Badge variant="default">{c.status}</Badge>}
               </td>
+              {isSuperAdmin && (
+                <td className="p-2 text-center">
+                  {(c.status === 'paid' || c.status === 'paid_out') ? (
+                    <button
+                      onClick={() => onRevertOne(c)}
+                      className="text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded hover:bg-amber-50"
+                      title="Reverter para pendente"
+                      data-testid={`revert-row-${c.commission_id}`}
+                    >
+                      ↩ Reverter
+                    </button>
+                  ) : <span className="text-txt-secondary text-[10px]">—</span>}
+                </td>
+              )}
             </tr>
           ))}
           {chain.length === 0 && (
-            <tr><td colSpan={7} className="p-6 text-center text-txt-secondary">Sem comissões registradas.</td></tr>
+            <tr><td colSpan={isSuperAdmin ? 8 : 7} className="p-6 text-center text-txt-secondary">Sem comissões registradas.</td></tr>
           )}
         </tbody>
       </table>

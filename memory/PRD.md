@@ -137,6 +137,13 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Cleanup**: script `tests/cleanup_duplicate_commissions.py` removeu 3 grupos duplicados do DB de produção (mantendo `paid_out` por prioridade).
   - **Validação**: todos os amounts agora batem matematicamente com `subtotal × rate`; recalc force executado 2x sem gerar nenhuma duplicata.
   - Testes: `test_iter42_no_duplicate_commissions.py` (3 testes — sem duplicatas no DB, índice único existente, recalc force idempotente sobre paid/paid_out) — **todos PASS**.
+- ✅ Iter 42b (Fev/2026): **Reverter status de comissões (paid|paid_out → pending)** — apenas super_admin.
+  - Endpoints: `POST /api/admin/commissions/revert/preview` + `/apply` (`require_super_admin()`).
+  - Aceita 4 modos de filtro combináveis: `commission_ids[]`, `order_ids[]`, `user_id`, intervalo `start/end`.
+  - Reverte massa (>1 pedido) exige `confirm=True` (proteção contra acidente).
+  - Atualização: `status="pending"`, remove `paid_at`/`paid_out_at`/`withdrawal_id`; grava `reverted_at`/`reverted_by_email` (audit leve embutido).
+  - Frontend (`AdminCommissionsByGeneration.jsx`): botão "↩ Reverter" por linha + "Reverter pedido inteiro" no expand + "Reverter por filtro" no topo. Modal `RevertCommissionsModal` mostra preview, contadores, alerta de saques afetados, e exige digitar `REVERTER` para confirmação em massa.
+  - Testes: `test_iter42_revert_commissions.py` (5 testes — RBAC super_admin only, exige filtro, confirm em massa, desvinculação de withdrawal_id, ignora pending) — **todos PASS**.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
