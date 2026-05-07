@@ -12,7 +12,7 @@ import UserEditModal from '../../components/UserEditModal';
 
 const TABS = [
   { id: 'overview', label: 'Visão geral' },
-  { id: 'commissions', label: 'Comissões' },
+  { id: 'commissions', label: 'Cashbacks' },
   { id: 'orders', label: 'Pedidos' },
   { id: 'network', label: 'Equipe' },
   { id: 'card', label: 'Cartão de Benefícios' },
@@ -145,11 +145,11 @@ function OverviewTab({ kpis, u }) {
   return (
     <div className="space-y-5">
       <div>
-        <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">Saldos & Comissões</div>
+        <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">Saldos & Cashbacks</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard icon={Wallet} label="Disponível p/ saque" value={formatCurrency(kpis.available)} color="green" />
           <KpiCard icon={Clock} label="Em quarentena" value={formatCurrency(kpis.quarantine)} color="amber" hint="Aguardando liberação" />
-          <KpiCard icon={CircleDollarSign} label="Comissões pendentes" value={formatCurrency(kpis.pending_commissions)} color="blue" hint="Aguardando pagamento" />
+          <KpiCard icon={CircleDollarSign} label="Cashbacks pendentes" value={formatCurrency(kpis.pending_commissions)} color="blue" hint="Aguardando pagamento" />
           <KpiCard icon={TrendingUp} label="Total já ganho" value={formatCurrency(kpis.total_earned)} color="brand" />
           <KpiCard icon={Wallet} label="Total já sacado" value={formatCurrency(kpis.total_withdrawn)} color="slate" />
           <KpiCard icon={CreditCard} label="Enviado ao cartão" value={formatCurrency(kpis.card_total_sent)} color="purple" />
@@ -180,10 +180,10 @@ function OverviewTab({ kpis, u }) {
 }
 
 /* ============================================================================ */
-/* TAB: Comissões                                                               */
+/* TAB: Cashbacks                                                               */
 /* ============================================================================ */
 function CommissionsTab({ list }) {
-  if (!list.length) return <EmptyState text="Sem comissões registradas." />;
+  if (!list.length) return <EmptyState text="Sem cashbacks registradas." />;
   const statusBadge = (s) => {
     if (s === 'paid') return <Badge variant="success">Paga</Badge>;
     if (s === 'pending') return <Badge variant="warning">Pendente</Badge>;
@@ -409,7 +409,7 @@ function CardTab({ card }) {
                 <th className="text-left p-3">Lote</th>
                 <th className="text-left p-3">Gerado em</th>
                 <th className="text-center p-3">Status do lote</th>
-                <th className="text-center p-3">Comissões</th>
+                <th className="text-center p-3">Cashbacks</th>
                 <th className="text-right p-3">Valor</th>
                 <th className="text-left p-3">Enviado em</th>
               </tr>

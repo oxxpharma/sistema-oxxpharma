@@ -218,7 +218,7 @@ export default function AdminDashboard() {
         <TopAffiliatesCard items={data.top_affiliates || []} />
       </div>
 
-      {/* Linha 4: Comissões consolidadas + Pedidos recentes */}
+      {/* Linha 4: Cashbacks consolidadas + Pedidos recentes */}
       <div className="grid lg:grid-cols-3 gap-4">
         <CommissionsCard summary={data.commissions_summary || {}} />
         <RecentOrdersCard items={data.recent_orders || []} className="lg:col-span-2" />
@@ -417,7 +417,7 @@ function TopAffiliatesCard({ items }) {
                   <div className="font-heading font-black text-sm text-emerald-600" title="Soma do subtotal dos pedidos pagos pela 1ª pessoa indicada">
                     {formatCurrency(a.direct_revenue)}
                   </div>
-                  <div className="text-[11px] text-txt-secondary">comissão: {formatCurrency(a.commission_total)}</div>
+                  <div className="text-[11px] text-txt-secondary">cashback: {formatCurrency(a.commission_total)}</div>
                 </div>
               </li>
             );
@@ -439,7 +439,7 @@ function CommissionsCard({ summary }) {
     <div className="bg-white rounded-2xl border border-border p-5" data-testid="commissions-summary-card">
       <div className="flex items-center gap-2 mb-3">
         <CircleDollarSign className="w-5 h-5 text-brand-main" />
-        <h2 className="font-heading font-black text-lg">Comissões</h2>
+        <h2 className="font-heading font-black text-lg">Cashbacks</h2>
       </div>
       <ul className="space-y-2">
         {items.map(it => (

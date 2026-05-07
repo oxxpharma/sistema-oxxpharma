@@ -43,9 +43,9 @@ export default function AdminRecalcCommissions() {
       if (r.orders_eligible === 0) {
         toast.info('Nenhum pedido elegível encontrado com esses filtros.');
       } else if (r.total_commissions === 0) {
-        toast.warning(`${r.orders_eligible} pedidos elegíveis, mas nenhuma comissão a ser criada (sem cadeia ativa).`);
+        toast.warning(`${r.orders_eligible} pedidos elegíveis, mas nenhuma cashback a ser criada (sem cadeia ativa).`);
       } else {
-        toast.success(`Simulação concluída: ${r.total_commissions} comissões totalizando ${formatCurrency(r.total_amount)}.`);
+        toast.success(`Simulação concluída: ${r.total_commissions} cashbacks totalizando ${formatCurrency(r.total_amount)}.`);
       }
     } catch (e) {
       toast.error('Falha ao simular: ' + (e.message || e));
@@ -58,7 +58,7 @@ export default function AdminRecalcCommissions() {
     setApplying(true);
     try {
       const r = await api.post('/api/admin/recalc-commissions/apply', buildBody());
-      toast.success(`Recalculo concluído: ${r.commissions_created} comissões criadas (${formatCurrency(r.total_amount)}). Batch: ${r.batch_id?.slice(0, 16)}…`);
+      toast.success(`Recalculo concluído: ${r.commissions_created} cashbacks criadas (${formatCurrency(r.total_amount)}). Batch: ${r.batch_id?.slice(0, 16)}…`);
       setConfirmOpen(false);
       setPreview(null);
       // recarrega historico
@@ -88,12 +88,12 @@ export default function AdminRecalcCommissions() {
     <div data-testid="admin-recalc-commissions">
       <div className="mb-5">
         <h1 className="font-heading font-black text-2xl text-txt-primary flex items-center gap-2">
-          <Calculator className="w-6 h-6 text-brand-main" /> Recalcular comissões retroativamente
+          <Calculator className="w-6 h-6 text-brand-main" /> Recalcular Cashbacks retroativamente
         </h1>
         <p className="text-sm text-txt-secondary mt-1 max-w-3xl">
           Útil para pedidos que foram pagos <strong>antes</strong> da sincronização Maxx ter informado o líder.
-          Esta ferramenta encontra pedidos pagos <strong>sem nenhuma comissão</strong> registrada, simula o cálculo
-          com a cadeia atual (afiliado + Equipe até a 6ª geração) e, depois de você confirmar, grava as comissões
+          Esta ferramenta encontra pedidos pagos <strong>sem nenhuma cashback</strong> registrada, simula o cálculo
+          com a cadeia atual (afiliado + Equipe até a 6ª geração) e, depois de você confirmar, grava as cashbacks
           marcadas como retroativas.
         </p>
       </div>
@@ -104,10 +104,10 @@ export default function AdminRecalcCommissions() {
         <div className="text-xs text-amber-900">
           <div className="font-bold mb-1">Como funciona</div>
           <ul className="list-disc pl-4 space-y-0.5">
-            <li>Considera apenas pedidos com <strong>payment_status = paid</strong> e <strong>sem comissão</strong> existente.</li>
+            <li>Considera apenas pedidos com <strong>payment_status = paid</strong> e <strong>sem cashback</strong> existente.</li>
             <li>Aplica a regra atual: afiliado (sponsor_id direto) + Equipe até 6 gerações via cadeia <code className="font-mono">sponsor_id → network_sponsor_id</code>.</li>
-            <li>Comissões geradas ficam com flag <code className="font-mono">retroactive=true</code> e <code className="font-mono">recalc_batch_id</code> para auditoria.</li>
-            <li>Status inicial das comissões: <strong>pending</strong> (mesmo comportamento dos pedidos novos).</li>
+            <li>Cashbacks geradas ficam com flag <code className="font-mono">retroactive=true</code> e <code className="font-mono">recalc_batch_id</code> para auditoria.</li>
+            <li>Status inicial das cashbacks: <strong>pending</strong> (mesmo comportamento dos pedidos novos).</li>
           </ul>
         </div>
       </div>
@@ -161,9 +161,9 @@ export default function AdminRecalcCommissions() {
             data-testid="force-toggle"
           />
           <div className="text-xs">
-            <div className="font-bold text-amber-900">Reprocessar pedidos que já têm comissão (modo force)</div>
+            <div className="font-bold text-amber-900">Reprocessar pedidos que já têm cashback (modo force)</div>
             <div className="text-amber-800/80 mt-0.5 leading-relaxed">
-              Apaga as comissões <strong>pendentes</strong> e <strong>aguardando inscrição</strong> dos pedidos no filtro e recalcula tudo com a regra atual. Comissões <strong>pagas</strong> são preservadas (não duplicam). Útil para corrigir histórico após mudanças nas regras de cálculo MMN.
+              Apaga as cashbacks <strong>pendentes</strong> e <strong>aguardando inscrição</strong> dos pedidos no filtro e recalcula tudo com a regra atual. Cashbacks <strong>pagas</strong> são preservadas (não duplicam). Útil para corrigir histórico após mudanças nas regras de cálculo MMN.
             </div>
           </div>
         </label>
@@ -189,8 +189,8 @@ export default function AdminRecalcCommissions() {
           {/* Sumário */}
           <div className="grid sm:grid-cols-4 gap-3">
             <SumCard label="Pedidos elegíveis" value={preview.orders_eligible} icon={Receipt} testId="sum-orders" />
-            <SumCard label="Pedidos que gerarão comissão" value={preview.orders_with_commissions} color="text-emerald-700 bg-emerald-50" testId="sum-orders-with" />
-            <SumCard label="Comissões a criar" value={preview.total_commissions} color="text-brand-main bg-brand-light" testId="sum-comms" />
+            <SumCard label="Pedidos que gerarão cashback" value={preview.orders_with_commissions} color="text-emerald-700 bg-emerald-50" testId="sum-orders-with" />
+            <SumCard label="Cashbacks a criar" value={preview.total_commissions} color="text-brand-main bg-brand-light" testId="sum-comms" />
             <SumCard label="Valor total" value={formatCurrency(preview.total_amount)} color="text-brand-main bg-brand-light" big testId="sum-amount" />
           </div>
 
@@ -225,7 +225,7 @@ export default function AdminRecalcCommissions() {
                       <th className="text-left p-2">Nome</th>
                       <th className="text-left p-2">E-mail</th>
                       <th className="text-left p-2">Rede</th>
-                      <th className="text-right p-2">Comissões</th>
+                      <th className="text-right p-2">Cashbacks</th>
                       <th className="text-right p-2">Total</th>
                     </tr>
                   </thead>
@@ -285,7 +285,7 @@ export default function AdminRecalcCommissions() {
                         <div className="text-xs text-txt-secondary">total: {formatCurrency(o.total)}</div>
                         {willGenerate ? (
                           <div className="font-bold text-emerald-700 text-sm">
-                            +{o.commissions_count} comissões · {formatCurrency(o.commissions_total)}
+                            +{o.commissions_count} cashbacks · {formatCurrency(o.commissions_total)}
                           </div>
                         ) : (
                           <Badge variant="default">sem cadeia ativa</Badge>
@@ -294,7 +294,7 @@ export default function AdminRecalcCommissions() {
                     </button>
                     {isExp && willGenerate && (
                       <div className="border-t border-emerald-200 px-3 py-2 bg-white text-xs">
-                        <div className="font-bold mb-1.5">Comissões a criar:</div>
+                        <div className="font-bold mb-1.5">Cashbacks a criar:</div>
                         <ul className="space-y-1">
                           {o.commissions_breakdown.map((c, i) => (
                             <li key={i} className="flex items-center justify-between gap-2 py-1">
@@ -323,7 +323,7 @@ export default function AdminRecalcCommissions() {
               <div>
                 <div className="font-bold">Pronto para gravar?</div>
                 <div className="text-xs text-txt-secondary">
-                  {preview.total_commissions} comissões · {formatCurrency(preview.total_amount)} no total. Esta ação é <strong>irreversível</strong>.
+                  {preview.total_commissions} cashbacks · {formatCurrency(preview.total_amount)} no total. Esta ação é <strong>irreversível</strong>.
                 </div>
               </div>
               <Button onClick={() => setConfirmOpen(true)} data-testid="btn-open-confirm">
@@ -352,7 +352,7 @@ export default function AdminRecalcCommissions() {
                     <th className="text-left p-2">Por</th>
                     <th className="text-left p-2">Filtros</th>
                     <th className="text-right p-2">Pedidos</th>
-                    <th className="text-right p-2">Comissões</th>
+                    <th className="text-right p-2">Cashbacks</th>
                     <th className="text-right p-2">Total</th>
                     <th className="text-left p-2">Batch ID</th>
                   </tr>
@@ -399,14 +399,14 @@ export default function AdminRecalcCommissions() {
                 <div className="font-bold mb-1">Resumo:</div>
                 <ul className="text-xs space-y-0.5">
                   <li>Pedidos a processar: <strong>{preview.orders_with_commissions}</strong></li>
-                  <li>Comissões a criar: <strong>{preview.total_commissions}</strong></li>
+                  <li>Cashbacks a criar: <strong>{preview.total_commissions}</strong></li>
                   <li>Valor total: <strong>{formatCurrency(preview.total_amount)}</strong></li>
                   <li>Beneficiários únicos: <strong>{preview.beneficiaries.length}</strong></li>
                 </ul>
               </div>
               <p className="text-xs text-txt-secondary">
-                As comissões serão criadas com status <strong>pending</strong> e marcadas como retroativas.
-                Você pode acompanhá-las pela tela de comissões e relatório.
+                As cashbacks serão criadas com status <strong>pending</strong> e marcadas como retroativas.
+                Você pode acompanhá-las pela tela de cashbacks e relatório.
               </p>
             </div>
             <div className="p-5 border-t border-border flex items-center justify-end gap-2">

@@ -190,7 +190,7 @@ DEFAULT_TEMPLATES = [
         "body_html": """
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
   <h1 style="color:#E8731A;">Ola, {{user.name}}!</h1>
-  <p>Que bom ter voce na <strong>OxxPharma</strong>. Voce ja pode navegar, comprar com entrega para todo o Brasil e ganhar <strong>8% de comissao</strong> em toda compra feita pelo seu link de indicacao.</p>
+  <p>Que bom ter voce na <strong>OxxPharma</strong>. Voce ja pode navegar, comprar com entrega para todo o Brasil e ganhar <strong>8% de cashback</strong> em toda compra feita pelo seu link de indicacao.</p>
   <div style="background:#FEF3E8;border:1px solid #E8731A;border-radius:8px;padding:16px;margin:16px 0;">
     <div style="font-size:12px;color:#888;text-transform:uppercase;">Seu link de indicacao</div>
     <div style="font-family:monospace;word-break:break-all;color:#E8731A;font-weight:bold;">{{referral_link}}</div>
@@ -253,14 +253,14 @@ DEFAULT_TEMPLATES = [
     },
     {
         "slug": "commission_earned",
-        "name": "Comissao ganha",
-        "subject": "Voce ganhou R$ {{commission.amount}} em comissao!",
+        "name": "Cashback ganho",
+        "subject": "Voce ganhou R$ {{commission.amount}} em cashback!",
         "body_html": """
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
   <h1 style="color:#10B981;">Voce ganhou R$ {{commission.amount}}!</h1>
   <p>Ola {{user.name}}, boas noticias: <strong>{{customer_name}}</strong> acabou de comprar pela sua indicacao (pedido #{{order_short_id}} - R$ {{order.subtotal}}).</p>
-  <p>Sua comissao ({{commission.rate_pct}}%) entra como <em>pendente</em> e liberara apos a confirmacao do pagamento do pedido.</p>
-  <p><a href="{{referral_link}}" style="background:#E8731A;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Ver minhas comissoes</a></p>
+  <p>Seu cashback ({{commission.rate_pct}}%) entra como <em>pendente</em> e sera liberado apos aprovacao do administrador.</p>
+  <p><a href="{{referral_link}}" style="background:#E8731A;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Ver meus cashbacks</a></p>
 </div>""",
         "active": True,
     },

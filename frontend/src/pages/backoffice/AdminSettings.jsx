@@ -60,7 +60,7 @@ export default function AdminSettings() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><SettingsIcon className="w-7 h-7 text-brand-main" /> Configurações</h1>
-          <p className="text-sm text-txt-secondary mt-1">Comissões, promoção a Propagandista e saques.</p>
+          <p className="text-sm text-txt-secondary mt-1">Cashbacks, promoção a Propagandista e saques.</p>
         </div>
         <Button onClick={save} loading={saving} data-testid="save-settings"><Save className="w-4 h-4" /> Salvar</Button>
       </div>
@@ -68,7 +68,7 @@ export default function AdminSettings() {
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Afiliado */}
         <div className="bg-white rounded-xl border border-border p-6">
-          <h2 className="font-heading font-black text-lg flex items-center gap-2 mb-4"><Percent className="w-5 h-5 text-brand-main" /> Comissão de afiliado (link)</h2>
+          <h2 className="font-heading font-black text-lg flex items-center gap-2 mb-4"><Percent className="w-5 h-5 text-brand-main" /> Cashback de Indicação (link)</h2>
           <Input
             label="Taxa sobre subtotal (ex: 0.08 = 8%)"
             type="number" step="0.001"
@@ -138,7 +138,7 @@ export default function AdminSettings() {
         </label>
         <div className="grid md:grid-cols-2 gap-3">
           <Input label="Valor mínimo de saque (R$)" type="number" step="0.01" value={settings.withdrawal_min_amount} onChange={e => setSettings({ ...settings, withdrawal_min_amount: e.target.value })} />
-          <Input label="Dias para liberação após pagamento" type="number" value={settings.withdrawal_release_days} onChange={e => setSettings({ ...settings, withdrawal_release_days: e.target.value })} hint="Tempo de quarentena antes da comissão liberar para saque" />
+          <Input label="Dias para liberação após pagamento" type="number" value={settings.withdrawal_release_days} onChange={e => setSettings({ ...settings, withdrawal_release_days: e.target.value })} hint="Tempo de quarentena antes da cashback liberar para saque" />
         </div>
       </div>
 

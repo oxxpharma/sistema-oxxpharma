@@ -130,7 +130,7 @@ export default function MyNetwork() {
         <div className="p-6 border-b border-border">
           <h2 className="font-heading font-black text-xl">Minhas gerações (até 6 níveis)</h2>
           <p className="text-xs text-txt-secondary mt-1">
-            Você recebe comissão de toda a sua linha de indicados — direta e indireta — até a 6ª geração.
+            Você recebe cashback de toda a sua linha de indicados — direta e indireta — até a 6ª geração.
             Clique em cada geração para ver os membros.
           </p>
         </div>
@@ -226,7 +226,7 @@ function SourceCard({ label, sub, data, color }) {
           <div className="font-bold">{formatCurrency(data.pending || 0)}</div>
         </div>
       </div>
-      <div className="text-[10px] opacity-60 mt-2">{data.count || 0} comissões</div>
+      <div className="text-[10px] opacity-60 mt-2">{data.count || 0} cashbacks</div>
     </div>
   );
 }

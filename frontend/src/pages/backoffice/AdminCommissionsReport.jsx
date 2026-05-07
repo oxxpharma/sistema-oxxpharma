@@ -36,7 +36,7 @@ export default function AdminCommissionsReport() {
   return (
     <div data-testid="admin-commissions-report">
       <div className="mb-6">
-        <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><FileText className="w-7 h-7 text-brand-main" /> Relatório de comissões</h1>
+        <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><FileText className="w-7 h-7 text-brand-main" /> Relatório de Cashbacks</h1>
         <p className="text-sm text-txt-secondary mt-1">Agregado por usuário — pronto para enviar à empresa do cartão de benefícios.</p>
       </div>
 
@@ -78,7 +78,7 @@ export default function AdminCommissionsReport() {
                   <th className="text-left p-3">Nome</th>
                   <th className="text-left p-3">Email</th>
                   <th className="text-left p-3">Chave PIX</th>
-                  <th className="text-right p-3">Nº comissões</th>
+                  <th className="text-right p-3">Nº cashbacks</th>
                   <th className="text-right p-3">Total</th>
                 </tr>
               </thead>
@@ -93,7 +93,7 @@ export default function AdminCommissionsReport() {
                     <td className="p-3 text-right font-bold text-emerald-600">{formatCurrency(r.amount)}</td>
                   </tr>
                 ))}
-                {(!data?.rows || data.rows.length === 0) && <tr><td colSpan={6} className="p-10 text-center text-txt-secondary">Nenhuma comissão no filtro.</td></tr>}
+                {(!data?.rows || data.rows.length === 0) && <tr><td colSpan={6} className="p-10 text-center text-txt-secondary">Nenhuma cashback no filtro.</td></tr>}
               </tbody>
             </table>
           </div>

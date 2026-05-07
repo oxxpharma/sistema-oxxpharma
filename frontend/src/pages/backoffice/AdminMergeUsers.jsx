@@ -71,7 +71,7 @@ export default function AdminMergeUsers() {
           <p className="text-sm text-txt-secondary mt-1 max-w-3xl">
             Cruzamos os usuários por <strong>CPF</strong>, <strong>e-mail</strong> e <strong>telefone</strong>. Quando há
             duplicidade (ex.: cliente cadastrado direto + mesmo CPF chegando da API Maxx), você pode fundir as contas.
-            Os <strong>dados transacionais</strong> (pedidos, pontos, comissões, saques, cartão) da conta absorvida são
+            Os <strong>dados transacionais</strong> (pedidos, pontos, cashbacks, saques, cartão) da conta absorvida são
             preservados e migrados para a conta principal.
           </p>
         </div>
@@ -88,7 +88,7 @@ export default function AdminMergeUsers() {
           <ul className="list-disc pl-4 space-y-0.5">
             <li>A conta <strong>principal (manter)</strong> permanece. A conta <strong>fundir</strong> é eliminada após mover relacionamentos.</li>
             <li>Dados <strong>cadastrais</strong> da conta &ldquo;fundir&rdquo; sobrescrevem os da principal <em>apenas se preenchidos</em> (campos vazios da Maxx nunca apagam dados existentes).</li>
-            <li>Pedidos, pontos, comissões, saques, cartão de benefícios e relacionamentos de patrocinador são migrados para a conta principal.</li>
+            <li>Pedidos, pontos, cashbacks, saques, cartão de benefícios e relacionamentos de patrocinador são migrados para a conta principal.</li>
             <li>Toda fusão é registrada em log de auditoria.</li>
           </ul>
         </div>
@@ -323,7 +323,7 @@ function ConfirmMergeModal({ state, merging, onCancel, onConfirm }) {
           <div className="bg-bg-secondary border border-border rounded-lg p-3 text-xs">
             <div className="font-bold mb-1.5">Após a fusão:</div>
             <ul className="list-disc pl-4 space-y-1 text-txt-secondary">
-              <li>Pedidos, pontos, comissões, saques e linhas de cartão da conta &ldquo;fundir&rdquo; serão migrados para a principal.</li>
+              <li>Pedidos, pontos, cashbacks, saques e linhas de cartão da conta &ldquo;fundir&rdquo; serão migrados para a principal.</li>
               <li>Quem tinha a conta &ldquo;fundir&rdquo; como patrocinador/líder passa a apontar para a conta principal.</li>
               <li>Dados cadastrais (nome, e-mail, telefone, CPF, líder) serão sobrescritos com os da conta &ldquo;fundir&rdquo; <em>somente se preenchidos</em>.</li>
               <li>A conta &ldquo;fundir&rdquo; será deletada e a fusão ficará registrada em log de auditoria.</li>

@@ -27,7 +27,7 @@ export default function CommissionsStatusModal({ open, onClose, mode = 'revert',
     icon: CheckCircle2,
     iconBg: 'bg-emerald-100 text-emerald-600',
     btnClass: 'bg-emerald-600 hover:bg-emerald-700',
-    titleDefault: 'Aprovar comissões (→ Pago)',
+    titleDefault: 'Aprovar cashbacks (→ Pago)',
     descDefault: 'Marca como "Pago" — usuário poderá solicitar saque.',
   } : {
     endpoint: '/api/admin/commissions/revert',
@@ -37,7 +37,7 @@ export default function CommissionsStatusModal({ open, onClose, mode = 'revert',
     icon: Undo2,
     iconBg: 'bg-amber-100 text-amber-600',
     btnClass: 'bg-amber-600 hover:bg-amber-700',
-    titleDefault: 'Reverter comissões (→ Pendente)',
+    titleDefault: 'Reverter cashbacks (→ Pendente)',
     descDefault: 'Volta status para "pendente" e desvincula do saque (se houver).',
   };
 
@@ -71,7 +71,7 @@ export default function CommissionsStatusModal({ open, onClose, mode = 'revert',
       const body = { ...filters };
       if (total > 1) body.confirm = true;
       const r = await api.post(`${cfg.endpoint}/apply`, body);
-      toast.success(`${r.modified} comissão(ões) ${cfg.actionVerb} — total ${formatCurrency(r.total_amount)}`);
+      toast.success(`${r.modified} cashback(ões) ${cfg.actionVerb} — total ${formatCurrency(r.total_amount)}`);
       onSuccess?.();
       onClose();
     } catch (e) {
@@ -107,13 +107,13 @@ export default function CommissionsStatusModal({ open, onClose, mode = 'revert',
           ) : total === 0 ? (
             <div className="text-sm text-txt-secondary text-center py-6">
               {mode === 'approve'
-                ? 'Nenhuma comissão pendente nos critérios selecionados.'
-                : 'Nenhuma comissão atende aos critérios (apenas paid e paid_out podem ser revertidas).'}
+                ? 'Nenhuma cashback pendente nos critérios selecionados.'
+                : 'Nenhuma cashback atende aos critérios (apenas paid e paid_out podem ser revertidas).'}
             </div>
           ) : (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat label="Comissões" value={total} testId="status-total" />
+                <Stat label="Cashbacks" value={total} testId="status-total" />
                 <Stat label="Valor total" value={formatCurrency(preview.total_amount)} testId="status-amount" />
                 <Stat label="Beneficiários" value={preview.affected_users} />
                 <Stat label="Saques afetados" value={preview.affected_withdrawals?.length || 0} />
@@ -123,8 +123,8 @@ export default function CommissionsStatusModal({ open, onClose, mode = 'revert',
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex gap-2 text-xs text-amber-900">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                   <div>
-                    <div className="font-semibold">Atenção — comissões já saqueadas</div>
-                    <div className="mt-1">{preview.affected_withdrawals.length} saque(s) tinham essas comissões: <span className="font-mono">{preview.affected_withdrawals.slice(0, 4).join(', ')}{preview.affected_withdrawals.length > 4 ? `… (+${preview.affected_withdrawals.length - 4})` : ''}</span>. Os documentos de <em>withdrawal</em> não serão alterados, mas a vinculação <code>withdrawal_id</code> nas comissões será removida.</div>
+                    <div className="font-semibold">Atenção — cashbacks já saqueadas</div>
+                    <div className="mt-1">{preview.affected_withdrawals.length} saque(s) tinham essas cashbacks: <span className="font-mono">{preview.affected_withdrawals.slice(0, 4).join(', ')}{preview.affected_withdrawals.length > 4 ? `… (+${preview.affected_withdrawals.length - 4})` : ''}</span>. Os documentos de <em>withdrawal</em> não serão alterados, mas a vinculação <code>withdrawal_id</code> nas cashbacks será removida.</div>
                   </div>
                 </div>
               )}
@@ -184,7 +184,7 @@ export default function CommissionsStatusModal({ open, onClose, mode = 'revert',
           <Button variant="outline" onClick={onClose} disabled={applying} data-testid="status-cancel-btn">Cancelar</Button>
           <Button variant="default" onClick={apply} disabled={!canApply || applying} data-testid="status-apply-btn" className={cfg.btnClass}>
             {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />}
-            {applying ? `${cfg.actionLabel}…` : `${cfg.actionLabel} ${total > 0 ? total : ''} comissão${total > 1 ? 'ões' : ''}`}
+            {applying ? `${cfg.actionLabel}…` : `${cfg.actionLabel} ${total > 0 ? total : ''} cashback${total > 1 ? 'ões' : ''}`}
           </Button>
         </div>
       </div>

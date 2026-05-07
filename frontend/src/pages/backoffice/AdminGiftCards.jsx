@@ -22,7 +22,7 @@ export default function AdminGiftCards() {
           <h1 className="font-heading font-black text-2xl flex items-center gap-3">
             <CreditCard className="w-7 h-7 text-brand-main" /> Cartão de Benefícios
           </h1>
-          <p className="text-sm text-txt-secondary mt-1">Programa de indicação + envio diário de comissões.</p>
+          <p className="text-sm text-txt-secondary mt-1">Programa de indicação + envio diário de cashbacks.</p>
         </div>
       </div>
 
@@ -87,7 +87,7 @@ function ConfigTab() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-heading font-bold">Status do programa</h3>
-            <p className="text-xs text-txt-secondary">Habilita o CRON diário e o recebimento de comissões via cartão.</p>
+            <p className="text-xs text-txt-secondary">Habilita o CRON diário e o recebimento de cashbacks via cartão.</p>
           </div>
           <label className="inline-flex items-center gap-2 cursor-pointer" data-testid="toggle-enabled">
             <input
@@ -280,12 +280,12 @@ function BatchesTab() {
   useEffect(() => { (async () => { try { await load(); } finally { setLoading(false); } })(); }, []);
 
   const runManual = async () => {
-    if (!window.confirm('Gerar e enviar o lote AGORA com todas as comissões pagas pendentes?')) return;
+    if (!window.confirm('Gerar e enviar o lote AGORA com todas as cashbacks pagas pendentes?')) return;
     setRunning(true);
     try {
       const r = await api.post('/api/admin/card-batches/run');
       if (r.ran) toast.success(`Lote criado: ${r.users_count} usuários, ${formatCurrency(r.total_amount)}`);
-      else toast.info('Nenhuma comissão pendente');
+      else toast.info('Nenhuma cashback pendente');
       await load();
     } catch (e) { toast.error('Erro ao rodar'); }
     finally { setRunning(false); }

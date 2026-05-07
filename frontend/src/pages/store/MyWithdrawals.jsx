@@ -80,7 +80,7 @@ export default function MyWithdrawals() {
         <div className="bg-white rounded-xl border border-border p-5">
           <TrendingUp className="w-6 h-6 text-brand-main mb-2" />
           <div className="text-2xl font-heading font-black">{formatCurrency(balance.pending_commissions)}</div>
-          <div className="text-xs text-txt-secondary mt-0.5">Comissões pendentes</div>
+          <div className="text-xs text-txt-secondary mt-0.5">Cashbacks pendentes</div>
         </div>
         <div className="bg-white rounded-xl border border-border p-5">
           <CheckCircle2 className="w-6 h-6 text-blue-500 mb-2" />
@@ -91,7 +91,7 @@ export default function MyWithdrawals() {
 
       <div className="bg-bg-secondary rounded-xl p-4 text-xs text-txt-secondary mb-6 space-y-1">
         <div>• Valor mínimo de saque: <strong>{formatCurrency(balance.withdrawal_min_amount)}</strong></div>
-        <div>• Tempo de quarentena: comissões pagas ficam bloqueadas por <strong>{balance.withdrawal_release_days} dias</strong> antes de liberar para saque.</div>
+        <div>• Tempo de quarentena: cashbacks pagas ficam bloqueadas por <strong>{balance.withdrawal_release_days} dias</strong> antes de liberar para saque.</div>
         <div>• Pagamento via PIX após aprovação do administrador.</div>
       </div>
 

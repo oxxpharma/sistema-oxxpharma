@@ -20,7 +20,7 @@ const TRIGGER_LABELS = {
   email_trigger_order_paid: 'Pagamento confirmado',
   email_trigger_order_shipped: 'Pedido enviado',
   email_trigger_order_delivered: 'Pedido entregue',
-  email_trigger_commission_earned: 'Comissão ganha (afiliado)',
+  email_trigger_commission_earned: 'Cashback ganha (afiliado)',
   email_trigger_admin_new_order: 'Admin: novo pedido',
   email_trigger_admin_new_candidate: 'Admin: novo candidato a Propagandista',
 };

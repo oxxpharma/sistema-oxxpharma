@@ -130,12 +130,12 @@ export default function MyReferral() {
     const storeName = settings?.store_name || 'OxxPharma';
     const badge = settings?.referral_box_badge || 'NOVO PROGRAMA';
     const titleRaw = settings?.referral_box_title || `${programName}\n${storeName}`;
-    const desc = settings?.referral_box_description || `Indique amigos e receba suas comissões direto no <b>seu cartão</b>. Adira agora ao programa, gere seu link personalizado e comece a ganhar em cada compra indicada.`;
+    const desc = settings?.referral_box_description || `Indique amigos e receba suas cashbacks direto no <b>seu cartão</b>. Adira agora ao programa, gere seu link personalizado e comece a ganhar em cada compra indicada.`;
     const ctaLabel = settings?.referral_box_cta_label || 'Aderir ao programa de indicação';
     const features = (settings?.referral_box_features && settings.referral_box_features.length)
       ? settings.referral_box_features
       : [
-        { icon: 'Gift', title: 'Cartão de Benefícios', desc: 'Receba suas comissões em um cartão de benefícios exclusivo.' },
+        { icon: 'Gift', title: 'Cartão de Benefícios', desc: 'Receba suas cashbacks em um cartão de benefícios exclusivo.' },
         { icon: 'Share2', title: 'Link exclusivo', desc: 'Compartilhe seu código nas redes sociais.' },
         { icon: 'Send', title: 'Envio diário', desc: 'Todo dia às 23:59 seu saldo é enviado pro cartão.' },
       ];
@@ -218,7 +218,7 @@ export default function MyReferral() {
         <Share2 className="w-7 h-7 text-brand-main" /> Indique e ganhe benefícios
       </h1>
       <p className="text-sm text-txt-secondary mb-6">
-        Compartilhe seu link personalizado. A cada compra feita através dele, sua comissão entra no seu saldo na conta.
+        Compartilhe seu link personalizado. A cada compra feita através dele, sua cashback entra no seu saldo na conta.
       </p>
 
       {/* Cartão principal */}
@@ -445,11 +445,11 @@ export default function MyReferral() {
       {/* Histórico */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <div className="p-6 border-b border-border">
-          <h2 className="font-heading font-black text-lg">Histórico de comissões</h2>
+          <h2 className="font-heading font-black text-lg">Histórico de cashbacks</h2>
         </div>
         {commissions.length === 0 ? (
           <div className="p-12 text-center text-txt-secondary text-sm">
-            Nenhuma comissão ainda. Compartilhe seu link para começar a ganhar!
+            Nenhuma cashback ainda. Compartilhe seu link para começar a ganhar!
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -460,7 +460,7 @@ export default function MyReferral() {
                   <th className="text-left p-3">Cliente</th>
                   <th className="text-left p-3">Pedido</th>
                   <th className="text-right p-3">Valor pedido</th>
-                  <th className="text-right p-3">Comissão</th>
+                  <th className="text-right p-3">Cashback</th>
                   <th className="text-center p-3">Status</th>
                   <th className="text-center p-3">Cartão</th>
                 </tr>

@@ -99,7 +99,7 @@ export default function AdminCommissionsByGeneration() {
   return (
     <div className="space-y-6" data-testid="commissions-by-generation-page">
       <div>
-        <h1 className="font-heading font-black text-2xl md:text-3xl text-txt-primary">Comissões por Geração</h1>
+        <h1 className="font-heading font-black text-2xl md:text-3xl text-txt-primary">Cashback por Geração</h1>
         <p className="text-sm text-txt-secondary mt-1">Validação visual da cadeia MMN: quem recebeu, qual % e de qual geração (0 a 6).</p>
       </div>
 
@@ -130,7 +130,7 @@ export default function AdminCommissionsByGeneration() {
                   if (start) f.start = start;
                   if (end) f.end = end;
                   if (!start && !end) {
-                    if (!window.confirm('Você não selecionou data. Isto aprovará TODAS as comissões pendentes. Continuar?')) return;
+                    if (!window.confirm('Você não selecionou data. Isto aprovará TODAS as cashbacks pendentes. Continuar?')) return;
                   }
                   setStatusModal({ mode: 'approve', filters: f, title: 'Aprovar por filtro (em massa)' });
                 }}
@@ -148,7 +148,7 @@ export default function AdminCommissionsByGeneration() {
                   if (start) f.start = start;
                   if (end) f.end = end;
                   if (!start && !end && status === '') {
-                    if (!window.confirm('Você não selecionou data nem status. Isto reverterá TODAS as comissões pagas/saqueadas. Continuar?')) return;
+                    if (!window.confirm('Você não selecionou data nem status. Isto reverterá TODAS as cashbacks pagas/saqueadas. Continuar?')) return;
                   }
                   setStatusModal({ mode: 'revert', filters: f, title: 'Reverter por filtro (em massa)' });
                 }}
@@ -169,8 +169,8 @@ export default function AdminCommissionsByGeneration() {
           {/* Totais */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard icon={DollarSign} color="emerald" label="Total pago" value={formatCurrency(data.totals.total_amount)} testId="total-amount" />
-            <StatCard icon={TrendingUp} color="brand" label="Nº de comissões" value={data.totals.total_count} testId="total-count" />
-            <StatCard icon={Package} color="indigo" label="Pedidos c/ comissão" value={data.totals.orders_with_commission} testId="total-orders" />
+            <StatCard icon={TrendingUp} color="brand" label="Nº de cashbacks" value={data.totals.total_count} testId="total-count" />
+            <StatCard icon={Package} color="indigo" label="Pedidos c/ cashback" value={data.totals.orders_with_commission} testId="total-orders" />
             <StatCard icon={Users} color="amber" label="Gerações ativas" value={chartData.filter(c => (c.affiliate + c.network_1 + c.network_2) > 0).length} testId="active-gens" />
           </div>
 
@@ -178,7 +178,7 @@ export default function AdminCommissionsByGeneration() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 bg-white rounded-xl border border-border p-5">
               <h2 className="font-heading font-black text-base mb-4">Total pago por geração (empilhado por rede)</h2>
-              {chartData.length === 0 ? <EmptyHint msg="Sem comissões no período." /> : (
+              {chartData.length === 0 ? <EmptyHint msg="Sem cashbacks no período." /> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={chartData} margin={{ left: 8, right: 8, top: 6, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
@@ -195,7 +195,7 @@ export default function AdminCommissionsByGeneration() {
             </div>
             <div className="bg-white rounded-xl border border-border p-5">
               <h2 className="font-heading font-black text-base mb-4">Distribuição por origem</h2>
-              {networkPie.length === 0 ? <EmptyHint msg="Sem comissões." /> : (
+              {networkPie.length === 0 ? <EmptyHint msg="Sem cashbacks." /> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
                     <Pie data={networkPie} dataKey="value" nameKey="name" outerRadius={90} label={(e) => `${e.name}: ${formatCurrency(e.value)}`}>
@@ -221,7 +221,7 @@ export default function AdminCommissionsByGeneration() {
                     <th className="text-left p-3">Origem</th>
                     <th className="text-right p-3">% média</th>
                     <th className="text-right p-3">Beneficiários</th>
-                    <th className="text-right p-3">Nº comissões</th>
+                    <th className="text-right p-3">Nº cashbacks</th>
                     <th className="text-right p-3">Total pago</th>
                   </tr>
                 </thead>
@@ -250,7 +250,7 @@ export default function AdminCommissionsByGeneration() {
           {/* Pedidos recentes com cadeia detalhada */}
           <div className="bg-white rounded-xl border border-border overflow-hidden">
             <div className="p-5 border-b border-border">
-              <h2 className="font-heading font-black text-base">Últimos pedidos com comissões (validação detalhada)</h2>
+              <h2 className="font-heading font-black text-base">Últimos pedidos com cashbacks (validação detalhada)</h2>
               <p className="text-xs text-txt-secondary mt-1">Clique em um pedido para ver a cadeia completa de beneficiários (quem recebeu, qual geração, qual %).</p>
             </div>
             <div className="overflow-x-auto">
@@ -263,12 +263,12 @@ export default function AdminCommissionsByGeneration() {
                     <th className="text-left p-3">Data</th>
                     <th className="text-right p-3">Subtotal</th>
                     <th className="text-right p-3">Beneficiários</th>
-                    <th className="text-right p-3">Comissões pagas</th>
+                    <th className="text-right p-3">Cashbacks pagas</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(data.recent_orders || []).length === 0
-                    ? <tr><td colSpan={7} className="p-10 text-center text-txt-secondary">Nenhum pedido com comissão no período.</td></tr>
+                    ? <tr><td colSpan={7} className="p-10 text-center text-txt-secondary">Nenhum pedido com cashback no período.</td></tr>
                     : data.recent_orders.map((o) => {
                       const isOpen = expanded.has(o.order_id);
                       return (
@@ -324,12 +324,12 @@ export default function AdminCommissionsByGeneration() {
                                     onRevertOne={(c) => setStatusModal({
                                       mode: 'revert',
                                       filters: { commission_ids: [c.commission_id] },
-                                      title: `Reverter comissão de ${c.beneficiary_name}`,
+                                      title: `Reverter cashback de ${c.beneficiary_name}`,
                                     })}
                                     onApproveOne={(c) => setStatusModal({
                                       mode: 'approve',
                                       filters: { commission_ids: [c.commission_id] },
-                                      title: `Aprovar comissão de ${c.beneficiary_name}`,
+                                      title: `Aprovar cashback de ${c.beneficiary_name}`,
                                     })}
                                   />
                                 </div>
@@ -373,7 +373,7 @@ function ChainTable({ chain, subtotal, isSuperAdmin, onRevertOne, onApproveOne }
   return (
     <div className="bg-white rounded-lg border border-border overflow-hidden">
       <div className="px-3 py-2 border-b border-border flex items-center justify-between flex-wrap gap-2">
-        <div className="text-xs font-semibold text-txt-secondary">Cadeia de comissões geradas por este pedido</div>
+        <div className="text-xs font-semibold text-txt-secondary">Cadeia de cashbacks geradas por este pedido</div>
         <div className="flex items-center gap-2 flex-wrap">
           {gens.map(g => {
             const has = chain.some(c => (c.generation ?? 0) === g);
@@ -461,7 +461,7 @@ function ChainTable({ chain, subtotal, isSuperAdmin, onRevertOne, onApproveOne }
             </tr>
           ))}
           {chain.length === 0 && (
-            <tr><td colSpan={isSuperAdmin ? 8 : 7} className="p-6 text-center text-txt-secondary">Sem comissões registradas.</td></tr>
+            <tr><td colSpan={isSuperAdmin ? 8 : 7} className="p-6 text-center text-txt-secondary">Sem cashbacks registradas.</td></tr>
           )}
         </tbody>
       </table>

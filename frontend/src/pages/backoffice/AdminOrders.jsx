@@ -66,7 +66,7 @@ export default function AdminOrders() {
       `Deletar PERMANENTEMENTE o pedido ${o.order_id}?\n\n` +
       `Isso vai APAGAR:\n` +
       `• O registro do pedido\n` +
-      `• Comissões geradas por este pedido\n` +
+      `• Cashbacks geradas por este pedido\n` +
       `• Pontos atribuídos por este pedido\n` +
       `• Logs de webhook (pagamento + Equipe)\n\n` +
       `E REVERTERÁ:\n` +
@@ -77,7 +77,7 @@ export default function AdminOrders() {
     try {
       const r = await api.delete(`/api/admin/orders/${o.order_id}`);
       const s = r?.summary || {};
-      toast.success(`Pedido excluído (${s.commissions_deleted || 0} comissões, ${s.points_deleted || 0} pontos${s.stock_restored ? ', estoque revertido' : ''})`);
+      toast.success(`Pedido excluído (${s.commissions_deleted || 0} cashbacks, ${s.points_deleted || 0} pontos${s.stock_restored ? ', estoque revertido' : ''})`);
       if (selected?.order_id === o.order_id) setSelected(null);
       setOrders(prev => prev.filter(x => x.order_id !== o.order_id));
     } catch (err) { toast.error(err.message || 'Erro ao deletar'); }
@@ -184,7 +184,7 @@ export default function AdminOrders() {
 
               {selected.affiliate_id && (
                 <div className="bg-brand-light border border-brand-main/20 rounded-lg p-3 text-sm">
-                  <div className="font-bold text-brand-main">Comissão de afiliado</div>
+                  <div className="font-bold text-brand-main">Cashback de Indicação</div>
                   <div className="text-xs">Código {selected.affiliate_code} · {formatCurrency(selected.affiliate_commission)}</div>
                 </div>
               )}
@@ -237,7 +237,7 @@ export default function AdminOrders() {
               {/* Zona de perigo */}
               <div className="mt-6 pt-4 border-t border-red-200">
                 <h3 className="text-sm font-bold text-red-600 mb-2">Zona de perigo</h3>
-                <p className="text-xs text-txt-secondary mb-3">Deletar um pedido remove todas as comissões, pontos e logs gerados por ele, e reverte estoque e cupom.</p>
+                <p className="text-xs text-txt-secondary mb-3">Deletar um pedido remove todas as cashbacks, pontos e logs gerados por ele, e reverte estoque e cupom.</p>
                 <Button variant="outline" onClick={() => deleteOrder(selected)} className="border-red-300 text-red-600 hover:bg-red-50" data-testid="delete-order-modal-btn">
                   <Trash2 className="w-4 h-4" /> Deletar pedido permanentemente
                 </Button>

@@ -22,7 +22,7 @@ const NETWORK_OPTIONS = [
 const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
   { value: 'comercial', label: 'Comercial (backoffice sem financeiro/integrações)' },
-  { value: 'financeiro', label: 'Financeiro (comissões, saques, cartão)' },
+  { value: 'financeiro', label: 'Financeiro (cashbacks, saques, cartão)' },
 ];
 const ROLE_OPTIONS_SUPER = [
   { value: 'admin', label: 'Admin (tudo exceto integrações críticas)' },
@@ -118,7 +118,7 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
 
   const del = async () => {
     if (!window.confirm(`Deletar PERMANENTEMENTE o usuário ${u.name}? Esta ação não pode ser desfeita.`)) return;
-    if (!window.confirm('Tem CERTEZA absoluta? Pedidos serão preservados, mas comissões e dados serão apagados.')) return;
+    if (!window.confirm('Tem CERTEZA absoluta? Pedidos serão preservados, mas cashbacks e dados serão apagados.')) return;
     try {
       await api.del(`/api/admin/users/${userId}`);
       toast.success('Usuário deletado');

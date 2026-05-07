@@ -155,6 +155,10 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Cleanup**: script `cleanup_orphan_commissions.py` removeu 9 comissões órfãs em 6 pedidos pending. DB final: 9 comissões (R$ 85,07) batendo exatamente com o preview do recálculo.
   - **Status inicial das comissões**: `pending` (beneficiário inscrito) ou `pending_enrollment` (não inscrito). Nunca `paid` direto — admin precisa aprovar manualmente (Iter 42c).
   - Testes: `test_iter42d_commissions_only_when_paid.py` (4 testes — sem órfãs no DB, criação ao marcar paid, idempotência, recálculo force pós-cleanup) — **todos PASS**.
+- ✅ Iter 42e (Fev/2026): **Renomeação visual "Comissão" → "Cashback"** em todo o sistema (frontend + emails).
+  - Substituídos 97 ocorrências em 19 arquivos do frontend + email templates (`commission_earned`, `welcome`).
+  - Termos especiais: "Comissões por Geração" → **"Cashback por Geração"** · "Recalcular Comissões" → **"Recalcular Cashbacks"** · "Comissão de afiliado" → **"Cashback de Indicação"**.
+  - **Mantidos** intactos: URLs (`/api/admin/commissions/*`, `/backoffice/comissoes-por-geracao`), nomes de variáveis JS/Python, schema do banco (collection `commissions`, campos `commission_id`), slug de email (`commission_earned`), data-testids — preserva integrações externas (Maxx, scripts) e não exige migração.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
