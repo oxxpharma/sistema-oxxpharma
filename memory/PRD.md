@@ -144,6 +144,11 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Atualização: `status="pending"`, remove `paid_at`/`paid_out_at`/`withdrawal_id`; grava `reverted_at`/`reverted_by_email` (audit leve embutido).
   - Frontend (`AdminCommissionsByGeneration.jsx`): botão "↩ Reverter" por linha + "Reverter pedido inteiro" no expand + "Reverter por filtro" no topo. Modal `RevertCommissionsModal` mostra preview, contadores, alerta de saques afetados, e exige digitar `REVERTER` para confirmação em massa.
   - Testes: `test_iter42_revert_commissions.py` (5 testes — RBAC super_admin only, exige filtro, confirm em massa, desvinculação de withdrawal_id, ignora pending) — **todos PASS**.
+- ✅ Iter 42c (Fev/2026): **Comissões NÃO transitam mais para "paid" automaticamente** — apenas super_admin via UI.
+  - **Removido** trigger automático nos 2 pontos: `update_order_status` (admin marca pedido pago) e `mark_order_paid` (webhook MercadoPago / pagamento via voucher). Ambos continuam emitindo NF, registrando pontos e disparando emails — só a transição `commission.status pending → paid` foi removida.
+  - **Novo endpoint**: `POST /api/admin/commissions/approve/preview` + `/apply` (`require_super_admin()`). Aceita os mesmos 4 modos de filtro do revert. Massa (>1 pedido) exige `confirm=True`.
+  - **Frontend** (`CommissionsStatusModal.jsx` — substituiu `RevertCommissionsModal`): modal genérico que serve tanto revert (amber) quanto approve (emerald). Botões "✓ Aprovar" por linha (apenas se `pending`) + "Aprovar pendentes do pedido" no expand + "Aprovar por filtro" no topo.
+  - Testes: `test_iter42c_approve_commissions.py` (5 testes — aprovação não-automática ao marcar pedido pago, RBAC, preview, ignora paid/paid_out, confirm em massa) — **todos PASS**.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

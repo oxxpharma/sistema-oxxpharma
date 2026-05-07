@@ -7,10 +7,10 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend,
   PieChart, Pie, Cell,
 } from 'recharts';
-import { Loader2, Search, ChevronDown, ChevronRight, DollarSign, TrendingUp, Users, Package, Undo2 } from 'lucide-react';
+import { Loader2, Search, ChevronDown, ChevronRight, DollarSign, TrendingUp, Users, Package, Undo2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
-import RevertCommissionsModal from '../../components/admin/RevertCommissionsModal';
+import CommissionsStatusModal from '../../components/admin/CommissionsStatusModal';
 import { useAuth } from '../../contexts/AuthContext';
 
 const PAGE_LIMIT = 20;
@@ -35,8 +35,7 @@ export default function AdminCommissionsByGeneration() {
   const [end, setEnd] = useState('');
   const [expanded, setExpanded] = useState(new Set());
   const [page, setPage] = useState(1);
-  const [revertFilters, setRevertFilters] = useState(null); // {commission_ids|order_ids|...}
-  const [revertTitle, setRevertTitle] = useState('');
+  const [statusModal, setStatusModal] = useState(null); // { mode: 'revert'|'approve', filters, title }
 
   const load = async (targetPage = page) => {
     setLoading(true);
@@ -121,24 +120,45 @@ export default function AdminCommissionsByGeneration() {
           <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" />
         </div>
         <Button variant="outline" onClick={applyFilters} data-testid="apply-filters"><Search className="w-4 h-4" /> Aplicar</Button>
-        {isSuperAdmin && (status === 'paid' || status === 'paid_out' || status === '') && (
-          <Button
-            variant="outline"
-            onClick={() => {
-              const f = { status_in: status === '' ? ['paid', 'paid_out'] : [status] };
-              if (start) f.start = start;
-              if (end) f.end = end;
-              if (!start && !end && status === '') {
-                if (!window.confirm('Você não selecionou data nem status. Isto reverterá TODAS as comissões pagas/saqueadas. Continuar?')) return;
-              }
-              setRevertFilters(f);
-              setRevertTitle('Reverter por filtro (em massa)');
-            }}
-            data-testid="revert-by-filter-btn"
-            className="text-amber-700 border-amber-300 hover:bg-amber-50"
-          >
-            <Undo2 className="w-4 h-4" /> Reverter por filtro
-          </Button>
+        {isSuperAdmin && (
+          <>
+            {(status === 'pending' || status === '') && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const f = {};
+                  if (start) f.start = start;
+                  if (end) f.end = end;
+                  if (!start && !end) {
+                    if (!window.confirm('Você não selecionou data. Isto aprovará TODAS as comissões pendentes. Continuar?')) return;
+                  }
+                  setStatusModal({ mode: 'approve', filters: f, title: 'Aprovar por filtro (em massa)' });
+                }}
+                data-testid="approve-by-filter-btn"
+                className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+              >
+                <CheckCircle2 className="w-4 h-4" /> Aprovar por filtro
+              </Button>
+            )}
+            {(status === 'paid' || status === 'paid_out' || status === '') && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const f = { status_in: status === '' ? ['paid', 'paid_out'] : [status] };
+                  if (start) f.start = start;
+                  if (end) f.end = end;
+                  if (!start && !end && status === '') {
+                    if (!window.confirm('Você não selecionou data nem status. Isto reverterá TODAS as comissões pagas/saqueadas. Continuar?')) return;
+                  }
+                  setStatusModal({ mode: 'revert', filters: f, title: 'Reverter por filtro (em massa)' });
+                }}
+                data-testid="revert-by-filter-btn"
+                className="text-amber-700 border-amber-300 hover:bg-amber-50"
+              >
+                <Undo2 className="w-4 h-4" /> Reverter por filtro
+              </Button>
+            )}
+          </>
         )}
       </div>
 
@@ -270,13 +290,26 @@ export default function AdminCommissionsByGeneration() {
                               <td colSpan={7} className="p-0">
                                 <div className="p-4">
                                   {isSuperAdmin && (
-                                    <div className="flex justify-end mb-2">
+                                    <div className="flex justify-end gap-2 mb-2">
                                       <Button
                                         variant="outline"
-                                        onClick={() => {
-                                          setRevertFilters({ order_ids: [o.order_id] });
-                                          setRevertTitle(`Reverter pedido ${o.order_number || o.order_id.slice(0, 12)}`);
-                                        }}
+                                        onClick={() => setStatusModal({
+                                          mode: 'approve',
+                                          filters: { order_ids: [o.order_id] },
+                                          title: `Aprovar pedido ${o.order_number || o.order_id.slice(0, 12)}`,
+                                        })}
+                                        data-testid={`approve-order-${o.order_id}`}
+                                        className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5" /> Aprovar pendentes do pedido
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => setStatusModal({
+                                          mode: 'revert',
+                                          filters: { order_ids: [o.order_id] },
+                                          title: `Reverter pedido ${o.order_number || o.order_id.slice(0, 12)}`,
+                                        })}
                                         data-testid={`revert-order-${o.order_id}`}
                                         className="text-amber-700 border-amber-300 hover:bg-amber-50 text-xs"
                                       >
@@ -288,10 +321,16 @@ export default function AdminCommissionsByGeneration() {
                                     chain={o.chain}
                                     subtotal={o.subtotal}
                                     isSuperAdmin={isSuperAdmin}
-                                    onRevertOne={(c) => {
-                                      setRevertFilters({ commission_ids: [c.commission_id] });
-                                      setRevertTitle(`Reverter comissão de ${c.beneficiary_name}`);
-                                    }}
+                                    onRevertOne={(c) => setStatusModal({
+                                      mode: 'revert',
+                                      filters: { commission_ids: [c.commission_id] },
+                                      title: `Reverter comissão de ${c.beneficiary_name}`,
+                                    })}
+                                    onApproveOne={(c) => setStatusModal({
+                                      mode: 'approve',
+                                      filters: { commission_ids: [c.commission_id] },
+                                      title: `Aprovar comissão de ${c.beneficiary_name}`,
+                                    })}
                                   />
                                 </div>
                               </td>
@@ -317,18 +356,19 @@ export default function AdminCommissionsByGeneration() {
         </>
       )}
 
-      <RevertCommissionsModal
-        open={!!revertFilters}
-        onClose={() => setRevertFilters(null)}
-        filters={revertFilters}
-        title={revertTitle}
+      <CommissionsStatusModal
+        open={!!statusModal}
+        onClose={() => setStatusModal(null)}
+        mode={statusModal?.mode}
+        filters={statusModal?.filters}
+        title={statusModal?.title}
         onSuccess={() => load(page)}
       />
     </div>
   );
 }
 
-function ChainTable({ chain, subtotal, isSuperAdmin, onRevertOne }) {
+function ChainTable({ chain, subtotal, isSuperAdmin, onRevertOne, onApproveOne }) {
   const gens = [0, 1, 2, 3, 4, 5, 6];
   return (
     <div className="bg-white rounded-lg border border-border overflow-hidden">
@@ -405,6 +445,15 @@ function ChainTable({ chain, subtotal, isSuperAdmin, onRevertOne }) {
                       data-testid={`revert-row-${c.commission_id}`}
                     >
                       ↩ Reverter
+                    </button>
+                  ) : c.status === 'pending' ? (
+                    <button
+                      onClick={() => onApproveOne(c)}
+                      className="text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded hover:bg-emerald-50"
+                      title="Aprovar (marcar como pago)"
+                      data-testid={`approve-row-${c.commission_id}`}
+                    >
+                      ✓ Aprovar
                     </button>
                   ) : <span className="text-txt-secondary text-[10px]">—</span>}
                 </td>

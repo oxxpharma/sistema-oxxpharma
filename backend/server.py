@@ -1163,13 +1163,10 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
         for item in o.get("items", []):
             await db.products.update_one({"product_id": item["product_id"]}, {"$inc": {"stock": item["quantity"]}})
     await db.orders.update_one({"order_id": order_id}, {"$set": update})
-    # Sincronizar status das comissoes do afiliado
+    # Iter 42c: comissoes NAO transitam mais para "paid" automaticamente quando o pedido eh marcado como pago.
+    # Admin precisa aprovar manualmente em /backoffice/comissoes-por-geracao (botao "Aprovar").
     if status == "paid":
-        await db.commissions.update_many(
-            {"order_id": order_id, "status": "pending"},
-            {"$set": {"status": "paid", "paid_at": now_iso()}},
-        )
-        # Registrar pontos
+        # Apenas registra pontos (independente de comissao)
         await register_points_from_order(db, order_id)
     elif status == "cancelled":
         await db.commissions.update_many(
@@ -2425,18 +2422,27 @@ def _build_revert_query(body: _RevertCommissionsBody):
     invalid = [s for s in statuses if s not in ("paid", "paid_out")]
     if invalid:
         return {}, f"status_in deve conter apenas 'paid' e/ou 'paid_out' (recebido: {invalid})"
+    return _build_commissions_query(body, statuses)
+
+
+def _build_approve_query(body: "_ApproveCommissionsBody"):
+    """Filtro para aprovar (pending -> paid). Retorna (query, error|None)."""
+    return _build_commissions_query(body, ["pending"])
+
+
+def _build_commissions_query(body, statuses: list):
     q = {"status": {"$in": statuses}}
     has_filter = False
-    if body.commission_ids:
+    if getattr(body, "commission_ids", None):
         q["commission_id"] = {"$in": body.commission_ids}
         has_filter = True
-    if body.order_ids:
+    if getattr(body, "order_ids", None):
         q["order_id"] = {"$in": body.order_ids}
         has_filter = True
-    if body.user_id:
+    if getattr(body, "user_id", None):
         q["user_id"] = body.user_id
         has_filter = True
-    if body.start or body.end:
+    if getattr(body, "start", None) or getattr(body, "end", None):
         rng = {}
         if body.start:
             rng["$gte"] = body.start if "T" in body.start else body.start + "T00:00:00"
@@ -2447,6 +2453,87 @@ def _build_revert_query(body: _RevertCommissionsBody):
     if not has_filter:
         return {}, "Forneca pelo menos um filtro: commission_ids, order_ids, user_id ou intervalo start/end."
     return q, None
+
+
+# ==================== APPROVE COMMISSIONS (pending -> paid, super_admin only) ====================
+
+class _ApproveCommissionsBody(BaseModel):
+    """Aprovar comissoes pending -> paid manualmente.
+    Aceita os mesmos filtros do revert (commission_ids/order_ids/user_id/start-end).
+    """
+    commission_ids: Optional[List[str]] = None
+    order_ids: Optional[List[str]] = None
+    user_id: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    confirm: Optional[bool] = False
+
+
+@app.post("/api/admin/commissions/approve/preview")
+async def admin_commissions_approve_preview(request: Request, body: _ApproveCommissionsBody, user: dict = Depends(require_super_admin())):
+    db = request.app.db
+    q, err = _build_approve_query(body)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    cursor = db.commissions.find(q, {"_id": 0, "commission_id": 1, "user_id": 1, "customer_name": 1,
+                                     "order_id": 1, "type": 1, "generation": 1, "amount": 1,
+                                     "status": 1, "created_at": 1}).limit(2000)
+    items = await cursor.to_list(2000)
+    total = await db.commissions.count_documents(q)
+    total_amount = round(sum(i.get("amount") or 0 for i in items), 2)
+    affected_users = len({i.get("user_id") for i in items})
+    return {
+        "total": total,
+        "shown": len(items),
+        "total_amount": total_amount,
+        "affected_users": affected_users,
+        "affected_withdrawals": [],  # nao afeta saques (pending nunca tem withdrawal_id)
+        "items": items,
+    }
+
+
+@app.post("/api/admin/commissions/approve/apply")
+async def admin_commissions_approve_apply(request: Request, body: _ApproveCommissionsBody, user: dict = Depends(require_super_admin())):
+    """Marca comissoes pending como paid (manual)."""
+    db = request.app.db
+    q, err = _build_approve_query(body)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    distinct_orders = await db.commissions.distinct("order_id", q)
+    if len(distinct_orders) > 1 and not body.confirm:
+        raise HTTPException(status_code=400, detail=f"Esta operacao afeta {len(distinct_orders)} pedidos. Reenvie com confirm=true para confirmar.")
+
+    pre = await db.commissions.find(q, {"_id": 0, "commission_id": 1, "amount": 1}).to_list(5000)
+    if not pre:
+        return {"success": True, "modified": 0, "total_amount": 0, "affected_orders": 0}
+
+    now = now_iso()
+    res = await db.commissions.update_many(
+        {"commission_id": {"$in": [p["commission_id"] for p in pre]}},
+        {
+            "$set": {
+                "status": "paid",
+                "paid_at": now,
+                "approved_by_user_id": user.get("user_id"),
+                "approved_by_email": user.get("email"),
+            },
+            # Limpa marca de revert se a comissao tinha sido revertida antes
+            "$unset": {"reverted_at": "", "reverted_by_user_id": "", "reverted_by_email": ""},
+        },
+    )
+
+    total_amount = round(sum(p.get("amount") or 0 for p in pre), 2)
+    return {
+        "success": True,
+        "modified": res.modified_count,
+        "total_amount": total_amount,
+        "affected_orders": len(distinct_orders),
+        "affected_withdrawals": [],
+    }
+
+
+# ==================== /APPROVE ====================
 
 
 # ==================== AFFILIATE / REFERRALS ====================
@@ -2788,11 +2875,8 @@ async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, s
             {"order_id": order_id},
             {"$set": {"invoice_number": inv["number"], "invoice_issued_at": inv["issued_at"]}},
         )
-    # Commissions -> paid
-    await db.commissions.update_many(
-        {"order_id": order_id, "status": "pending"},
-        {"$set": {"status": "paid", "paid_at": now_iso()}},
-    )
+    # Iter 42c: comissoes NAO transitam mais para "paid" automaticamente.
+    # Admin precisa aprovar manualmente em /backoffice/comissoes-por-geracao.
     # Pontos
     await register_points_from_order(db, order_id)
     # Email
