@@ -79,10 +79,18 @@ async def main():
 
     # Orfas
     comm_oids = await db.commissions.distinct("order_id")
-    paid_oids = set(await db.orders.distinct(
+    # Pedido eh "valido" se payment_status=paid OU order_status em estado pos-pagamento.
+    # Isso protege casos onde webhook nao chegou mas admin marcou shipped/delivered.
+    VALID_ORDER_STATES = ["paid", "shipped", "delivered"]
+    valid_oids = set()
+    valid_oids.update(await db.orders.distinct(
         "order_id", {"payment_status": "paid", "order_id": {"$in": comm_oids}}
     ))
-    orphan_oids = [o for o in comm_oids if o not in paid_oids]
+    valid_oids.update(await db.orders.distinct(
+        "order_id",
+        {"order_status": {"$in": VALID_ORDER_STATES}, "order_id": {"$in": comm_oids}}
+    ))
+    orphan_oids = [o for o in comm_oids if o not in valid_oids]
     if orphan_oids:
         orphan_agg = await db.commissions.aggregate([
             {"$match": {"order_id": {"$in": orphan_oids}}},
