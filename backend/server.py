@@ -382,6 +382,15 @@ async def lifespan(app: FastAPI):
     await app.db.commissions.create_index("user_id")
     await app.db.commissions.create_index([("user_id", 1), ("status", 1)])
     await app.db.commissions.create_index("withdrawal_id")
+    # Iter 42: indice unico para impedir duplicacao por (order, beneficiario, tipo, geracao)
+    try:
+        await app.db.commissions.create_index(
+            [("order_id", 1), ("user_id", 1), ("type", 1), ("generation", 1)],
+            unique=True,
+            name="uq_commission_per_beneficiary",
+        )
+    except Exception as e:
+        logger.warning(f"could not create uq_commission_per_beneficiary index: {e}")
     await app.db.users.create_index("network_type")
     await app.db.users.create_index("network_sponsor_id")
     await app.db.users.create_index("external_id", sparse=True)
@@ -1051,7 +1060,12 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         generation += 1
 
     if commissions_to_insert:
-        await db.commissions.insert_many(commissions_to_insert)
+        try:
+            await db.commissions.insert_many(commissions_to_insert, ordered=False)
+        except Exception as e:
+            # Defesa contra duplicatas (indice unico em order_id+user_id+type+generation).
+            # Logamos mas nao quebramos o checkout.
+            logger.warning(f"commissions insert_many partial failure: {e}")
 
     # Clear cart
     await db.carts.delete_one({"user_id": user["user_id"]})
@@ -2244,8 +2258,8 @@ async def admin_recalc_apply(request: Request, body: _RecalcBody, user: dict = D
         if not cust:
             continue
         if body.force:
-            # Iter 41: apaga TODAS as comissoes existentes deste pedido para recriar com a regra atual.
-            # Comissoes ja PAGAS sao preservadas (somente pending e pending_enrollment sao apagadas).
+            # Iter 41/42: apaga apenas as comissoes "abertas" (pending/pending_enrollment) deste pedido.
+            # Comissoes ja PAGAS (paid) ou SAQUEADAS (paid_out) sao preservadas como historico imutavel.
             del_res = await db.commissions.delete_many({
                 "order_id": o["order_id"],
                 "status": {"$in": ["pending", "pending_enrollment"]},
@@ -2256,21 +2270,25 @@ async def admin_recalc_apply(request: Request, body: _RecalcBody, user: dict = D
                 continue
         comms = await compute_order_commissions(db, o, cust, settings, mark_retroactive=True, batch_id=batch_id)
         if body.force:
-            # Em modo force, nao recriar comissoes que ja foram pagas (preserva historico)
-            paid_keys = set()
-            async for paid in db.commissions.find(
-                {"order_id": o["order_id"], "status": "paid"},
+            # Iter 42: nao recriar comissoes ja PAGAS (paid) nem SAQUEADAS (paid_out)
+            # Sem isso, paid_out era ignorado e gerava DUPLICATAS no recalc force.
+            existing_keys = set()
+            async for ex in db.commissions.find(
+                {"order_id": o["order_id"], "status": {"$in": ["paid", "paid_out"]}},
                 {"_id": 0, "user_id": 1, "type": 1, "generation": 1}
             ):
-                paid_keys.add((paid.get("user_id"), paid.get("type"), paid.get("generation")))
-            comms = [c for c in comms if (c["user_id"], c["type"], c.get("generation")) not in paid_keys]
+                existing_keys.add((ex.get("user_id"), ex.get("type"), ex.get("generation")))
+            comms = [c for c in comms if (c["user_id"], c["type"], c.get("generation")) not in existing_keys]
         if comms:
             all_docs.extend(comms)
             processed_ids.append(o["order_id"])
 
     total_amount = round(sum(d["amount"] for d in all_docs), 2)
     if all_docs:
-        await db.commissions.insert_many(all_docs)
+        try:
+            await db.commissions.insert_many(all_docs, ordered=False)
+        except Exception as e:
+            logger.warning(f"recalc insert_many partial failure: {e}")
 
     # Audit log
     try:

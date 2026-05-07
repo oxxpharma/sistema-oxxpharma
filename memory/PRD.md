@@ -129,6 +129,14 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Bugfix menu admin igual para todos:** o filtro `can?.[it.perm]` do sidebar dependia de uma propriedade `perm` que nenhum item tinha → todo admin via todo o menu. Adicionada `perm` em cada item (`integrations`/`financial`/`commercial`/`editProducts`/`manageRoles`). Resultado validado em 4 logins distintos: super_admin 33 itens, admin 20, financeiro 10, comercial 13 — cada um vê apenas o que sua role permite.
   - **Hardening de roles:** `isSuperAdmin` no frontend e `require_super_admin` no backend passaram a ser strict (apenas `role='super_admin'`). Antes admin legacy com access_level=0 ainda "viava" super e burlava a regra de "admin não vê integrações críticas". Migração do `admin@oxxpharma.com` de `role='admin'` para `role='super_admin'` aplicada via `seed_admin` (roda em todo startup, mantém promoção idempotente).
   - Testes: 19/20 passing (1 skipped). Roles: super/admin/financeiro/comercial criados em `test_credentials.md` para validação manual.
+- ✅ Iter 39-41 (Fev/2026): Funil /indique-ganhe, Preço Clube p/ não-membros, Relatório Comissões por Geração, retenção `pending_enrollment`, modo `force` no recálculo, filtro de data + Top10 vendas diretas no Dashboard.
+- ✅ Iter 42 (Fev/2026): **Fix crítico: Comissões duplicadas no DB** (cliente reportou pagamento de R$1.422 vs R$1.278 esperado).
+  - **Root cause**: `admin_recalc_apply` em modo `force` filtrava apenas `status="paid"` para preservar histórico, mas comissões já SAQUEADAS pelo usuário (`status="paid_out"`) eram ignoradas no filtro `paid_keys` → o recalc deletava as `pending` e recriava idênticas, gerando 2 comissões para o mesmo (order, user, type, generation).
+  - **Fix backend**: `paid_keys` agora bloqueia inserção quando existir comissão com `status in ["paid","paid_out"]`. `delete_many` continua restrito a `pending|pending_enrollment` para nunca tocar histórico.
+  - **Defesa em profundidade**: criado **índice único** `uq_commission_per_beneficiary` em `(order_id, user_id, type, generation)`; `insert_many` migrado para `ordered=False` com try/except (idempotente mesmo em race conditions).
+  - **Cleanup**: script `tests/cleanup_duplicate_commissions.py` removeu 3 grupos duplicados do DB de produção (mantendo `paid_out` por prioridade).
+  - **Validação**: todos os amounts agora batem matematicamente com `subtotal × rate`; recalc force executado 2x sem gerar nenhuma duplicata.
+  - Testes: `test_iter42_no_duplicate_commissions.py` (3 testes — sem duplicatas no DB, índice único existente, recalc force idempotente sobre paid/paid_out) — **todos PASS**.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
