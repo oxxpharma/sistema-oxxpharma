@@ -990,82 +990,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     if coupon_id_applied:
         await store_extras.increment_coupon_usage(db, coupon_id_applied)
 
-    # ============ COMISSOES ============
-    commissions_to_insert = []
-
-    # 1) Comissao de afiliado (8% configuravel) - pago a quem indicou via link
-    # Iter 40: sempre cria. Se afiliado nao esta inscrito no programa, status=pending_enrollment
-    # e fica oculto ate ele se inscrever.
-    if affiliate_id and commission_amount > 0:
-        affiliate_user = await db.users.find_one({"user_id": affiliate_id}, {"_id": 0})
-        aff_active = bool(affiliate_user and affiliate_user.get("referral_program_active"))
-        commissions_to_insert.append({
-            "commission_id": gen_id("com_"),
-            "user_id": affiliate_id,
-            "order_id": order["order_id"],
-            "customer_id": user["user_id"],
-            "customer_name": user.get("name"),
-            "type": "affiliate",
-            "network_type": None,
-            "generation": 0,
-            "amount": commission_amount,
-            "rate": affiliate_rate,
-            "order_subtotal": round(subtotal, 2),
-            "status": "pending" if aff_active else "pending_enrollment",
-            "program_active_at_creation": aff_active,
-            "created_at": now_iso(),
-        })
-
-    # 2) Comissoes de rede MMN (ate 6 geracoes)
-    # Iter 40: comissoes sao SEMPRE geradas (sem filtrar por programa de beneficios).
-    # Beneficiarios nao inscritos ficam com status='pending_enrollment' e a comissao eh
-    # liberada quando se inscrevem. A geracao incrementa a cada passo da cadeia,
-    # mesmo quando o ancestral nao eh MMN (nao paga, mas "gasta" a geracao,
-    # preservando a topologia da rede).
-    network1_pcts = settings.get("network1_generations", []) or []
-    network2_pcts = settings.get("network2_generations", []) or []
-    current_id = user.get("sponsor_id") or user.get("network_sponsor_id")
-    visited = {user["user_id"]}
-    generation = 1
-    while generation <= 6 and current_id and current_id not in visited:
-        visited.add(current_id)
-        ancestor = await db.users.find_one({"user_id": current_id}, {"_id": 0})
-        if not ancestor:
-            break
-        a_net = ancestor.get("network_type")
-        if a_net in (NETWORK_1, NETWORK_2):
-            pcts = network1_pcts if a_net == NETWORK_1 else network2_pcts
-            pct = pcts[generation - 1] if generation - 1 < len(pcts) else 0
-            if pct > 0:
-                amt = round(subtotal * pct / 100, 2)
-                if amt > 0:
-                    a_active = bool(ancestor.get("referral_program_active"))
-                    commissions_to_insert.append({
-                        "commission_id": gen_id("com_"),
-                        "user_id": ancestor["user_id"],
-                        "order_id": order["order_id"],
-                        "customer_id": user["user_id"],
-                        "customer_name": user.get("name"),
-                        "type": "network_gen",
-                        "network_type": a_net,
-                        "generation": generation,
-                        "amount": amt,
-                        "rate": pct / 100,
-                        "order_subtotal": round(subtotal, 2),
-                        "status": "pending" if a_active else "pending_enrollment",
-                        "program_active_at_creation": a_active,
-                        "created_at": now_iso(),
-                    })
-        current_id = ancestor.get("sponsor_id") or ancestor.get("network_sponsor_id")
-        generation += 1
-
-    if commissions_to_insert:
-        try:
-            await db.commissions.insert_many(commissions_to_insert, ordered=False)
-        except Exception as e:
-            # Defesa contra duplicatas (indice unico em order_id+user_id+type+generation).
-            # Logamos mas nao quebramos o checkout.
-            logger.warning(f"commissions insert_many partial failure: {e}")
+    # Iter 42d: Comissoes NAO sao mais criadas no checkout. Sao criadas apenas
+    # quando o pedido vira "paid" (em mark_order_paid ou update_order_status).
+    # Isso evita comissoes orfas em pedidos cancelados/abandonados.
 
     # Clear cart
     await db.carts.delete_one({"user_id": user["user_id"]})
@@ -1082,21 +1009,6 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         asyncio.create_task(email_service.trigger(db, "admin_new_order", admins, {
             **ctx, "items_count": len(items),
             "admin_link": f"{app_url}/backoffice/pedidos",
-        }))
-    # Comissoes de afiliado -> cada beneficiario
-    for comm in commissions_to_insert:
-        if comm.get("type") != "affiliate":
-            continue
-        receiver = await db.users.find_one({"user_id": comm["user_id"]}, {"_id": 0, "password_hash": 0})
-        if not receiver or not receiver.get("email"):
-            continue
-        asyncio.create_task(email_service.trigger(db, "commission_earned", receiver["email"], {
-            **order_ctx(final_order, receiver),
-            "customer_name": user.get("name"),
-            "commission": {
-                "amount": f"{comm['amount']:.2f}",
-                "rate_pct": f"{comm.get('rate', 0) * 100:.1f}",
-            },
         }))
 
     return final_order
@@ -1163,10 +1075,13 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
         for item in o.get("items", []):
             await db.products.update_one({"product_id": item["product_id"]}, {"$inc": {"stock": item["quantity"]}})
     await db.orders.update_one({"order_id": order_id}, {"$set": update})
-    # Iter 42c: comissoes NAO transitam mais para "paid" automaticamente quando o pedido eh marcado como pago.
-    # Admin precisa aprovar manualmente em /backoffice/comissoes-por-geracao (botao "Aprovar").
+    # Iter 42c+d: comissoes NAO transitam mais para "paid" automaticamente.
+    # Iter 42d: AO marcar pedido como "paid" pela primeira vez, criamos as comissoes
+    # (status pending|pending_enrollment). Admin aprova manualmente em
+    # /backoffice/comissoes-por-geracao.
     if status == "paid":
-        # Apenas registra pontos (independente de comissao)
+        await _create_commissions_for_paid_order(db, order_id)
+        # Registra pontos
         await register_points_from_order(db, order_id)
     elif status == "cancelled":
         await db.commissions.update_many(
@@ -1904,6 +1819,54 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
         generation += 1
 
     return out
+
+
+async def _create_commissions_for_paid_order(db, order_id: str, *, fire_emails: bool = True) -> list:
+    """Iter 42d: gera as comissoes para um pedido recem-pago.
+
+    - Idempotente: se ja existe qualquer comissao para o order_id, NAO recria
+      (recalculo retroativo eh feito por /admin/recalc-commissions).
+    - Status inicial: 'pending' (afiliado/MMN inscrito) ou 'pending_enrollment'
+      (beneficiario ainda nao inscrito no Clube). NUNCA cria como 'paid' direto -
+      admin precisa aprovar manualmente.
+    - Fire emails: dispara 'commission_earned' para cada afiliado direto criado.
+
+    Retorna a lista das comissoes criadas (vazia se ja havia).
+    """
+    if await db.commissions.count_documents({"order_id": order_id}) > 0:
+        return []
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        return []
+    customer = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0}) if order.get("user_id") else None
+    if not customer:
+        return []
+    settings = await get_settings(db)
+    comms = await compute_order_commissions(db, order, customer, settings, mark_retroactive=False)
+    if not comms:
+        return []
+    try:
+        await db.commissions.insert_many(comms, ordered=False)
+    except Exception as e:
+        logger.warning(f"_create_commissions_for_paid_order insert error (order={order_id}): {e}")
+
+    # Emails de comissao para afiliados diretos
+    if fire_emails:
+        for comm in comms:
+            if comm.get("type") != "affiliate":
+                continue
+            receiver = await db.users.find_one({"user_id": comm["user_id"]}, {"_id": 0, "password_hash": 0})
+            if not receiver or not receiver.get("email"):
+                continue
+            asyncio.create_task(email_service.trigger(db, "commission_earned", receiver["email"], {
+                **order_ctx(order, receiver),
+                "customer_name": customer.get("name"),
+                "commission": {
+                    "amount": f"{comm['amount']:.2f}",
+                    "rate_pct": f"{comm.get('rate', 0) * 100:.1f}",
+                },
+            }))
+    return comms
 
 
 # ==================== COMMISSION HELPER END ====================
@@ -2876,7 +2839,8 @@ async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, s
             {"$set": {"invoice_number": inv["number"], "invoice_issued_at": inv["issued_at"]}},
         )
     # Iter 42c: comissoes NAO transitam mais para "paid" automaticamente.
-    # Admin precisa aprovar manualmente em /backoffice/comissoes-por-geracao.
+    # Iter 42d: cria as comissoes (status pending|pending_enrollment) ao confirmar pagamento.
+    await _create_commissions_for_paid_order(db, order_id)
     # Pontos
     await register_points_from_order(db, order_id)
     # Email

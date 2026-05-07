@@ -149,6 +149,12 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - **Novo endpoint**: `POST /api/admin/commissions/approve/preview` + `/apply` (`require_super_admin()`). Aceita os mesmos 4 modos de filtro do revert. Massa (>1 pedido) exige `confirm=True`.
   - **Frontend** (`CommissionsStatusModal.jsx` — substituiu `RevertCommissionsModal`): modal genérico que serve tanto revert (amber) quanto approve (emerald). Botões "✓ Aprovar" por linha (apenas se `pending`) + "Aprovar pendentes do pedido" no expand + "Aprovar por filtro" no topo.
   - Testes: `test_iter42c_approve_commissions.py` (5 testes — aprovação não-automática ao marcar pedido pago, RBAC, preview, ignora paid/paid_out, confirm em massa) — **todos PASS**.
+- ✅ Iter 42d (Fev/2026): **Comissões agora são criadas APENAS quando o pedido vira `paid`** (root cause do "recálculo não funciona").
+  - **Bug**: comissões eram criadas no `/api/checkout` imediatamente na criação do pedido. Pedidos cancelados/abandonados/pendentes geravam comissões órfãs. O recálculo (`_list_orders_for_recalc`) só lê pedidos `payment_status=paid`, então **nunca tocava** essas órfãs → cliente via 18 comissões e o force recriava só 9 → DB ficava com 18 (9 paid + 9 órfãs).
+  - **Fix**: removido bloco de criação de comissões do checkout. Adicionado helper `_create_commissions_for_paid_order(db, order_id)` chamado em `mark_order_paid` (webhook MP/voucher) e `update_order_status` quando `status="paid"`. Idempotente: se já existem comissões para o pedido, pula.
+  - **Cleanup**: script `cleanup_orphan_commissions.py` removeu 9 comissões órfãs em 6 pedidos pending. DB final: 9 comissões (R$ 85,07) batendo exatamente com o preview do recálculo.
+  - **Status inicial das comissões**: `pending` (beneficiário inscrito) ou `pending_enrollment` (não inscrito). Nunca `paid` direto — admin precisa aprovar manualmente (Iter 42c).
+  - Testes: `test_iter42d_commissions_only_when_paid.py` (4 testes — sem órfãs no DB, criação ao marcar paid, idempotência, recálculo force pós-cleanup) — **todos PASS**.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
