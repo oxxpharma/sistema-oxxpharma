@@ -6293,11 +6293,14 @@ def _extract_enrollment_address(enr: dict, user: dict) -> dict:
 
     Procura em 3 fontes, na ordem:
       1) enr.address.* (schema aninhado oficial)
-      2) enr.<chave_flat> (varias variantes em PT/EN: cep, zip, rua, street, etc)
+      2) enr.<chave_flat> com match FUZZY (qualquer chave que contenha 'cep'
+         vira zip_code, 'rua/logr/end' vira street, etc).
       3) user.addresses[0] (endereco padrao da loja, caso o usuario tenha)
 
     Retorna: {zip_code, street, number, complement, neighborhood, city, state}
     """
+    import re
+
     out = {"zip_code": "", "street": "", "number": "", "complement": "",
            "neighborhood": "", "city": "", "state": ""}
 
@@ -6311,23 +6314,60 @@ def _extract_enrollment_address(enr: dict, user: dict) -> dict:
     out["city"] = nested.get("city") or ""
     out["state"] = nested.get("state") or ""
 
-    # 2) Chaves flat no enrollment (variantes em PT/EN)
-    KEY_ALIASES = {
-        "zip_code": ["zip_code", "zip", "cep", "postal_code", "address_zip"],
-        "street": ["street", "rua", "endereco", "logradouro", "address", "address_street"],
-        "number": ["number", "numero", "num", "address_number"],
-        "complement": ["complement", "complemento", "compl", "apto", "address_complement"],
-        "neighborhood": ["neighborhood", "bairro", "address_neighborhood"],
-        "city": ["city", "cidade", "municipio", "address_city"],
-        "state": ["state", "uf", "estado", "address_state"],
-    }
-    for canon, aliases in KEY_ALIASES.items():
-        if out[canon]:
-            continue
-        for k in aliases:
-            v = (enr or {}).get(k)
-            if v not in (None, ""):
-                out[canon] = str(v).strip()
+    # 2) Chaves flat - match FUZZY (substrings em PT/EN)
+    # Para cada campo canonico, lista de SUBSTRINGS que devem aparecer no nome da chave.
+    # Tambem usa exclusoes (chaves que casariam por engano).
+    FUZZY_RULES = [
+        # (canon, includes, excludes, normalizer)
+        ("zip_code",      ["cep", "zip", "postal"], [], lambda v: v),
+        ("street",        ["rua", "street", "endere", "logradouro", "address"],
+                          ["numero", "complemento", "bairro", "cidade", "estado",
+                           "uf", "cep", "zip"], lambda v: v),
+        ("number",        ["numero", "num_end", "endereco_n", "address_num", "number"],
+                          ["telefone", "phone", "celular", "documento", "cpf"],
+                          lambda v: v),
+        ("complement",    ["complemento", "complement", "compl", "apto"], [], lambda v: v),
+        ("neighborhood",  ["bairro", "neighborhood"], [], lambda v: v),
+        ("city",          ["cidade", "municipio", "city"], [], lambda v: v),
+        ("state",         ["uf", "estado", "state"], ["cidade", "city"], lambda v: v),
+    ]
+
+    if isinstance(enr, dict):
+        for k, raw in enr.items():
+            if raw in (None, "") or k in ("address", "pix", "cpf", "full_name",
+                                           "birth_date", "mother_name", "phone",
+                                           "rg", "name"):
+                continue
+            v = str(raw).strip()
+            if not v:
+                continue
+            kl = k.lower()
+            for canon, includes, excludes, norm in FUZZY_RULES:
+                if out[canon]:
+                    continue
+                # exclusao
+                if any(ex in kl for ex in excludes):
+                    continue
+                # inclusao
+                if any(inc in kl for inc in includes):
+                    out[canon] = norm(v)
+                    break
+
+    # Detecao adicional pelo FORMATO do valor (defesa final):
+    # - CEP brasileiro: 8 digitos puros OU XXXXX-XXX (com hifen na posicao 5)
+    # - Excluimos chaves conhecidas que NAO sao CEP (datas, documentos)
+    if not out["zip_code"]:
+        EXCLUDED_FIELDS = ("phone", "cpf", "full_name", "name", "mother_name",
+                            "birth_date", "rg", "email", "celular", "telefone",
+                            "nascimento", "data", "documento")
+        for k, raw in (enr or {}).items():
+            kl = k.lower()
+            if any(ex in kl for ex in EXCLUDED_FIELDS):
+                continue
+            v = str(raw or "").strip()
+            # Aceita "01310100" (8 digitos puros) ou "01310-100" (formato CEP)
+            if re.fullmatch(r"\d{8}", v) or re.fullmatch(r"\d{5}-\d{3}", v):
+                out["zip_code"] = v
                 break
 
     # 3) Fallback: enderecos cadastrados na loja

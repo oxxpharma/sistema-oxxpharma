@@ -84,3 +84,59 @@ def test_partial_flat_keys():
     assert a["zip_code"] == "12345678"
     assert a["city"] == "Salvador"
     assert a["street"] == ""
+
+
+def test_fuzzy_keys_unusual():
+    """Iter 42j+: match fuzzy para chaves customizadas pelo admin."""
+    cases = [
+        ({"meu_cep": "01310100"}, "zip_code", "01310100"),
+        ({"endereco_cep": "20040-000"}, "zip_code", "20040-000"),
+        ({"cep_postal": "30000000"}, "zip_code", "30000000"),
+        ({"endereco_completo": "Rua das Flores"}, "street", "Rua das Flores"),
+        ({"endereco_numero": "100"}, "number", "100"),
+        ({"endereco_bairro": "Centro"}, "neighborhood", "Centro"),
+        ({"endereco_cidade": "Curitiba"}, "city", "Curitiba"),
+        ({"endereco_uf": "PR"}, "state", "PR"),
+    ]
+    for enr, field, expected in cases:
+        a = _extract_enrollment_address(enr, {})
+        assert a[field] == expected, f"FAIL: {enr} esperava {field}={expected}, recebeu {a}"
+
+
+def test_fuzzy_does_not_confuse_phone_with_number():
+    """Telefone NAO deve virar 'number' do endereco mesmo contendo digitos."""
+    enr = {"telefone": "(11) 99999-9999", "celular": "(21) 88888-8888",
+           "numero_endereco": "555"}
+    a = _extract_enrollment_address(enr, {})
+    assert a["number"] == "555"
+
+
+def test_format_detection_8digit_cep():
+    """Quando nao casa por nome, detecta CEP pelo FORMATO (8 digitos puros)."""
+    enr = {"campo_estranho_qualquer": "01310100"}  # 8 digitos = formato CEP
+    a = _extract_enrollment_address(enr, {})
+    assert a["zip_code"] == "01310100"
+
+
+def test_birth_date_does_not_become_zip():
+    """REGRESSAO: birth_date '1993-04-06' tem 8 digitos quando removidos os hifens.
+    NAO pode virar CEP por engano."""
+    enr = {"cpf": "12345678901", "full_name": "Joao", "birth_date": "1993-04-06",
+           "phone": "11999999999", "mother_name": "Maria"}
+    a = _extract_enrollment_address(enr, {})
+    assert a["zip_code"] == "", f"birth_date virou CEP! got {a['zip_code']!r}"
+
+
+def test_format_detection_with_hyphen():
+    """Detecta CEP no formato XXXXX-XXX (8 digitos com hifen na posicao 5)."""
+    enr = {"qualquer_campo_custom": "01310-100"}
+    a = _extract_enrollment_address(enr, {})
+    assert a["zip_code"] == "01310-100"
+
+
+def test_state_does_not_match_city_key():
+    """A regra de 'state' nao pode capturar a chave 'cidade'."""
+    enr = {"cidade": "Sao Paulo"}
+    a = _extract_enrollment_address(enr, {})
+    assert a["city"] == "Sao Paulo"
+    assert a["state"] == ""
