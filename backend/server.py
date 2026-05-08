@@ -1379,6 +1379,17 @@ async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Dep
     (cobre o caso "user da Maxx tinha external_id mas faltavam dados que estavam na OxxPharma"
     e tambem o inverso).
     """
+    try:
+        return await _do_merge_users(request, data, user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Iter 42f: nunca deixar exception virar 500 cru (frontend trava no JSON.parse).
+        logger.exception(f"merge-users falhou: keep={data.keep_user_id} drop={data.drop_user_id}")
+        raise HTTPException(status_code=500, detail=f"Erro interno na fusao: {type(e).__name__}: {str(e)[:200]}")
+
+
+async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     db = request.app.db
     if data.keep_user_id == data.drop_user_id:
         raise HTTPException(status_code=400, detail="keep_user_id e drop_user_id sao iguais")
@@ -1440,14 +1451,23 @@ async def admin_merge_users(request: Request, data: _MergeBody, user: dict = Dep
 
     # Antes de aplicar o update no keep, precisamos liberar campos com indice unico
     # (email, cpf_digits, external_id) que possam estar sendo "transferidos" do drop.
+    # Iter 42f: tornar mais robusto - sempre limpa do drop ANTES de tentar setar no keep,
+    # para evitar DuplicateKeyError no $set do keep.
     unset_on_drop = {}
-    for f in ("email", "cpf_digits", "external_id"):
-        if f in update_set and update_set.get(f) and drop.get(f) == update_set.get(f):
+    for f in ("email", "cpf_digits", "external_id", "phone_digits"):
+        if drop.get(f):
             unset_on_drop[f] = ""
     if unset_on_drop:
-        await db.users.update_one({"user_id": data.drop_user_id}, {"$unset": unset_on_drop})
+        try:
+            await db.users.update_one({"user_id": data.drop_user_id}, {"$unset": unset_on_drop})
+        except Exception as e:
+            logger.warning(f"unset on drop falhou (nao bloqueia): {e}")
 
-    await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
+    try:
+        await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
+    except Exception as e:
+        # Provavel DuplicateKeyError (email/cpf/external_id colidindo com terceiro)
+        raise HTTPException(status_code=409, detail=f"Conflito ao gravar dados do usuario principal: {str(e)[:200]}")
 
     # 2. Migrar relacionamentos (compras, pontos, comissoes, saques, batches do cartao,
     #    referidos, indicacoes, e qualquer ref a user_id)

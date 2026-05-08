@@ -34,7 +34,15 @@ async function request(path, { method = 'GET', body, headers = {}, ...rest } = {
     ...rest,
   });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      // Resposta nao-JSON (ex: nginx/cloudflare retornando "Internal Server Error" puro).
+      data = { detail: text.length > 300 ? `Erro ${res.status}` : text };
+    }
+  }
   if (!res.ok) {
     const msg = data?.detail
       ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))
