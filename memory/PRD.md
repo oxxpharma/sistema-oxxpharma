@@ -192,6 +192,12 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
 ## Test Credentials
 Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`.
 
+## Iter 42j (Fev/2026): Fix endereço no XLSX/CSV de aprovados no Programa de Benefícios
+- **Bug**: exportador lia apenas `enr.address.*` (aninhado), mas o admin de produção configurou `enrollment_fields` com chaves flat em PT (`cep`, `rua`, `numero`, `bairro`, `cidade`, `uf`, `complemento`) → colunas vazias no XLSX.
+- **Fix**: novo helper `_extract_enrollment_address(enr, user)` com 3 fontes em ordem: aninhado → flat PT/EN com aliases → `user.addresses[0]` fallback.
+- Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
+- Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
+
 ## Project Health
 - **Broken**: nenhum
 - **Mocked**: API externa Cartão de Benefícios (adapter genérico — depende do fornecedor)

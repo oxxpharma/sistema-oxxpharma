@@ -6288,6 +6288,65 @@ def _fmt_cpf(v):
     return f"{s[:3]}.{s[3:6]}.{s[6:9]}-{s[9:11]}" if len(s) == 11 else (v or "")
 
 
+def _extract_enrollment_address(enr: dict, user: dict) -> dict:
+    """Iter 42j: extrai endereco do referral_enrollment com fallbacks robustos.
+
+    Procura em 3 fontes, na ordem:
+      1) enr.address.* (schema aninhado oficial)
+      2) enr.<chave_flat> (varias variantes em PT/EN: cep, zip, rua, street, etc)
+      3) user.addresses[0] (endereco padrao da loja, caso o usuario tenha)
+
+    Retorna: {zip_code, street, number, complement, neighborhood, city, state}
+    """
+    out = {"zip_code": "", "street": "", "number": "", "complement": "",
+           "neighborhood": "", "city": "", "state": ""}
+
+    # 1) Schema aninhado oficial
+    nested = (enr or {}).get("address") or {}
+    out["zip_code"] = nested.get("zip_code") or ""
+    out["street"] = nested.get("street") or ""
+    out["number"] = nested.get("number") or ""
+    out["complement"] = nested.get("complement") or ""
+    out["neighborhood"] = nested.get("neighborhood") or ""
+    out["city"] = nested.get("city") or ""
+    out["state"] = nested.get("state") or ""
+
+    # 2) Chaves flat no enrollment (variantes em PT/EN)
+    KEY_ALIASES = {
+        "zip_code": ["zip_code", "zip", "cep", "postal_code", "address_zip"],
+        "street": ["street", "rua", "endereco", "logradouro", "address", "address_street"],
+        "number": ["number", "numero", "num", "address_number"],
+        "complement": ["complement", "complemento", "compl", "apto", "address_complement"],
+        "neighborhood": ["neighborhood", "bairro", "address_neighborhood"],
+        "city": ["city", "cidade", "municipio", "address_city"],
+        "state": ["state", "uf", "estado", "address_state"],
+    }
+    for canon, aliases in KEY_ALIASES.items():
+        if out[canon]:
+            continue
+        for k in aliases:
+            v = (enr or {}).get(k)
+            if v not in (None, ""):
+                out[canon] = str(v).strip()
+                break
+
+    # 3) Fallback: enderecos cadastrados na loja
+    if not any(out[k] for k in ("zip_code", "street")):
+        addresses = (user or {}).get("addresses") or []
+        default_addr = next((a for a in addresses if a.get("is_default")), None)
+        a = default_addr or (addresses[0] if addresses else None)
+        if a:
+            out["zip_code"] = out["zip_code"] or a.get("zip_code") or ""
+            out["street"] = out["street"] or a.get("street") or ""
+            out["number"] = out["number"] or a.get("number") or ""
+            out["complement"] = out["complement"] or a.get("complement") or ""
+            out["neighborhood"] = out["neighborhood"] or a.get("neighborhood") or ""
+            out["city"] = out["city"] or a.get("city") or ""
+            out["state"] = out["state"] or a.get("state") or ""
+
+    return out
+
+
 async def _referral_approved_rows(db, start_date: Optional[str] = None, end_date: Optional[str] = None):
     """Retorna lista de usuarios aprovados no Programa de Beneficios.
     start_date/end_date em formato YYYY-MM-DD (filtra por data de aprovacao local TZ America/Sao_Paulo)."""
@@ -6315,10 +6374,11 @@ async def _referral_approved_rows(db, start_date: Optional[str] = None, end_date
     rows = []
     for u in users:
         enr = u.get("referral_enrollment") or {}
-        addr = enr.get("address") or {}
         pix = enr.get("pix") or {}
         sp = sponsors.get(u.get("sponsor_id")) or {}
         ad = admins.get(u.get("referral_approved_by_admin")) or {}
+        # Iter 42j: extrai endereco com fallback robusto (suporta chaves PT/EN flat e enderecos da loja)
+        addr = _extract_enrollment_address(enr, u)
         rows.append({
             "user_id": u.get("user_id"),
             "referral_code": u.get("referral_code") or "",
