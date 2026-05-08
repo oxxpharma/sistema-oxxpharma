@@ -890,20 +890,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
 
     # Aplica frete grátis se configurado em site_settings (espelha regras publicas)
     fs_settings = await _get_site_settings(db)
-    fs_mode = (fs_settings.get("free_shipping_mode") or "off").lower()
-    fs_min = float(fs_settings.get("free_shipping_min_subtotal") or 0)
-    fs_audiences = fs_settings.get("free_shipping_audiences") or []
-    user_net = user.get("network_type") or "customer"
-    user_cats = user.get("category_ids") or []
-    matches_audience = (
-        user_net in fs_audiences
-        or any(isinstance(t, str) and t.startswith("cat:") and t[4:] in user_cats for t in fs_audiences)
-    )
-    if fs_mode == "all":
-        shipping = 0.0
-    elif fs_mode == "above" and subtotal >= fs_min and fs_min > 0:
-        shipping = 0.0
-    elif fs_mode == "audiences" and matches_audience and (fs_min <= 0 or subtotal >= fs_min):
+    fs_label_default = fs_settings.get("free_shipping_label") or "Frete grátis"
+    apply_free, _ = _evaluate_free_shipping(fs_settings, user, subtotal)
+    if apply_free:
         shipping = 0.0
 
     # Cupom (opcional)
@@ -4856,10 +4845,7 @@ async def public_calculate_shipping(request: Request):
         result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
 
     # Aplica frete grátis se configurado em site_settings
-    fs_mode = (settings.get("free_shipping_mode") or "off").lower()
-    fs_min = float(settings.get("free_shipping_min_subtotal") or 0)
     fs_label = settings.get("free_shipping_label") or "Frete grátis"
-    fs_audiences = settings.get("free_shipping_audiences") or []
     subtotal = float(body.get("subtotal") or declared_value or 0)
 
     # Descobrir user logado (se houver) para checar audiencia
@@ -4872,30 +4858,7 @@ async def public_calculate_shipping(request: Request):
         except Exception:
             pass
 
-    def _user_matches_audiences(u, audiences):
-        if not audiences:
-            return False
-        if not u:
-            return False
-        ntype = u.get("network_type") or "customer"
-        if ntype in audiences:
-            return True
-        user_cats = u.get("category_ids") or []
-        for tok in audiences:
-            if isinstance(tok, str) and tok.startswith("cat:") and tok[4:] in user_cats:
-                return True
-        return False
-
-    apply_free = False
-    if fs_mode == "all":
-        apply_free = True
-    elif fs_mode == "above" and subtotal >= fs_min and fs_min > 0:
-        apply_free = True
-    elif fs_mode == "audiences":
-        # Somente para audiencias selecionadas
-        if _user_matches_audiences(current_user_doc, fs_audiences):
-            # Se fs_min > 0, exige minimo; senao libera direto
-            apply_free = (fs_min <= 0) or (subtotal >= fs_min)
+    apply_free, fs_info = _evaluate_free_shipping(settings, current_user_doc, subtotal)
 
     if apply_free and isinstance(result, dict):
         # Zera price em todos os options retornados (e marca como gratis)
@@ -4908,11 +4871,111 @@ async def public_calculate_shipping(request: Request):
         result["free_shipping_label"] = fs_label
     else:
         result["free_shipping_applied"] = False
-        if fs_mode == "above" and fs_min > 0:
-            result["free_shipping_threshold"] = fs_min
-            result["free_shipping_remaining"] = max(0.0, fs_min - subtotal)
+        if fs_info.get("free_shipping_threshold"):
+            result["free_shipping_threshold"] = fs_info["free_shipping_threshold"]
+            result["free_shipping_remaining"] = fs_info["free_shipping_remaining"]
 
     return result
+
+
+# ==================== FREE SHIPPING EVALUATION (Iter 42g) ====================
+
+def _user_matches_rule(u: dict | None, rule: dict, subtotal: float) -> bool:
+    """Avalia uma unica regra de frete gratis. AND interno: todos os criterios da
+    propria regra devem casar. OR externo (entre regras) eh feito pelo evaluator.
+    Schema da regra:
+      {
+        "name": str,
+        "account_types": ["customer","network_1","network_2"],  # opcional
+        "categories": ["cat_id"],                                # opcional
+        "min_subtotal": float,                                    # opcional (>0)
+      }
+    Regra com TODOS criterios vazios = match universal (libera para todo mundo).
+    """
+    account_types = rule.get("account_types") or []
+    categories = rule.get("categories") or []
+    min_sub = float(rule.get("min_subtotal") or 0)
+
+    if min_sub > 0 and subtotal < min_sub:
+        return False
+
+    # Se nao define publico, qualquer um passa (rule do tipo "valor minimo apenas")
+    if not account_types and not categories:
+        return True
+
+    if not u:
+        return False
+    ntype = u.get("network_type") or "customer"
+    if account_types and ntype in account_types:
+        return True
+    if categories:
+        ucats = u.get("category_ids") or []
+        for c in categories:
+            if c in ucats:
+                return True
+    return False
+
+
+def _evaluate_free_shipping(settings: dict, user_doc: dict | None, subtotal: float) -> tuple[bool, dict]:
+    """Retorna (apply_free, info_dict).
+
+    Suporta os 2 schemas:
+      - NOVO: settings['free_shipping_rules'] = [ {rule}, {rule}, ... ]  (OR)
+      - LEGADO: free_shipping_mode + free_shipping_min_subtotal + free_shipping_audiences
+
+    Quando 'free_shipping_rules' existe e nao esta vazio, ele PREVALECE.
+    """
+    if not settings.get("free_shipping_enabled", True):
+        # Iter 42g: flag opcional para desligar tudo de uma vez
+        return False, {"reason": "disabled"}
+
+    rules = settings.get("free_shipping_rules") or []
+    if rules:
+        for r in rules:
+            if _user_matches_rule(user_doc, r, subtotal):
+                return True, {"matched_rule": r.get("name") or "regra"}
+        # Nenhuma regra casou: pegar a regra com menor min_subtotal para mostrar threshold
+        thresholds = [float(r.get("min_subtotal") or 0) for r in rules if (r.get("min_subtotal") or 0) > 0]
+        info = {"matched_rule": None}
+        if thresholds:
+            min_t = min(thresholds)
+            info["free_shipping_threshold"] = min_t
+            info["free_shipping_remaining"] = max(0.0, min_t - subtotal)
+        return False, info
+
+    # ----- Fallback LEGADO -----
+    mode = (settings.get("free_shipping_mode") or "off").lower()
+    fs_min = float(settings.get("free_shipping_min_subtotal") or 0)
+    fs_audiences = settings.get("free_shipping_audiences") or []
+
+    if mode == "all":
+        return True, {"matched_rule": "all"}
+    if mode == "above" and fs_min > 0 and subtotal >= fs_min:
+        return True, {"matched_rule": "above"}
+    if mode == "audiences":
+        # match audience
+        matches = False
+        if user_doc:
+            ntype = user_doc.get("network_type") or "customer"
+            if ntype in fs_audiences:
+                matches = True
+            else:
+                ucats = user_doc.get("category_ids") or []
+                for tok in fs_audiences:
+                    if isinstance(tok, str) and tok.startswith("cat:") and tok[4:] in ucats:
+                        matches = True
+                        break
+        if matches and (fs_min <= 0 or subtotal >= fs_min):
+            return True, {"matched_rule": "audiences"}
+
+    info = {"matched_rule": None}
+    if mode == "above" and fs_min > 0:
+        info["free_shipping_threshold"] = fs_min
+        info["free_shipping_remaining"] = max(0.0, fs_min - subtotal)
+    return False, info
+
+
+# ==================== /FREE SHIPPING ====================
 
 
 @app.post("/api/admin/correios-test")
@@ -5205,10 +5268,16 @@ DEFAULT_SITE_SETTINGS = {
     "referral_box_image_translate_y": "-50",
     "referral_box_image_float": True,
     # ============ Frete grátis ============
+    # Iter 42g: NOVO modelo - lista de regras OR. Cada regra eh dict:
+    #   { name, account_types: [...], categories: [...], min_subtotal: float }
+    # Match em qualquer regra libera frete (OR). Dentro da regra os criterios sao AND.
+    "free_shipping_enabled": True,
+    "free_shipping_rules": [],
+    "free_shipping_label": "Frete grátis",
+    # === Schema LEGADO (mantido para retrocompat) ===
     # mode: 'off' | 'all' | 'above' | 'audiences'
     "free_shipping_mode": "off",
     "free_shipping_min_subtotal": 199.0,
-    "free_shipping_label": "Frete grátis",
     # tokens aceitos: 'customer' | 'network_1' | 'network_2' | 'cat:{category_id}'
     "free_shipping_audiences": [],
     # ============ Provider de envio ============
@@ -5708,6 +5777,111 @@ async def admin_user_voucher(request: Request, user_id: str, user: dict = Depend
         "history": u.get("voucher_history") or [],
         "name": u.get("name"),
         "email": u.get("email"),
+    }
+
+
+# ==================== AJUSTE DE CASHBACK (super_admin) ====================
+
+@app.get("/api/admin/users/{user_id}/cashback")
+async def admin_user_cashback(request: Request, user_id: str, user: dict = Depends(require_admin())):
+    """Saldo e historico de cashback do usuario (deriva de db.commissions)."""
+    db = request.app.db
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0, "name": 1, "email": 1})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    pipe = [
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": "$status", "count": {"$sum": 1}, "total": {"$sum": "$amount"}}},
+    ]
+    by_status = await db.commissions.aggregate(pipe).to_list(20)
+    bs = {s["_id"]: s for s in by_status}
+    paid = round((bs.get("paid") or {}).get("total") or 0, 2)
+    paid_out = round((bs.get("paid_out") or {}).get("total") or 0, 2)
+    pending = round((bs.get("pending") or {}).get("total") or 0, 2)
+    pending_enroll = round((bs.get("pending_enrollment") or {}).get("total") or 0, 2)
+    history = await db.commissions.find(
+        {"user_id": user_id},
+        {"_id": 0, "commission_id": 1, "order_id": 1, "type": 1, "generation": 1,
+         "amount": 1, "status": 1, "created_at": 1, "paid_at": 1, "paid_out_at": 1,
+         "note": 1, "approved_by_email": 1, "performed_by_email": 1, "customer_name": 1},
+    ).sort("created_at", -1).limit(100).to_list(100)
+    return {
+        "name": target.get("name"),
+        "email": target.get("email"),
+        "balance_available": paid,            # saldo disponivel para saque
+        "balance_paid_out": paid_out,
+        "balance_pending": pending,
+        "balance_pending_enrollment": pending_enroll,
+        "history": history,
+    }
+
+
+@app.post("/api/admin/users/{user_id}/cashback-adjust")
+async def admin_cashback_adjust(request: Request, user_id: str, payload: dict, user: dict = Depends(require_super_admin())):
+    """Adiciona ou debita cashback de um usuario manualmente.
+
+    Body: {"delta": float, "note": str (obrigatorio para auditoria)}
+
+    Cria um documento em db.commissions com:
+      - type='admin_adjustment'
+      - status='paid' (entra direto no saldo disponivel)
+      - amount=delta (pode ser negativo para debitar)
+
+    Para debito, valida que o saldo disponivel (paid) cobre o valor.
+    """
+    db = request.app.db
+    try:
+        delta = float(payload.get("delta") or 0)
+    except Exception:
+        raise HTTPException(status_code=400, detail="delta invalido")
+    if delta == 0:
+        raise HTTPException(status_code=400, detail="delta nao pode ser zero")
+    note = (payload.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Descricao e obrigatoria para auditoria")
+
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+
+    # Saldo atual disponivel (apenas paid)
+    cur_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user_id, "status": "paid"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    cur_balance = round((cur_agg[0]["total"] if cur_agg else 0), 2)
+
+    if delta < 0 and cur_balance + delta < 0:
+        raise HTTPException(status_code=400, detail=f"Saldo ficaria negativo (atual R${cur_balance:.2f})")
+
+    now = now_iso()
+    doc = {
+        "commission_id": gen_id("com_"),
+        "user_id": user_id,
+        "customer_name": target.get("name"),
+        "type": "admin_adjustment",
+        "network_type": None,
+        "generation": None,
+        "amount": round(delta, 2),
+        "rate": 0,
+        "order_subtotal": 0,
+        "order_id": f"adj_{gen_id('').replace('_','')[:12]}",  # placeholder unico (nao colide com indice)
+        "status": "paid",
+        "paid_at": now,
+        "created_at": now,
+        "note": note,
+        "performed_by_user_id": user.get("user_id"),
+        "performed_by_email": user.get("email"),
+    }
+    await db.commissions.insert_one(doc)
+
+    new_balance = round(cur_balance + delta, 2)
+    return {
+        "ok": True,
+        "delta": round(delta, 2),
+        "previous_balance": cur_balance,
+        "new_balance": new_balance,
+        "commission_id": doc["commission_id"],
     }
 
 

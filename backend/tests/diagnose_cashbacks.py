@@ -77,8 +77,10 @@ async def main():
     print(f"    Subtotal (base de cashback): R$ {paid['subtotal_sum']:.2f}")
     print(f"    Total (com frete):           R$ {paid['total_sum']:.2f}")
 
-    # Orfas
-    comm_oids = await db.commissions.distinct("order_id")
+    # Orfas (ignora admin_adjustment - sao ajustes manuais sem pedido real)
+    comm_oids = await db.commissions.distinct(
+        "order_id", {"type": {"$ne": "admin_adjustment"}}
+    )
     # Pedido eh "valido" se payment_status=paid OU order_status em estado pos-pagamento.
     # Isso protege casos onde webhook nao chegou mas admin marcou shipped/delivered.
     VALID_ORDER_STATES = ["paid", "shipped", "delivered"]

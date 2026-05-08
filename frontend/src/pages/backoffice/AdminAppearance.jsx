@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
@@ -407,73 +407,32 @@ export default function AdminAppearance() {
       )}
 
       {tab === 'free_shipping' && (
-        <div className="space-y-4 max-w-2xl">
+        <div className="space-y-4 max-w-3xl">
           <Card title="Configuração de Frete Grátis">
-            <p className="text-xs text-txt-secondary -mt-1 mb-3">Quando ativo, sobrepõe o cálculo dos Correios e zera o frete na vitrine, no carrinho e no checkout.</p>
-            <div className="space-y-3">
-              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'off' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
-                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'off'} onChange={() => set('free_shipping_mode', 'off')} className="mt-1" data-testid="fs-off" />
-                <div>
-                  <div className="font-bold text-sm">Desativado</div>
-                  <div className="text-xs text-txt-secondary">Frete calculado normalmente pelos Correios.</div>
-                </div>
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">Configure uma ou mais <strong>regras</strong>. O frete fica grátis se <strong>QUALQUER</strong> regra for satisfeita (lógica OR). Se uma regra exige <em>público</em> + <em>valor mínimo</em>, ambos precisam casar (AND interno).</p>
+
+            {/* Toggle global */}
+            <div className="flex items-center gap-3 p-3 bg-bg-secondary rounded-lg mb-4">
+              <input
+                type="checkbox"
+                id="fs-enabled"
+                checked={s.free_shipping_enabled !== false}
+                onChange={(e) => set('free_shipping_enabled', e.target.checked)}
+                className="w-4 h-4"
+                data-testid="fs-enabled"
+              />
+              <label htmlFor="fs-enabled" className="text-sm font-semibold cursor-pointer flex-1">
+                Frete grátis ativo
               </label>
-              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'all' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
-                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'all'} onChange={() => set('free_shipping_mode', 'all')} className="mt-1" data-testid="fs-all" />
-                <div>
-                  <div className="font-bold text-sm">Frete grátis para tudo</div>
-                  <div className="text-xs text-txt-secondary">Toda compra terá frete zero, independente do valor.</div>
-                </div>
-              </label>
-              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'above' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
-                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'above'} onChange={() => set('free_shipping_mode', 'above')} className="mt-1" data-testid="fs-above" />
-                <div className="flex-1">
-                  <div className="font-bold text-sm">Frete grátis acima de um valor</div>
-                  <div className="text-xs text-txt-secondary mb-2">Aplica frete zero quando o subtotal atingir o valor mínimo.</div>
-                  {s.free_shipping_mode === 'above' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
-                      <div>
-                        <label className="text-xs font-semibold block mb-1">Valor mínimo (R$)</label>
-                        <input type="number" min="0" step="0.01" className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono" value={s.free_shipping_min_subtotal || 0} onChange={(e) => set('free_shipping_min_subtotal', parseFloat(e.target.value) || 0)} data-testid="fs-min" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </label>
-              <label className={`flex items-start gap-3 border-2 rounded-lg p-3 cursor-pointer ${s.free_shipping_mode === 'audiences' ? 'border-brand-main bg-brand-light' : 'border-border'}`}>
-                <input type="radio" name="fs_mode" checked={s.free_shipping_mode === 'audiences'} onChange={() => set('free_shipping_mode', 'audiences')} className="mt-1" data-testid="fs-audiences" />
-                <div className="flex-1">
-                  <div className="font-bold text-sm">Frete grátis para públicos selecionados</div>
-                  <div className="text-xs text-txt-secondary mb-2">Escolha redes Equipe e/ou categorias de usuário que receberão frete grátis.</div>
-                  {s.free_shipping_mode === 'audiences' && (
-                    <div className="mt-2 space-y-3">
-                      <AudienceGroup
-                        title="Por tipo de conta"
-                        options={[
-                          { token: 'customer', label: 'Cliente (customer)' },
-                          { token: 'network_1', label: 'Equipe 1 (Corporativa)' },
-                          { token: 'network_2', label: 'Equipe 2 (Propagandista)' },
-                        ]}
-                        selected={s.free_shipping_audiences || []}
-                        onToggle={(token) => toggleFsAudience(s, set, token)}
-                      />
-                      <AudienceGroup
-                        title="Por categoria de usuário"
-                        options={userCategories.map(c => ({ token: `cat:${c.category_id}`, label: c.name, color: c.color }))}
-                        selected={s.free_shipping_audiences || []}
-                        onToggle={(token) => toggleFsAudience(s, set, token)}
-                        emptyText={<>Nenhuma categoria cadastrada. Crie em <span className="font-mono">/backoffice/categorias-usuarios</span>.</>}
-                      />
-                      <div>
-                        <label className="text-xs font-semibold block mb-1">Valor mínimo (R$) - opcional</label>
-                        <input type="number" min="0" step="0.01" className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono" value={s.free_shipping_min_subtotal || 0} onChange={(e) => set('free_shipping_min_subtotal', parseFloat(e.target.value) || 0)} data-testid="fs-aud-min" />
-                        <p className="text-xs text-txt-secondary mt-1">Deixe 0 para liberar frete grátis em qualquer compra do público selecionado.</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </label>
+              <span className="text-xs text-txt-secondary">{(s.free_shipping_rules || []).length} regra(s) configurada(s)</span>
             </div>
+
+            <FreeShippingRules
+              rules={s.free_shipping_rules || []}
+              onChange={(rules) => set('free_shipping_rules', rules)}
+              userCategories={userCategories}
+            />
+
             <div className="mt-4 pt-3 border-t border-border">
               <Field label="Texto exibido na opção (ex: Frete grátis)" value={s.free_shipping_label} onChange={(v) => set('free_shipping_label', v)} testId="fs-label" />
             </div>
@@ -611,6 +570,123 @@ function toggleFsAudience(s, set, token) {
   const cur = new Set(s.free_shipping_audiences || []);
   if (cur.has(token)) cur.delete(token); else cur.add(token);
   set('free_shipping_audiences', [...cur]);
+}
+
+const ACCOUNT_TYPE_OPTS = [
+  { token: 'customer', label: 'Cliente (customer)' },
+  { token: 'network_1', label: 'Equipe 1 (Corporativa)' },
+  { token: 'network_2', label: 'Equipe 2 (Propagandista)' },
+];
+
+function FreeShippingRules({ rules, onChange, userCategories }) {
+  const update = (idx, patch) => {
+    const next = rules.map((r, i) => i === idx ? { ...r, ...patch } : r);
+    onChange(next);
+  };
+  const add = (preset) => {
+    const base = { name: '', account_types: [], categories: [], min_subtotal: 0 };
+    onChange([...rules, { ...base, ...(preset || {}) }]);
+  };
+  const remove = (idx) => onChange(rules.filter((_, i) => i !== idx));
+
+  if (rules.length === 0) {
+    return (
+      <div className="border-2 border-dashed border-border rounded-lg p-6 text-center" data-testid="fs-empty-rules">
+        <p className="text-sm text-txt-secondary mb-3">Nenhuma regra configurada — frete será calculado normalmente pelos Correios.</p>
+        <div className="flex flex-wrap gap-2 justify-center">
+          <Button variant="outline" onClick={() => add({ name: 'Frete grátis para tudo' })} data-testid="fs-add-rule-all">+ Frete grátis para tudo</Button>
+          <Button variant="outline" onClick={() => add({ name: 'Frete grátis acima de R$ 199', min_subtotal: 199 })} data-testid="fs-add-rule-min">+ Acima de um valor</Button>
+          <Button variant="outline" onClick={() => add({ name: 'Frete grátis Equipe', account_types: ['network_1', 'network_2'] })} data-testid="fs-add-rule-team">+ Para a Equipe</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="fs-rules-list">
+      {rules.map((r, idx) => {
+        const tokens = (r.account_types || []).concat((r.categories || []).map(c => `cat:${c}`));
+        return (
+          <div key={idx} className="border border-border rounded-lg p-4 bg-bg-secondary/30" data-testid={`fs-rule-${idx}`}>
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  value={r.name || ''}
+                  onChange={(e) => update(idx, { name: e.target.value })}
+                  className="w-full text-sm font-bold bg-transparent border-b border-border focus:border-brand-main outline-none px-1 py-1"
+                  placeholder={`Regra ${idx + 1}`}
+                  data-testid={`fs-rule-name-${idx}`}
+                />
+              </div>
+              <button onClick={() => remove(idx)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded" title="Remover regra" data-testid={`fs-rule-remove-${idx}`}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <AudienceGroup
+                title="Tipo de conta (qualquer um marcado libera)"
+                options={ACCOUNT_TYPE_OPTS}
+                selected={tokens}
+                onToggle={(token) => {
+                  const cur = new Set(r.account_types || []);
+                  if (cur.has(token)) cur.delete(token); else cur.add(token);
+                  update(idx, { account_types: [...cur] });
+                }}
+              />
+              <AudienceGroup
+                title="Categoria de usuário"
+                options={userCategories.map(c => ({ token: `cat:${c.category_id}`, label: c.name, color: c.color }))}
+                selected={tokens}
+                onToggle={(token) => {
+                  const id = token.replace(/^cat:/, '');
+                  const cur = new Set(r.categories || []);
+                  if (cur.has(id)) cur.delete(id); else cur.add(id);
+                  update(idx, { categories: [...cur] });
+                }}
+                emptyText={<>Nenhuma categoria cadastrada. Crie em <span className="font-mono">/backoffice/categorias-usuarios</span>.</>}
+              />
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-txt-secondary block mb-1.5">Valor mínimo (R$) — opcional</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="w-full md:w-1/2 px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                  value={r.min_subtotal || 0}
+                  onChange={(e) => update(idx, { min_subtotal: parseFloat(e.target.value) || 0 })}
+                  data-testid={`fs-rule-min-${idx}`}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-border text-xs text-txt-secondary">
+              <strong>Resumo:</strong> {summarizeRule(r, userCategories)}
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="flex flex-wrap gap-2 pt-2">
+        <Button variant="outline" size="sm" onClick={() => add({ name: 'Nova regra' })} data-testid="fs-add-rule"><Plus className="w-4 h-4" /> Adicionar regra</Button>
+      </div>
+    </div>
+  );
+}
+
+function summarizeRule(r, userCategories) {
+  const parts = [];
+  const types = r.account_types || [];
+  if (types.length) parts.push(`tipo: ${types.join(', ')}`);
+  const cats = (r.categories || []).map(id => {
+    const c = userCategories.find(x => x.category_id === id);
+    return c ? c.name : id;
+  });
+  if (cats.length) parts.push(`categoria: ${cats.join(', ')}`);
+  if (r.min_subtotal > 0) parts.push(`compra ≥ R$ ${r.min_subtotal.toFixed(2)}`);
+  if (parts.length === 0) return 'Libera para qualquer pessoa, em qualquer compra.';
+  return parts.join(' E ');
 }
 
 function AudienceGroup({ title, options, selected, onToggle, emptyText }) {

@@ -6,9 +6,11 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import {
   ArrowLeft, Loader2, Mail, Phone, Wallet, CircleDollarSign, ShoppingCart,
-  CreditCard, Users, Trophy, TrendingUp, Clock, Pencil,
+  CreditCard, Users, Trophy, TrendingUp, Clock, Pencil, SlidersHorizontal,
 } from 'lucide-react';
 import UserEditModal from '../../components/UserEditModal';
+import CashbackAdjustModal from '../../components/admin/CashbackAdjustModal';
+import { useAuth } from '../../contexts/AuthContext';
 
 const TABS = [
   { id: 'overview', label: 'Visão geral' },
@@ -21,10 +23,12 @@ const TABS = [
 
 export default function AdminUserDetails() {
   const { user_id } = useParams();
+  const { isSuperAdmin } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
   const [editing, setEditing] = useState(false);
+  const [adjustingCashback, setAdjustingCashback] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -97,7 +101,7 @@ export default function AdminUserDetails() {
         </div>
       </div>
 
-      {tab === 'overview' && <OverviewTab kpis={kpis} u={u} />}
+      {tab === 'overview' && <OverviewTab kpis={kpis} u={u} isSuperAdmin={isSuperAdmin} onAdjustCashback={() => setAdjustingCashback(true)} />}
       {tab === 'commissions' && <CommissionsTab list={commissions} />}
       {tab === 'orders' && <OrdersTab list={orders} />}
       {tab === 'network' && <NetworkTab network={network} u={u} />}
@@ -111,6 +115,15 @@ export default function AdminUserDetails() {
           onSaved={load}
         />
       )}
+
+      <CashbackAdjustModal
+        open={adjustingCashback}
+        onClose={() => setAdjustingCashback(false)}
+        userId={user_id}
+        userName={u.name}
+        currentBalance={kpis.available || 0}
+        onSuccess={load}
+      />
     </div>
   );
 }
@@ -141,11 +154,23 @@ function KpiCard({ icon: Icon, label, value, hint, color = 'brand' }) {
   );
 }
 
-function OverviewTab({ kpis, u }) {
+function OverviewTab({ kpis, u, isSuperAdmin, onAdjustCashback }) {
   return (
     <div className="space-y-5">
       <div>
-        <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">Saldos & Cashbacks</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Saldos & Cashbacks</div>
+          {isSuperAdmin && (
+            <Button
+              variant="outline"
+              onClick={onAdjustCashback}
+              data-testid="btn-adjust-cashback"
+              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
+            >
+              <SlidersHorizontal className="w-4 h-4" /> Ajustar saldo
+            </Button>
+          )}
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard icon={Wallet} label="Disponível p/ saque" value={formatCurrency(kpis.available)} color="green" />
           <KpiCard icon={Clock} label="Em quarentena" value={formatCurrency(kpis.quarantine)} color="amber" hint="Aguardando liberação" />

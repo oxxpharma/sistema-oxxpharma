@@ -159,6 +159,16 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Substituídos 97 ocorrências em 19 arquivos do frontend + email templates (`commission_earned`, `welcome`).
   - Termos especiais: "Comissões por Geração" → **"Cashback por Geração"** · "Recalcular Comissões" → **"Recalcular Cashbacks"** · "Comissão de afiliado" → **"Cashback de Indicação"**.
   - **Mantidos** intactos: URLs (`/api/admin/commissions/*`, `/backoffice/comissoes-por-geracao`), nomes de variáveis JS/Python, schema do banco (collection `commissions`, campos `commission_id`), slug de email (`commission_earned`), data-testids — preserva integrações externas (Maxx, scripts) e não exige migração.
+- ✅ Iter 42f (Fev/2026): **Fix bug merge-users 500 + ajuste de saldo Cashback admin**.
+  - **Bug**: `api.js` quebrava com `JSON.parse` em respostas não-JSON (502/503 de proxy/cloudflare). Frontend agora usa try/catch e mostra mensagem decente do backend.
+  - **Backend merge-users**: try/catch global retornando 500 com `detail` em JSON (nunca mais texto puro). Limpeza de campos com índice único (email, cpf_digits, external_id, phone_digits) feita ANTES do `$set` no keep para evitar `DuplicateKeyError`.
+  - **Ajuste de Cashback** (super_admin): `POST /api/admin/users/:id/cashback-adjust` — cria comissão `type=admin_adjustment, status=paid` com nota obrigatória (≥3 chars). Valida que débito não deixa saldo negativo. Frontend: modal `CashbackAdjustModal.jsx` na tab "Visão Geral" da ficha do usuário.
+- ✅ Iter 42g (Fev/2026): **Frete grátis com múltiplas regras OR**.
+  - Novo schema: `free_shipping_enabled` (bool) + `free_shipping_rules: [{name, account_types, categories, min_subtotal}]` — match em qualquer regra libera (OR), critérios dentro da regra são AND.
+  - Helper `_evaluate_free_shipping(settings, user_doc, subtotal)` reutilizado nos 2 pontos do código (checkout e cálculo público de frete).
+  - Retrocompatibilidade: schema legado (`free_shipping_mode/audiences/min_subtotal`) continua funcionando se `free_shipping_rules` estiver vazio.
+  - UI (`AdminAppearance.jsx`): empty state com 3 presets ("para tudo", "acima de R$", "Equipe"). Cada regra editável tem nome, chips de tipo de conta + categorias, valor mínimo, e resumo visual no rodapé.
+  - Testes: `test_iter42g_free_shipping_rules.py` (9 testes — regras OR, AND interno, disabled flag, schemas legados, regras prevalecem sobre legacy) — **todos PASS**.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

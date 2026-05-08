@@ -20,10 +20,11 @@ def _login(email, password):
 
 
 def test_no_orphan_commissions_in_db():
-    """DB nao deve ter comissoes em pedidos com payment_status != paid."""
+    """DB nao deve ter comissoes em pedidos com payment_status != paid.
+    Ignora admin_adjustment (saldo manual sem pedido real)."""
     client = MongoClient(MONGO_URL)
     db = client[DB_NAME]
-    comm_oids = db.commissions.distinct("order_id")
+    comm_oids = db.commissions.distinct("order_id", {"type": {"$ne": "admin_adjustment"}})
     if not comm_oids:
         return
     paid_oids = set(db.orders.distinct("order_id",
@@ -136,8 +137,8 @@ def test_recalc_force_works_after_orphan_cleanup():
     """Apos limpar orfas, o recalculo force deve produzir o estado esperado."""
     client = MongoClient(MONGO_URL)
     db = client[DB_NAME]
-    # Garante zero orfas
-    comm_oids = db.commissions.distinct("order_id")
+    # Garante zero orfas (ignorando admin_adjustment)
+    comm_oids = db.commissions.distinct("order_id", {"type": {"$ne": "admin_adjustment"}})
     paid_oids = set(db.orders.distinct("order_id",
                                        {"payment_status": "paid",
                                         "order_id": {"$in": comm_oids}}))
@@ -161,8 +162,9 @@ def test_recalc_force_works_after_orphan_cleanup():
     assert r.status_code == 200
 
     # DB final: total de comissoes ativas deve igualar o expected do preview
-    # (paid_out preservados + novos == expected_count)
+    # Iter 42h: ignora admin_adjustment (manual, fora do escopo do recalc)
     rows = list(db.commissions.aggregate([
+        {"$match": {"type": {"$ne": "admin_adjustment"}}},
         {"$group": {"_id": None, "count": {"$sum": 1}, "total": {"$sum": "$amount"}}}
     ]))
     if not rows:

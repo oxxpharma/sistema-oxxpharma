@@ -20,8 +20,10 @@ async def main(dry_run: bool = False):
     cli = AsyncIOMotorClient(os.environ["MONGO_URL"])
     db = cli[os.environ["DB_NAME"]]
 
-    # Order_ids que tem comissoes
-    comm_oids = await db.commissions.distinct("order_id")
+    # Order_ids que tem comissoes (ignora admin_adjustment - sao ajustes manuais sem pedido)
+    comm_oids = await db.commissions.distinct(
+        "order_id", {"type": {"$ne": "admin_adjustment"}}
+    )
     print(f"Pedidos com comissoes: {len(comm_oids)}")
 
     # Pedidos paid
