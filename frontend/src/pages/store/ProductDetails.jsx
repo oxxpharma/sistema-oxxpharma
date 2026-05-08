@@ -9,6 +9,8 @@ import { useCart } from '../../contexts/CartContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
+import { evaluateFreeShipping } from '../../lib/freeShipping';
+import FreeShippingProgress from '../../components/store/FreeShippingProgress';
 import { ShoppingCart, Truck, ShieldCheck, Minus, Plus, Loader2, ArrowLeft, Award } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -17,7 +19,7 @@ const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde8
 export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { addItem } = useCart();
+  const { addItem, cart } = useCart();
   const { user } = useAuth();
   const settings = useSiteSettings();
   const [product, setProduct] = useState(null);
@@ -134,6 +136,25 @@ export default function ProductDetails() {
             </div>
             <span className="text-xs text-txt-secondary">{product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque'}</span>
           </div>
+
+          {/* Iter 42i: feedback de frete gratis baseado no subtotal hipotetico (carrinho atual + este produto) */}
+          {(() => {
+            const hypoSubtotal = (cart?.subtotal || 0) + (price * qty);
+            const fs = evaluateFreeShipping(settings, user, hypoSubtotal);
+            if (!fs.applies && (!fs.threshold || fs.threshold <= 0)) return null;
+            return (
+              <div className="mt-3" data-testid="product-free-shipping-feedback">
+                <FreeShippingProgress
+                  subtotal={hypoSubtotal}
+                  threshold={fs.threshold || 0}
+                  remaining={fs.remaining || 0}
+                  applies={fs.applies}
+                  label={settings?.free_shipping_label || 'Frete grátis'}
+                  mini
+                />
+              </div>
+            );
+          })()}
 
           <div className="mt-6 grid grid-cols-2 gap-3">
             <Button variant="outline" onClick={addToCart} loading={adding} disabled={product.stock <= 0} data-testid="add-cart-btn">

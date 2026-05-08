@@ -169,6 +169,12 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
   - Retrocompatibilidade: schema legado (`free_shipping_mode/audiences/min_subtotal`) continua funcionando se `free_shipping_rules` estiver vazio.
   - UI (`AdminAppearance.jsx`): empty state com 3 presets ("para tudo", "acima de R$", "Equipe"). Cada regra editável tem nome, chips de tipo de conta + categorias, valor mínimo, e resumo visual no rodapé.
   - Testes: `test_iter42g_free_shipping_rules.py` (9 testes — regras OR, AND interno, disabled flag, schemas legados, regras prevalecem sobre legacy) — **todos PASS**.
+- ✅ Iter 42h (Fev/2026): **Barra de progresso até o frete grátis** no Carrinho e Checkout.
+  - Componente `FreeShippingProgress.jsx` reutilizável: 2 estados (faltam X / conquistado), versão compacta para o checkout.
+  - Helper `evaluateFreeShipping` em `src/lib/freeShipping.js` espelhando o backend `_evaluate_free_shipping` (suporta multi-regras OR + legado).
+  - Pluga em `CartPage.jsx` e `CheckoutPage.jsx` substituindo o aviso textual antigo. Mostra barra apenas quando há regra com `min_subtotal > 0` (regras puramente por público continuam silenciosas, pois progresso não faz sentido aí).
+  - Validação visual: configurada regra "Acima de R$ 500", carrinho com R$ 29,90 mostra "Faltam R$ 470,10" + barra com fill proporcional.
+  - Testes: 9 testes paridade backend + 13 testes paridade frontend (helper) — **22/22 PASS**.
 
 ## Files of Reference
 - `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)

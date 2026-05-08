@@ -9,12 +9,14 @@ import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2 } from
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
+import FreeShippingProgress from '../../components/store/FreeShippingProgress';
+import { evaluateFreeShipping } from '../../lib/freeShipping';
 
 const COUPON_KEY = 'oxx_coupon_v1';
 
 export default function CartPage() {
   const { cart, updateItem, removeItem, loading } = useCart();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const [updating, setUpdating] = useState(null);
   const settings = useSiteSettings();
@@ -29,18 +31,16 @@ export default function CartPage() {
 
   const subtotal = cart.subtotal || 0;
 
-  // Frete grátis baseado no site_settings (espelha lógica do backend)
-  const fsMode = settings?.free_shipping_mode || 'off';
-  const fsMin = Number(settings?.free_shipping_min_subtotal || 0);
-  const isFreeShippingByRule = subtotal > 0 && (
-    fsMode === 'all' || (fsMode === 'above' && fsMin > 0 && subtotal >= fsMin)
-  );
+  // Iter 42h: usa novo helper que suporta multiplas regras OR (e legacy fallback)
+  const fsEval = evaluateFreeShipping(settings, user, subtotal);
+  const isFreeShippingByRule = subtotal > 0 && fsEval.applies;
   // Quando NÃO tem regra de frete grátis, usamos o valor da opção escolhida
   // pelo usuário. Se nada selecionado ainda, o frete fica "a calcular" (0 no resumo)
   const shipping = (subtotal === 0 || isFreeShippingByRule)
     ? 0
     : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
-  const remainingForFree = (fsMode === 'above' && fsMin > 0 && subtotal < fsMin) ? (fsMin - subtotal) : 0;
+  const remainingForFree = fsEval.remaining || 0;
+  const fsThreshold = fsEval.threshold || 0;
   const discount = coupon?.discount || 0;
   const total = Math.max(0, subtotal + shipping - discount);
 
@@ -237,10 +237,14 @@ export default function CartPage() {
                   <span className="text-xs text-txt-secondary">calcule com seu CEP</span>
                 )}
               </div>
-              {remainingForFree > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-[11px] text-amber-800">
-                  Faltam <b>{formatCurrency(remainingForFree)}</b> para você ganhar <b>frete grátis</b> 🚚
-                </div>
+              {(remainingForFree > 0 || isFreeShippingByRule) && subtotal > 0 && fsThreshold > 0 && (
+                <FreeShippingProgress
+                  subtotal={subtotal}
+                  threshold={fsThreshold}
+                  remaining={remainingForFree}
+                  applies={isFreeShippingByRule}
+                  label={settings?.free_shipping_label || 'Frete grátis'}
+                />
               )}
               {discount > 0 && (
                 <div className="flex justify-between text-emerald-600">

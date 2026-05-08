@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useCart } from '../../contexts/CartContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { useReferral } from '../../contexts/RefContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
@@ -10,12 +11,15 @@ import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wal
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
+import FreeShippingProgress from '../../components/store/FreeShippingProgress';
+import { evaluateFreeShipping } from '../../lib/freeShipping';
 
 const emptyAddr = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true };
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const { cart, clear } = useCart();
+  const { user } = useAuth();
   const { refCode, refName, clearRef } = useReferral();
   const [addresses, setAddresses] = useState([]);
   const [selectedAddr, setSelectedAddr] = useState(null);
@@ -124,11 +128,11 @@ export default function CheckoutPage() {
 
   const settings = useSiteSettings();
   const subtotal = cart.subtotal || 0;
-  const fsMode = settings?.free_shipping_mode || 'off';
-  const fsMin = Number(settings?.free_shipping_min_subtotal || 0);
-  const isFreeShippingByRule = subtotal > 0 && (
-    fsMode === 'all' || (fsMode === 'above' && fsMin > 0 && subtotal >= fsMin)
-  );
+  // Iter 42h: helper unificado (suporta multiplas regras OR + legacy)
+  const fsEval = evaluateFreeShipping(settings, user, subtotal);
+  const isFreeShippingByRule = subtotal > 0 && fsEval.applies;
+  const fsThreshold = fsEval.threshold || 0;
+  const remainingForFree = fsEval.remaining || 0;
   const shipping = isFreeShippingByRule
     ? 0
     : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
@@ -351,6 +355,16 @@ export default function CheckoutPage() {
                   <span className="text-xs text-txt-secondary">selecione uma opção</span>
                 )}
               </div>
+              {(remainingForFree > 0 || isFreeShippingByRule) && subtotal > 0 && fsThreshold > 0 && (
+                <FreeShippingProgress
+                  subtotal={subtotal}
+                  threshold={fsThreshold}
+                  remaining={remainingForFree}
+                  applies={isFreeShippingByRule}
+                  label={settings?.free_shipping_label || 'Frete grátis'}
+                  compact
+                />
+              )}
               {couponDiscount > 0 && (
                 <div className="flex justify-between text-emerald-600"><span>Cupom</span><span className="font-semibold">−{formatCurrency(couponDiscount)}</span></div>
               )}
