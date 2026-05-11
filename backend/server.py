@@ -3499,6 +3499,43 @@ async def import_network1(request: Request, data: Network1ImportPayload, user: d
 
 # ==================== ADMIN: COMMISSIONS REPORT (BENEFIT CARD) ====================
 
+async def _build_referral_sales_summary(db, match: dict) -> list:
+    """Iter 42m: Agrega cashbacks por geracao filtrando apenas comissoes cujo
+    pedido (order.sponsor_id != None) foi feito via link de indicacao.
+
+    Resultado paralelo ao summary_by_generation — NAO substitui Equipe 1/2,
+    apenas marca quais foram originados em compras via link. Usado pelo frontend
+    para mostrar a 4a categoria "Compras por Indicacao" no grafico.
+
+    Retorna: [{generation, total_amount, count, beneficiaries_count, orders_count}]
+    """
+    referral_order_ids = await db.orders.distinct("order_id", {"sponsor_id": {"$ne": None}})
+    if not referral_order_ids:
+        return []
+    full_match = dict(match)
+    full_match["order_id"] = {"$in": referral_order_ids}
+    pipe = [
+        {"$match": full_match},
+        {"$group": {
+            "_id": "$generation",
+            "total_amount": {"$sum": "$amount"},
+            "count": {"$sum": 1},
+            "beneficiaries": {"$addToSet": "$user_id"},
+            "orders": {"$addToSet": "$order_id"},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    rows = await db.commissions.aggregate(pipe).to_list(20)
+    return [{
+        "generation": r["_id"] or 0,
+        "total_amount": round(r.get("total_amount") or 0, 2),
+        "count": r.get("count") or 0,
+        "beneficiaries_count": len(r.get("beneficiaries") or []),
+        "orders_count": len(r.get("orders") or []),
+    } for r in rows]
+
+
+
 @app.get("/api/admin/commissions-by-generation")
 async def admin_commissions_by_generation(request: Request, status: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     """Iter 39: Relatorio visual por geracao.
@@ -3639,6 +3676,7 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
 
     return {
         "summary_by_generation": summary,
+        "referral_sales_by_generation": await _build_referral_sales_summary(db, match),
         "totals": {
             "total_amount": round(total_amount_all, 2),
             "total_count": total_count_all,

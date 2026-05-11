@@ -208,6 +208,12 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 - Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
 - Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
 
+## Iter 42m (Fev/2026): "Compras por Indicação" no relatório admin + /minha-rede enxuto
+- **Admin Cashback por Geração**: nova 4ª categoria "Compras por Indicação" (verde) — cashbacks gerados por pedidos via link `?ref=` (filtro `order.sponsor_id != null`). Aparece como barra paralela (stackId="r") no gráfico, fatia adicional no pie e bloco extra na tabela "Resumo por geração". Texto explicativo deixa claro que estes valores **não somam** com Equipe 1/2 — é visão paralela.
+- **Backend**: helper `_build_referral_sales_summary(db, match)` retorna agregação por geração. Adicionado ao response de `/api/admin/commissions-by-generation` como `referral_sales_by_generation`.
+- **/minha-rede do usuário**: esconde card da Equipe que o user NÃO faz parte (se `network_1`, oculta "Equipe 2" e vice-versa). Card chamado só "Equipe" (sem número). Removido subtítulo "Estrutura propagandista (até 6ª gen)". Grid `sm:grid-cols-3` → `sm:grid-cols-2`.
+
+
 ## Iter 42l (Fev/2026): Fix 3 regressões críticas (afiliação perdida + banner + pontos no carrinho)
 - **Bug P0 — Pedidos via link de indicação perdiam `sponsor_id`** (afiliados sem cashback de indicações diretas, sumiam do Top 10).
   - **Root cause**: order só armazenava `affiliate_id` (não `sponsor_id`); user que registrou direto e depois comprou via ref_code não tinha `sponsor_id` persistido; query do Top 10 lia apenas de `users.sponsor_id` via lookup.

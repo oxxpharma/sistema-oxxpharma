@@ -24,7 +24,7 @@ const STATUS_OPTIONS = [
 ];
 
 const GEN_COLORS = ['#f97316', '#0ea5e9', '#22c55e', '#a855f7', '#ec4899', '#eab308', '#14b8a6'];
-const NETWORK_COLORS = { network_1: '#f97316', network_2: '#0ea5e9', affiliate: '#a855f7' };
+const NETWORK_COLORS = { network_1: '#f97316', network_2: '#0ea5e9', affiliate: '#a855f7', referral_sales: '#22c55e' };
 
 export default function AdminCommissionsByGeneration() {
   const { isSuperAdmin } = useAuth();
@@ -65,34 +65,46 @@ export default function AdminCommissionsByGeneration() {
     setExpanded(s);
   };
 
-  // Agrupa o summary por geração (0..6) somando Equipe 1 + Equipe 2
+  // Agrupa o summary por geração (0..6) somando Equipe 1 + Equipe 2.
+  // Iter 42m: tambem incorpora "Compras por Indicacao" (referral_sales_by_generation)
+  // como serie paralela — NAO empilhada (mostra o que veio de link, sem duplicar
+  // visualmente com Equipe 1/2).
   const chartData = useMemo(() => {
     if (!data?.summary_by_generation) return [];
     const byGen = new Map();
     for (const s of data.summary_by_generation) {
       const gen = s.generation ?? 0;
-      if (!byGen.has(gen)) byGen.set(gen, { generation: gen, label: gen === 0 ? 'Afiliado' : `${gen}ª ger.`, network_1: 0, network_2: 0, affiliate: 0, count: 0 });
+      if (!byGen.has(gen)) byGen.set(gen, { generation: gen, label: gen === 0 ? 'Afiliado' : `${gen}ª ger.`, network_1: 0, network_2: 0, affiliate: 0, referral_sales: 0, count: 0 });
       const row = byGen.get(gen);
       if (s.type === 'affiliate') row.affiliate += s.total_amount;
       else if (s.network_type === 'network_1') row.network_1 += s.total_amount;
       else if (s.network_type === 'network_2') row.network_2 += s.total_amount;
       row.count += s.count;
     }
+    for (const r of (data.referral_sales_by_generation || [])) {
+      const gen = r.generation ?? 0;
+      if (!byGen.has(gen)) byGen.set(gen, { generation: gen, label: gen === 0 ? 'Afiliado' : `${gen}ª ger.`, network_1: 0, network_2: 0, affiliate: 0, referral_sales: 0, count: 0 });
+      byGen.get(gen).referral_sales = r.total_amount || 0;
+    }
     return Array.from(byGen.values()).sort((a, b) => a.generation - b.generation);
   }, [data]);
 
   const networkPie = useMemo(() => {
     if (!data?.summary_by_generation) return [];
-    const totals = { affiliate: 0, network_1: 0, network_2: 0 };
+    const totals = { affiliate: 0, network_1: 0, network_2: 0, referral_sales: 0 };
     for (const s of data.summary_by_generation) {
       if (s.type === 'affiliate') totals.affiliate += s.total_amount;
       else if (s.network_type === 'network_1') totals.network_1 += s.total_amount;
       else if (s.network_type === 'network_2') totals.network_2 += s.total_amount;
     }
+    for (const r of (data.referral_sales_by_generation || [])) {
+      totals.referral_sales += r.total_amount || 0;
+    }
     return [
       { name: 'Afiliado Direto', value: totals.affiliate, color: NETWORK_COLORS.affiliate },
       { name: 'Equipe 1 (Corp.)', value: totals.network_1, color: NETWORK_COLORS.network_1 },
       { name: 'Equipe 2 (Prop.)', value: totals.network_2, color: NETWORK_COLORS.network_2 },
+      { name: 'Compras por Indicação', value: totals.referral_sales, color: NETWORK_COLORS.referral_sales },
     ].filter(x => x.value > 0);
   }, [data]);
 
@@ -177,7 +189,12 @@ export default function AdminCommissionsByGeneration() {
           {/* Gráficos */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 bg-white rounded-xl border border-border p-5">
-              <h2 className="font-heading font-black text-base mb-4">Total pago por geração (empilhado por rede)</h2>
+              <h2 className="font-heading font-black text-base mb-1">Total pago por geração</h2>
+              <p className="text-xs text-txt-secondary mb-4">
+                Barra empilhada = origem da hierarquia (Afiliado · Equipe 1 · Equipe 2).
+                Barra verde ao lado = cashback gerado em <strong>compras por indicação</strong> (pedidos via link <code>?ref=</code>).
+                Estes valores <strong>já estão somados</strong> em Equipe 1/2 — é uma visão paralela, não soma.
+              </p>
               {chartData.length === 0 ? <EmptyHint msg="Sem cashbacks no período." /> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={chartData} margin={{ left: 8, right: 8, top: 6, bottom: 8 }}>
@@ -189,6 +206,7 @@ export default function AdminCommissionsByGeneration() {
                     <Bar dataKey="affiliate" stackId="a" fill={NETWORK_COLORS.affiliate} name="Afiliado Direto" radius={[2, 2, 0, 0]} />
                     <Bar dataKey="network_1" stackId="a" fill={NETWORK_COLORS.network_1} name="Equipe 1" radius={[2, 2, 0, 0]} />
                     <Bar dataKey="network_2" stackId="a" fill={NETWORK_COLORS.network_2} name="Equipe 2" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="referral_sales" stackId="r" fill={NETWORK_COLORS.referral_sales} name="Compras por Indicação" radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -242,6 +260,29 @@ export default function AdminCommissionsByGeneration() {
                           <td className="p-3 text-right font-bold text-emerald-700">{formatCurrency(s.total_amount)}</td>
                         </tr>
                       ))}
+                  {/* Iter 42m: linhas extras paralelas — Compras por Indicacao */}
+                  {(data.referral_sales_by_generation || []).length > 0 && (
+                    <tr className="border-t-2 border-emerald-200 bg-emerald-50/40">
+                      <td colSpan={5} className="p-3 text-xs uppercase font-bold text-emerald-700 tracking-wider">
+                        Compras por Indicação · cashbacks gerados por pedidos via link <code>?ref=</code> (já contabilizados acima)
+                      </td>
+                    </tr>
+                  )}
+                  {(data.referral_sales_by_generation || []).map((r, i) => (
+                    <tr key={`rs-${i}`} className="border-t border-emerald-100 bg-emerald-50/20">
+                      <td className="p-3">
+                        <div className="font-semibold flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full inline-block" style={{ background: NETWORK_COLORS.referral_sales }} />
+                          {r.generation === 0 ? 'Afiliado · Compras por Indicação' : `${r.generation}ª geração · Compras por Indicação`}
+                        </div>
+                        <div className="text-[11px] text-txt-secondary mt-0.5">{r.orders_count} pedidos via link</div>
+                      </td>
+                      <td className="p-3 text-right text-xs text-txt-secondary">—</td>
+                      <td className="p-3 text-right">{r.beneficiaries_count}</td>
+                      <td className="p-3 text-right">{r.count}</td>
+                      <td className="p-3 text-right font-bold text-emerald-700">{formatCurrency(r.total_amount)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

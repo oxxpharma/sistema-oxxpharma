@@ -101,27 +101,31 @@ export default function MyNetwork() {
         </div>
       </div>
 
-      {/* Iter 35: Breakdown por origem */}
+      {/* Iter 35 (refeito 42m): Breakdown por origem.
+          Mostra "Indicacoes diretas" + apenas a Equipe que o user faz parte
+          (Equipe 1 OU 2 — nao ambos). */}
       {data.by_source && (
-        <div className="grid sm:grid-cols-3 gap-3 mb-8" data-testid="commissions-by-source">
+        <div className="grid sm:grid-cols-2 gap-3 mb-8" data-testid="commissions-by-source">
           <SourceCard
             label="Indicações diretas"
             sub="Afiliado (1ª venda)"
             data={data.by_source.affiliate || {}}
             color="from-emerald-500/10 to-emerald-500/5 text-emerald-700 border-emerald-200"
           />
-          <SourceCard
-            label="Equipe 1"
-            sub="Estrutura propagandista (até 6ª gen)"
-            data={data.by_source.network_1 || {}}
-            color="from-brand-main/15 to-brand-main/5 text-brand-main border-brand-main/30"
-          />
-          <SourceCard
-            label="Equipe 2"
-            sub="Rede corporativa (até 6ª gen)"
-            data={data.by_source.network_2 || {}}
-            color="from-sky-500/10 to-sky-500/5 text-sky-700 border-sky-200"
-          />
+          {data.network_type === 'network_1' && (
+            <SourceCard
+              label="Equipe"
+              data={data.by_source.network_1 || {}}
+              color="from-brand-main/15 to-brand-main/5 text-brand-main border-brand-main/30"
+            />
+          )}
+          {data.network_type === 'network_2' && (
+            <SourceCard
+              label="Equipe"
+              data={data.by_source.network_2 || {}}
+              color="from-sky-500/10 to-sky-500/5 text-sky-700 border-sky-200"
+            />
+          )}
         </div>
       )}
 
@@ -214,8 +218,8 @@ function SourceCard({ label, sub, data, color }) {
   return (
     <div className={`rounded-xl border p-4 bg-gradient-to-br ${color}`}>
       <div className="text-xs font-bold uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-[11px] opacity-70 mb-3">{sub}</div>
-      <div className="font-heading font-black text-2xl">{formatCurrency(total)}</div>
+      {sub && <div className="text-[11px] opacity-70 mb-3">{sub}</div>}
+      <div className={`font-heading font-black text-2xl ${sub ? '' : 'mt-2'}`}>{formatCurrency(total)}</div>
       <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
         <div>
           <div className="opacity-70">Recebido</div>
