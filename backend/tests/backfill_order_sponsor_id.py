@@ -16,11 +16,14 @@ Uso:
 import asyncio
 import os
 import sys
+import pathlib
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-load_dotenv("/app/backend/.env")
+# Carrega .env do mesmo diretorio do backend (../ a partir de tests/)
+_ENV_PATH = pathlib.Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_ENV_PATH)
 
 
 async def main(apply: bool):
