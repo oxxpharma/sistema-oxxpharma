@@ -57,15 +57,7 @@ export default function StoreHome() {
               overlay_opacity: settings?.hero_overlay_opacity ?? 0.4,
             }];
         return (
-          <HeroCarousel
-            slides={slides}
-            settings={settings}
-            secondaryLink={
-              <Link to="/indique-ganhe" className="inline-flex items-center gap-2 border-2 border-white/40 px-6 py-3 rounded-lg font-bold hover:bg-white/10 transition">
-                Indique e ganhe
-              </Link>
-            }
-          />
+          <HeroCarousel slides={slides} settings={settings} />
         );
       })()}
 
