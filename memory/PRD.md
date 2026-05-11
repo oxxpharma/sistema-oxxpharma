@@ -208,6 +208,21 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 - Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
 - Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
 
+## Iter 42l (Fev/2026): Fix 3 regressões críticas (afiliação perdida + banner + pontos no carrinho)
+- **Bug P0 — Pedidos via link de indicação perdiam `sponsor_id`** (afiliados sem cashback de indicações diretas, sumiam do Top 10).
+  - **Root cause**: order só armazenava `affiliate_id` (não `sponsor_id`); user que registrou direto e depois comprou via ref_code não tinha `sponsor_id` persistido; query do Top 10 lia apenas de `users.sponsor_id` via lookup.
+  - **Fix 1**: `/api/checkout` agora persiste `user.sponsor_id` (sticky) quando ref_code resolve para afiliado válido — apenas se user ainda não tinha sponsor (sem sobrescrever histórico).
+  - **Fix 2**: order document recebe `sponsor_id` (snapshot do checkout) — preserva afiliação mesmo se user mudar de sponsor no futuro.
+  - **Fix 3**: aggregation do Top 10 usa `$ifNull: ["$sponsor_id", "$_buyer.sponsor_id"]` — prioriza snapshot do pedido com fallback ao perfil atual.
+  - **Backfill**: script `tests/backfill_order_sponsor_id.py` (dry-run + `--apply`). Aplicado em produção: 13 pedidos recuperaram `sponsor_id` via `affiliate_id` + 2 users tiveram `sponsor_id` ressuscitado a partir do histórico de compras.
+- **Bug P1 — Hero Carousel não exibia imagem de fundo**:
+  - **Root cause**: data URLs (`data:image/...;base64,...`) entravam em `url()` sem aspas, com vírgulas e `=` que quebram o parser CSS quando o token não está quoted.
+  - **Fix**: `url("${sl.image_url}")` com aspas duplas e remoção do `background: undefined` shorthand que estava resetando `background-image`. Estrutura de style refatorada em ternário condicional (imagem OU gradient).
+- **Bug P2 — Total de pontos não aparecia no carrinho**:
+  - **Root cause**: endpoint `/api/cart` enriquecia itens com nome/preço/imagem mas não incluía `points_value` (frontend lia `i.points_value` sempre `undefined`).
+  - **Fix**: enriquecimento agora inclui `"points_value": float(prod.get("points_value") or 0)`.
+- Testes: `test_iter42l_sponsor_id_preserved.py` (3 testes — sticky sponsor_id, points_value no cart, agg Top 10 com fallback) — todos PASS. Total suíte iter42*: **42/42 passing**.
+
 ## Project Health
 - **Broken**: nenhum
 - **Mocked**: API externa Cartão de Benefícios (adapter genérico — depende do fornecedor)

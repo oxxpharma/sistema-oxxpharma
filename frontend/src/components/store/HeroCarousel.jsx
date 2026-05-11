@@ -42,13 +42,20 @@ export default function HeroCarousel({ slides = [], settings, secondaryLink }) {
           <div
             key={i}
             className="absolute inset-0 transition-opacity duration-700"
-            style={{
-              opacity: i === idx ? 1 : 0,
-              backgroundImage: sl.image_url ? `url(${sl.image_url})` : undefined,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              background: !sl.image_url ? 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)' : undefined,
-            }}
+            style={
+              sl.image_url
+                ? {
+                    opacity: i === idx ? 1 : 0,
+                    backgroundImage: `url("${sl.image_url}")`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
+                  }
+                : {
+                    opacity: i === idx ? 1 : 0,
+                    background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
+                  }
+            }
           />
         ))}
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />

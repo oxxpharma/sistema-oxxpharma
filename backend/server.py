@@ -745,7 +745,7 @@ async def get_cart(request: Request, user: dict = Depends(get_current_user)):
             original = float(price_info["original_price"])
             total = price * item["quantity"]
             subtotal += total
-            enriched.append({**item, "name": prod["name"], "price": price, "original_price": original, "tier_applied": price_info.get("applied_tier"), "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0)})
+            enriched.append({**item, "name": prod["name"], "price": price, "original_price": original, "tier_applied": price_info.get("applied_tier"), "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0), "points_value": float(prod.get("points_value") or 0)})
     return {"items": enriched, "subtotal": round(subtotal, 2), "count": len(enriched)}
 
 @app.post("/api/cart/items")
@@ -924,6 +924,14 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         if aff and aff["user_id"] != user["user_id"]:
             affiliate_id = aff["user_id"]
             affiliate_code = code
+            # Iter 42l: Sticky — persiste o sponsor_id no perfil do usuario para preservar
+            # afiliacao em pedidos futuros, Top 10 indicadores, comissoes MMN e relatorios.
+            await db.users.update_one(
+                {"user_id": user["user_id"], "$or": [{"sponsor_id": None}, {"sponsor_id": {"$exists": False}}]},
+                {"$set": {"sponsor_id": affiliate_id, "sponsor_code": code}},
+            )
+            user["sponsor_id"] = affiliate_id
+            user["sponsor_code"] = code
 
     commission_amount = round(subtotal * affiliate_rate, 2) if affiliate_id else 0
 
@@ -958,6 +966,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "payment_id": None, "payment_url": None,
         "affiliate_id": affiliate_id, "affiliate_code": affiliate_code,
         "affiliate_commission": commission_amount,
+        # Iter 42l: snapshot do sponsor_id no momento da compra (preserva afiliacao
+        # mesmo se o user mudar de sponsor no futuro; usado por Top 10, comissoes MMN
+        # e relatorios). Fallback para affiliate_id quando user nao tem sponsor proprio.
+        "sponsor_id": (user.get("sponsor_id") or affiliate_id),
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
@@ -1986,13 +1998,16 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
             "orders": b["orders"],
         })
 
-    # Iter 41 (refeito 42k): Top 10 indicadores — agrupa por SPONSOR direto do cliente
+    # Iter 41 (refeito 42k/42l): Top 10 indicadores — agrupa por SPONSOR direto do cliente
     # que comprou. Funciona independente do affiliate_commission_rate (admin pode usar
     # so network_gen). Mostra volume de vendas em link de indicacao + cashback ganho.
+    # Iter 42l: prioriza order.sponsor_id (snapshot do checkout) com fallback ao
+    # user.sponsor_id atual — garante que pedidos via ref_code (sem user.sponsor_id)
+    # tambem apareçam no ranking.
     sponsor_match = {"payment_status": "paid", "user_id": {"$ne": None}}
     if has_period:
         sponsor_match.update(period_filter)
-    # Faz join com users para pegar o sponsor_id de cada comprador
+    # Faz join com users para pegar o sponsor_id de cada comprador (fallback)
     top_aff_agg = await db.orders.aggregate([
         {"$match": sponsor_match},
         {"$lookup": {
@@ -2002,9 +2017,12 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
             "as": "_buyer",
         }},
         {"$unwind": {"path": "$_buyer", "preserveNullAndEmptyArrays": False}},
-        {"$match": {"_buyer.sponsor_id": {"$ne": None, "$exists": True}}},
+        {"$addFields": {
+            "_effective_sponsor": {"$ifNull": ["$sponsor_id", "$_buyer.sponsor_id"]},
+        }},
+        {"$match": {"_effective_sponsor": {"$ne": None}}},
         {"$group": {
-            "_id": "$_buyer.sponsor_id",
+            "_id": "$_effective_sponsor",
             "direct_revenue": {"$sum": "$subtotal"},
             "direct_orders": {"$addToSet": "$order_id"},
         }},
