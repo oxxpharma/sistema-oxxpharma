@@ -15,6 +15,7 @@ const TABS = [
   { key: 'referral_box', label: 'Programa de indicação', icon: Gift },
   { key: 'free_shipping', label: 'Frete grátis', icon: Truck },
   { key: 'points', label: 'Pontos', icon: Award },
+  { key: 'product_card', label: 'Card do produto', icon: BadgeCheck },
   { key: 'footer', label: 'Rodapé', icon: Layout },
 ];
 
@@ -74,29 +75,30 @@ export default function AdminAppearance() {
     finally { setSaving(false); }
   };
 
-  const uploadImage = async (key) => {
-    const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*';
-    inp.onchange = async () => {
-      const file = inp.files?.[0]; if (!file) return;
-      if (file.size > 2 * 1024 * 1024) { toast.error('Imagem muito grande (max 2MB)'); return; }
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          let dataUrl = reader.result;
-          // Para favicon: redimensiona para 64x64 quadrado para garantir que o
-          // browser consiga usar como icone (favicon grande vira mancha cinza)
-          if (key === 'favicon_url') {
-            dataUrl = await resizeToSquare(dataUrl, 64);
-          }
-          const r = await api.post('/api/admin/upload-image', { data: dataUrl, name: file.name });
-          set(key, r.url);
-          toast.success(key === 'favicon_url' ? 'Favicon enviado (redimensionado para 64×64).' : 'Imagem enviada');
-        } catch (e) { toast.error(e?.message); }
+  const uploadImage = async (key, returnUrl = false) => {
+    return new Promise((resolve) => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*';
+      inp.onchange = async () => {
+        const file = inp.files?.[0]; if (!file) return resolve(null);
+        if (file.size > 2 * 1024 * 1024) { toast.error('Imagem muito grande (max 2MB)'); return resolve(null); }
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            let dataUrl = reader.result;
+            if (key === 'favicon_url') {
+              dataUrl = await resizeToSquare(dataUrl, 64);
+            }
+            const r = await api.post('/api/admin/upload-image', { data: dataUrl, name: file.name });
+            if (!returnUrl && key) set(key, r.url);
+            toast.success(key === 'favicon_url' ? 'Favicon enviado (redimensionado para 64×64).' : 'Imagem enviada');
+            resolve(r.url);
+          } catch (e) { toast.error(e?.message); resolve(null); }
+        };
+        reader.readAsDataURL(file);
       };
-      reader.readAsDataURL(file);
-    };
-    inp.click();
+      inp.click();
+    });
   };
 
   // Redimensiona uma data URL para um quadrado 'size'x'size' centralizado
@@ -265,18 +267,37 @@ export default function AdminAppearance() {
 
       {tab === 'hero' && (
         <div className="space-y-4 max-w-3xl">
-          <Card title="Banner principal (homepage)">
-            <Field label="Título" value={s.hero_title} onChange={(v) => set('hero_title', v)} testId="hero-title" />
-            <Field label="Subtítulo" value={s.hero_subtitle} onChange={(v) => set('hero_subtitle', v)} />
-            <ImageUpload label="Imagem de fundo" url={s.hero_image_url} onPick={() => uploadImage('hero_image_url')} onClear={() => set('hero_image_url', '')} testId="hero-image" />
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Texto do botão (CTA)" value={s.hero_cta_label} onChange={(v) => set('hero_cta_label', v)} />
-              <Field label="Link do botão" value={s.hero_cta_link} onChange={(v) => set('hero_cta_link', v)} placeholder="/produtos" />
-            </div>
-            <div>
-              <label className="text-xs font-semibold block mb-1">Opacidade do overlay (0 = imagem nítida, 1 = preto total)</label>
-              <input type="range" min="0" max="1" step="0.05" value={s.hero_overlay_opacity || 0} onChange={(e) => set('hero_overlay_opacity', parseFloat(e.target.value))} className="w-full" />
-              <div className="text-xs text-txt-secondary">{Math.round((s.hero_overlay_opacity || 0) * 100)}%</div>
+          <Card title="Banner principal (carrossel)">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">
+              Adicione um ou mais slides com imagem, título, subtítulo e botão. Se houver mais de 1, eles giram automaticamente.
+            </p>
+
+            <HeroSlidesEditor
+              slides={s.hero_slides || (s.hero_image_url ? [{
+                title: s.hero_title, subtitle: s.hero_subtitle, image_url: s.hero_image_url,
+                cta_label: s.hero_cta_label, cta_link: s.hero_cta_link,
+                overlay_opacity: s.hero_overlay_opacity || 0,
+              }] : [])}
+              onChange={(slides) => set('hero_slides', slides)}
+              uploadImage={uploadImage}
+            />
+
+            <div className="mt-4 pt-3 border-t border-border grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-txt-secondary block mb-1">Autoplay (segundos)</label>
+                <input type="number" min="2" max="30" step="1" className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                  value={s.hero_autoplay_seconds || 6}
+                  onChange={(e) => set('hero_autoplay_seconds', parseInt(e.target.value, 10) || 6)}
+                  data-testid="hero-autoplay-seconds" />
+                <p className="text-[11px] text-txt-secondary mt-1">Tempo entre trocas. 0 = sem autoplay.</p>
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-txt-secondary block mb-1">Mostrar indicadores</label>
+                <label className="inline-flex items-center gap-2 cursor-pointer h-10">
+                  <input type="checkbox" className="w-4 h-4" checked={s.hero_show_dots !== false} onChange={(e) => set('hero_show_dots', e.target.checked)} data-testid="hero-show-dots" />
+                  <span className="text-sm">Bolinhas embaixo</span>
+                </label>
+              </div>
             </div>
           </Card>
         </div>
@@ -461,6 +482,37 @@ export default function AdminAppearance() {
                   )}
                 </div>
               </label>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'product_card' && (
+        <div className="space-y-4 max-w-3xl">
+          <Card title="Badge para visitantes (não logados)">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">
+              Quando o produto tem um "Preço para visitante" (tipo <span className="font-mono">guest</span>), aparece um selo no card. Aqui você define o texto global desse selo (sobrescreve o "Label" individual do produto).
+            </p>
+            <Field
+              label="Texto do badge (ex: CADASTRE-SE E GANHE DESCONTO)"
+              value={s.guest_tier_label_global}
+              onChange={(v) => set('guest_tier_label_global', v)}
+              placeholder="CADASTRE-SE E GANHE DESCONTO"
+              testId="guest-tier-label-global"
+              hint="Deixe vazio para usar o label individual de cada produto."
+            />
+          </Card>
+
+          <Card title="Tamanho da fonte dos textos do produto (vitrine)">
+            <p className="text-xs text-txt-secondary -mt-1 mb-3">
+              Ajuste o tamanho das letras em pixels. Vale para todos os cards de produto na loja pública.
+            </p>
+            <div className="space-y-3">
+              <FontSizeSlider label="Marca (ex: VITAMINA)" value={s.product_card_brand_px} onChange={(v) => set('product_card_brand_px', v)} min={9} max={20} defaultV={11} />
+              <FontSizeSlider label="Título do produto" value={s.product_card_title_px} onChange={(v) => set('product_card_title_px', v)} min={11} max={24} defaultV={14} />
+              <FontSizeSlider label="Preço" value={s.product_card_price_px} onChange={(v) => set('product_card_price_px', v)} min={14} max={32} defaultV={18} />
+              <FontSizeSlider label="Preço riscado (original)" value={s.product_card_strike_px} onChange={(v) => set('product_card_strike_px', v)} min={9} max={18} defaultV={12} />
+              <FontSizeSlider label="Rótulos / badges (Clube, pontos, etc)" value={s.product_card_label_px} onChange={(v) => set('product_card_label_px', v)} min={9} max={18} defaultV={12} />
             </div>
           </Card>
         </div>
@@ -870,6 +922,100 @@ function IconPicker({ value, onChange }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function FontSizeSlider({ label, value, onChange, min = 8, max = 32, defaultV = 14 }) {
+  const v = Number(value || defaultV);
+  return (
+    <div className="border border-border rounded-lg p-3 bg-bg-secondary/40">
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-xs font-bold uppercase tracking-wider text-txt-secondary">{label}</label>
+        <span className="text-xs font-mono font-bold">{v}px</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={v}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        className="w-full"
+      />
+      <div className="flex justify-between text-[10px] text-txt-secondary mt-0.5">
+        <span>{min}px</span>
+        <span style={{ fontSize: `${v}px` }} className="text-txt-primary font-semibold leading-none">Aa</span>
+        <span>{max}px</span>
+      </div>
+    </div>
+  );
+}
+
+function HeroSlidesEditor({ slides, onChange, uploadImage }) {
+  const update = (idx, patch) => onChange(slides.map((s, i) => i === idx ? { ...s, ...patch } : s));
+  const remove = (idx) => onChange(slides.filter((_, i) => i !== idx));
+  const move = (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= slides.length) return;
+    const next = [...slides];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    onChange(next);
+  };
+  const add = () => onChange([...slides, {
+    title: 'Novo banner', subtitle: '', image_url: '',
+    cta_label: '', cta_link: '/produtos', overlay_opacity: 0.3,
+  }]);
+
+  if (slides.length === 0) {
+    return (
+      <div className="border-2 border-dashed border-border rounded-lg p-6 text-center" data-testid="hero-empty">
+        <p className="text-sm text-txt-secondary mb-3">Nenhum slide configurado.</p>
+        <Button variant="outline" onClick={add} data-testid="hero-add-first"><Plus className="w-4 h-4" /> Adicionar primeiro slide</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="hero-slides-list">
+      {slides.map((slide, idx) => (
+        <div key={idx} className="border border-border rounded-lg p-4 bg-bg-secondary/30" data-testid={`hero-slide-${idx}`}>
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="text-xs font-bold uppercase text-txt-secondary">Slide {idx + 1}</div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => move(idx, -1)} disabled={idx === 0} className="p-1 hover:bg-bg-secondary rounded disabled:opacity-30" title="Mover para cima">↑</button>
+              <button onClick={() => move(idx, 1)} disabled={idx === slides.length - 1} className="p-1 hover:bg-bg-secondary rounded disabled:opacity-30" title="Mover para baixo">↓</button>
+              <button onClick={() => remove(idx)} className="p-1 text-rose-600 hover:bg-rose-50 rounded" title="Remover" data-testid={`hero-slide-remove-${idx}`}><X className="w-4 h-4" /></button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Field label="Título" value={slide.title} onChange={(v) => update(idx, { title: v })} />
+            <Field label="Subtítulo" value={slide.subtitle} onChange={(v) => update(idx, { subtitle: v })} />
+            <ImageUpload label="Imagem de fundo" url={slide.image_url}
+              onPick={async () => {
+                const url = await uploadImage(null, true);
+                if (url) update(idx, { image_url: url });
+              }}
+              onClear={() => update(idx, { image_url: '' })}
+              testId={`hero-slide-image-${idx}`}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Texto do botão (CTA)" value={slide.cta_label} onChange={(v) => update(idx, { cta_label: v })} placeholder="Ex: Ver produtos" />
+              <Field label="Link do botão" value={slide.cta_link} onChange={(v) => update(idx, { cta_link: v })} placeholder="/produtos" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold block mb-1">Opacidade do overlay</label>
+              <input type="range" min="0" max="1" step="0.05" value={slide.overlay_opacity || 0}
+                onChange={(e) => update(idx, { overlay_opacity: parseFloat(e.target.value) })}
+                className="w-full" />
+              <div className="text-xs text-txt-secondary">{Math.round((slide.overlay_opacity || 0) * 100)}%</div>
+            </div>
+          </div>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={add} data-testid="hero-add"><Plus className="w-4 h-4" /> Adicionar slide</Button>
     </div>
   );
 }

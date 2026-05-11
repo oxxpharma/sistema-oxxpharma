@@ -1986,30 +1986,50 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
             "orders": b["orders"],
         })
 
-    # Iter 41: Top 10 indicadores — apenas vendas DIRETAS pelo link
-    # (type=affiliate, generation=0). Mede volume vendido em cada link proprio.
-    affiliate_match = {"type": "affiliate", "status": {"$in": ["paid", "pending", "pending_enrollment"]}}
+    # Iter 41 (refeito 42k): Top 10 indicadores — agrupa por SPONSOR direto do cliente
+    # que comprou. Funciona independente do affiliate_commission_rate (admin pode usar
+    # so network_gen). Mostra volume de vendas em link de indicacao + cashback ganho.
+    sponsor_match = {"payment_status": "paid", "user_id": {"$ne": None}}
     if has_period:
-        affiliate_match.update(period_filter)
-    top_aff_agg = await db.commissions.aggregate([
-        {"$match": affiliate_match},
+        sponsor_match.update(period_filter)
+    # Faz join com users para pegar o sponsor_id de cada comprador
+    top_aff_agg = await db.orders.aggregate([
+        {"$match": sponsor_match},
+        {"$lookup": {
+            "from": "users",
+            "localField": "user_id",
+            "foreignField": "user_id",
+            "as": "_buyer",
+        }},
+        {"$unwind": {"path": "$_buyer", "preserveNullAndEmptyArrays": False}},
+        {"$match": {"_buyer.sponsor_id": {"$ne": None, "$exists": True}}},
         {"$group": {
-            "_id": "$user_id",
-            "direct_revenue": {"$sum": "$order_subtotal"},
+            "_id": "$_buyer.sponsor_id",
+            "direct_revenue": {"$sum": "$subtotal"},
             "direct_orders": {"$addToSet": "$order_id"},
-            "commission_total": {"$sum": "$amount"},
-            "commission_paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}},
         }},
         {"$project": {
             "direct_revenue": 1,
-            "commission_total": 1,
-            "commission_paid": 1,
             "orders_count": {"$size": "$direct_orders"},
         }},
         {"$sort": {"direct_revenue": -1}},
         {"$limit": 10},
     ]).to_list(10)
     top_aff_ids = [a["_id"] for a in top_aff_agg]
+    # Cashback ganho por cada um (somando affiliate + network_gen para esses sponsors)
+    aff_commissions = {}
+    if top_aff_ids:
+        comm_period = {"user_id": {"$in": top_aff_ids},
+                       "type": {"$in": ["affiliate", "network_gen"]}}
+        if has_period:
+            comm_period.update(period_filter)
+        async for c in db.commissions.aggregate([
+            {"$match": comm_period},
+            {"$group": {"_id": "$user_id",
+                        "commission_total": {"$sum": "$amount"},
+                        "commission_paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}}}}
+        ]):
+            aff_commissions[c["_id"]] = c
     aff_users = {}
     referral_counts = {}
     if top_aff_ids:
@@ -2023,6 +2043,7 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
     top_affiliates = []
     for a in top_aff_agg:
         u = aff_users.get(a["_id"], {})
+        c = aff_commissions.get(a["_id"], {})
         top_affiliates.append({
             "user_id": a["_id"],
             "name": u.get("name") or "(sem nome)",
@@ -2031,8 +2052,8 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
             "referral_code": u.get("referral_code"),
             "direct_revenue": round(a.get("direct_revenue") or 0, 2),
             "direct_orders": a.get("orders_count") or 0,
-            "commission_total": round(a.get("commission_total") or 0, 2),
-            "commission_paid": round(a.get("commission_paid") or 0, 2),
+            "commission_total": round(c.get("commission_total") or 0, 2),
+            "commission_paid": round(c.get("commission_paid") or 0, 2),
             "referrals_count": referral_counts.get(a["_id"], 0),
         })
 
@@ -3471,7 +3492,8 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
       - totals: {total_amount, total_count, orders_with_commission}
     """
     db = request.app.db
-    match = {}
+    # Iter 42k: ajustes manuais (admin_adjustment) nao aparecem no relatorio por geracao
+    match = {"type": {"$ne": "admin_adjustment"}}
     if status:
         match["status"] = status
     if start:

@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { useSiteSettings } from '../../hooks/useSiteSettings';
+import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { CheckCircle2, Package, MapPin, Loader2 } from 'lucide-react';
+import { CheckCircle2, Package, MapPin, Loader2, Award } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUS_LABELS = {
@@ -17,6 +20,8 @@ const STATUS_LABELS = {
 
 export default function OrderDetails() {
   const { id } = useParams();
+  const { user } = useAuth();
+  const settings = useSiteSettings();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
@@ -129,6 +134,25 @@ export default function OrderDetails() {
             <span className="font-bold">Total</span>
             <span className="font-heading font-black text-2xl text-brand-main">{formatCurrency(order.total)}</span>
           </div>
+          {/* Iter 42k: pontos ganhos com este pedido (se elegivel) */}
+          {(() => {
+            if (!canSeeProductPoints(user, settings)) return null;
+            const totalPts = (order.items || []).reduce(
+              (s, i) => s + (Number(i.points_value || 0) * Number(i.quantity || 0)),
+              0
+            );
+            if (totalPts <= 0) return null;
+            return (
+              <div className="flex justify-between items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2" data-testid="order-points-total">
+                <span className="text-amber-800 font-semibold inline-flex items-center gap-1.5 text-xs">
+                  <Award className="w-4 h-4" /> Pontos ganhos
+                </span>
+                <span className="text-amber-800 font-bold text-sm">
+                  {formatPointsLabel(totalPts, settings?.points_visibility_label || 'pontos')}
+                </span>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

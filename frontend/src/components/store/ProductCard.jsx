@@ -56,24 +56,61 @@ export default function ProductCard({ product }) {
       </div>
       <div className="p-4 flex flex-col flex-1">
         {product.brand && (
-          <div className="text-[11px] uppercase tracking-wider text-brand-main font-bold mb-1">{product.brand}</div>
+          <div
+            className="uppercase tracking-wider text-brand-main font-bold mb-1"
+            style={{ fontSize: `${settings?.product_card_brand_px || 11}px` }}
+          >
+            {product.brand}
+          </div>
         )}
-        <h3 className="text-sm font-semibold text-txt-primary line-clamp-2 min-h-[40px]">{product.name}</h3>
+        <h3
+          className="font-semibold text-txt-primary line-clamp-2 min-h-[40px]"
+          style={{ fontSize: `${settings?.product_card_title_px || 14}px`, lineHeight: 1.25 }}
+        >
+          {product.name}
+        </h3>
         {tierApplied && (
-          <div className="mt-1 inline-block self-start text-[10px] uppercase tracking-wider bg-brand-light text-brand-main rounded-full px-2 py-0.5 font-bold">
-            {tierApplied.label || 'Preço especial'}
+          <div
+            className="mt-1 inline-block self-start uppercase tracking-wider bg-brand-light text-brand-main rounded-full px-2 py-0.5 font-bold"
+            style={{ fontSize: `${settings?.product_card_label_px || 10}px` }}
+          >
+            {/* Iter 42k: para tier=guest, label global em site_settings tem precedencia */}
+            {tierApplied.type === 'guest' && (settings?.guest_tier_label_global || '').trim()
+              ? settings.guest_tier_label_global.trim()
+              : (tierApplied.label || 'Preço especial')}
           </div>
         )}
         <div className="mt-3 flex items-baseline gap-2">
-          <span className="text-lg font-heading font-black text-txt-primary">{formatCurrency(effective)}</span>
-          {hasDiscount && <span className="text-xs text-txt-secondary line-through">{formatCurrency(product.price)}</span>}
+          <span
+            className="font-heading font-black text-txt-primary"
+            style={{ fontSize: `${settings?.product_card_price_px || 18}px` }}
+          >
+            {formatCurrency(effective)}
+          </span>
+          {hasDiscount && (
+            <span
+              className="text-txt-secondary line-through"
+              style={{ fontSize: `${settings?.product_card_strike_px || 12}px` }}
+            >
+              {formatCurrency(product.price)}
+            </span>
+          )}
           {!hasDiscount && tierApplied && original > effective && (
-            <span className="text-xs text-txt-secondary line-through">{formatCurrency(original)}</span>
+            <span
+              className="text-txt-secondary line-through"
+              style={{ fontSize: `${settings?.product_card_strike_px || 12}px` }}
+            >
+              {formatCurrency(original)}
+            </span>
           )}
         </div>
         {/* Iter 39: preco do clube de beneficios visivel para todos */}
         {typeof product.club_price === 'number' && product.club_price > 0 && product.club_price < effective && (
-          <div className="mt-1 text-xs leading-tight" data-testid={`product-club-price-${product.product_id}`}>
+          <div
+            className="mt-1 leading-tight"
+            style={{ fontSize: `${settings?.product_card_label_px || 12}px` }}
+            data-testid={`product-club-price-${product.product_id}`}
+          >
             <span className="text-txt-secondary">Preço para participante do </span>
             <span className="font-semibold text-emerald-700">Clube do Benefícios</span>
             <span className="text-txt-secondary">: </span>
@@ -81,7 +118,11 @@ export default function ProductCard({ product }) {
           </div>
         )}
         {canSeeProductPoints(user, settings) && product.points_value > 0 && (
-          <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-700" data-testid={`product-points-${product.product_id}`}>
+          <div
+            className="mt-1 inline-flex items-center gap-1 font-semibold text-amber-700"
+            style={{ fontSize: `${settings?.product_card_label_px || 12}px` }}
+            data-testid={`product-points-${product.product_id}`}
+          >
             <Award className="w-3 h-3" />
             Ganhe {formatPointsLabel(product.points_value, settings?.points_visibility_label || 'pontos')}
           </div>

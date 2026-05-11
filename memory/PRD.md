@@ -190,6 +190,16 @@ Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e p
 - **P2**: PWA / push notifications para clientes.
 
 ## Test Credentials
+## Iter 42k (Fev/2026): 5 melhorias (1 bug P0 + 4 features)
+- **Bug P0**: Top 10 Indicadores e relatório "Cashback por Geração" sem Afiliado Direto quando `affiliate_commission_rate=0`.
+  - Top 10 refeito: agrupa por `_buyer.sponsor_id` de pedidos pagos (não depende de comissão `type=affiliate`).
+  - Relatório por geração agora exclui `admin_adjustment` da agregação (deixava de mostrar "Noneª geração").
+- **Badge para visitantes editável**: novo campo global `guest_tier_label_global` em site-settings sobrescreve `tier.label` individual de produtos. Editável em `/backoffice/aparencia` → "Card do produto".
+- **Pontos totais no carrinho e pedido**: linha "Você ganhará X pontos" no resumo do carrinho + no card do pedido (`OrderDetails`), só aparece se elegível (usa `canSeeProductPoints`).
+- **Tamanho da fonte do card de produto**: 5 sliders em `/backoffice/aparencia` → "Card do produto" (Marca, Título, Preço, Preço riscado, Rótulos) com preview "Aa" em tempo real.
+- **Banner carrossel**: schema novo `hero_slides: [{title, subtitle, image_url, cta_label, cta_link, overlay_opacity}]` com autoplay configurável e dots. Componente `HeroCarousel.jsx` na home. Retrocompatibilidade: se `hero_slides` vazio, usa `hero_image_url/hero_title/hero_subtitle/hero_cta_*` antigos.
+- Testes: 39/39 pytest passando (preservados todos os anteriores).
+
 Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`.
 
 ## Iter 42j (Fev/2026): Fix endereço no XLSX/CSV de aprovados no Programa de Benefícios

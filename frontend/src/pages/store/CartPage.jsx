@@ -5,12 +5,13 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { api } from '../../lib/api';
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2 } from 'lucide-react';
+import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2, Award } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
 import FreeShippingProgress from '../../components/store/FreeShippingProgress';
 import { evaluateFreeShipping } from '../../lib/freeShipping';
+import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 
 const COUPON_KEY = 'oxx_coupon_v1';
 
@@ -209,6 +210,26 @@ export default function CartPage() {
                 <span className="text-txt-secondary">Subtotal ({cart.count} itens)</span>
                 <span className="font-semibold">{formatCurrency(subtotal)}</span>
               </div>
+
+              {/* Iter 42k: pontos ganhos com este pedido (se elegivel) */}
+              {(() => {
+                if (!canSeeProductPoints(user, settings)) return null;
+                const totalPts = (cart.items || []).reduce(
+                  (s, i) => s + (Number(i.points_value || 0) * Number(i.quantity || 0)),
+                  0
+                );
+                if (totalPts <= 0) return null;
+                return (
+                  <div className="flex justify-between items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" data-testid="cart-points-total">
+                    <span className="text-amber-800 font-semibold inline-flex items-center gap-1.5 text-xs">
+                      <Award className="w-4 h-4" /> Você ganhará neste pedido
+                    </span>
+                    <span className="text-amber-800 font-bold text-sm">
+                      {formatPointsLabel(totalPts, settings?.points_visibility_label || 'pontos')}
+                    </span>
+                  </div>
+                );
+              })()}
 
               {/* Calculadora de frete */}
               {!isFreeShippingByRule && subtotal > 0 && (

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import ProductCard from '../../components/store/ProductCard';
+import HeroCarousel from '../../components/store/HeroCarousel';
 import { Loader2, ArrowRight, Pill, Baby, Heart, Sparkles, Droplets, Leaf } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 
@@ -43,47 +44,30 @@ export default function StoreHome() {
 
   return (
     <div data-testid="store-home">
-      {/* Hero */}
-      {!categoryFilter && (
-        <section
-          className="relative text-white"
-          style={settings?.hero_image_url
-            ? { backgroundImage: `url(${settings.hero_image_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-            : {}}
-        >
-          {settings?.hero_image_url
-            ? <div className="absolute inset-0 bg-black" style={{ opacity: settings?.hero_overlay_opacity ?? 0.4 }} />
-            : <div className="absolute inset-0 bg-gradient-to-br from-brand-main via-brand-hover to-orange-700" />}
-          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20 grid md:grid-cols-2 gap-8 items-center">
-            <div className="fade-in">
-              <div className="inline-block bg-white/15 backdrop-blur text-xs font-semibold px-3 py-1.5 rounded-full mb-4">
-                {settings?.tagline || 'Frete para todo o Brasil'}
-              </div>
-              <h1 className="font-heading font-black text-4xl sm:text-5xl lg:text-6xl leading-tight">
-                {settings?.hero_title || 'Saúde e bem-estar na sua porta.'}
-              </h1>
-              <p className="mt-4 text-white/90 text-base max-w-md">
-                {settings?.hero_subtitle || 'Medicamentos, vitaminas, dermocosméticos e mais — com atendimento e preços que cuidam de você.'}
-              </p>
-              <div className="mt-8 flex gap-3">
-                <Link to={settings?.hero_cta_link || '#produtos'} className="inline-flex items-center gap-2 bg-white text-brand-main px-6 py-3 rounded-lg font-bold hover:bg-white/90 transition" data-testid="hero-cta">
-                  {settings?.hero_cta_label || 'Ver produtos'} <ArrowRight className="w-4 h-4" />
-                </Link>
-                <Link to="/indique-ganhe" className="inline-flex items-center gap-2 border-2 border-white/40 px-6 py-3 rounded-lg font-bold hover:bg-white/10 transition">
-                  Indique e ganhe
-                </Link>
-              </div>
-            </div>
-            <div className="hidden md:block">
-              {!settings?.hero_image_url && (
-                <div className="aspect-square max-w-md ml-auto rounded-3xl bg-white/10 backdrop-blur border border-white/20 p-8 relative overflow-hidden">
-                  <img src="https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=600" alt="" className="w-full h-full object-cover rounded-2xl" />
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
+      {/* Hero - carrossel multi-slide (com fallback retrocompativel para banner unico) */}
+      {!categoryFilter && (() => {
+        const slides = (settings?.hero_slides && settings.hero_slides.length > 0)
+          ? settings.hero_slides
+          : [{
+              title: settings?.hero_title,
+              subtitle: settings?.hero_subtitle,
+              image_url: settings?.hero_image_url,
+              cta_label: settings?.hero_cta_label,
+              cta_link: settings?.hero_cta_link,
+              overlay_opacity: settings?.hero_overlay_opacity ?? 0.4,
+            }];
+        return (
+          <HeroCarousel
+            slides={slides}
+            settings={settings}
+            secondaryLink={
+              <Link to="/indique-ganhe" className="inline-flex items-center gap-2 border-2 border-white/40 px-6 py-3 rounded-lg font-bold hover:bg-white/10 transition">
+                Indique e ganhe
+              </Link>
+            }
+          />
+        );
+      })()}
 
       {/* Categorias */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
