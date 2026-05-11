@@ -2028,26 +2028,36 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
         }},
         {"$project": {
             "direct_revenue": 1,
+            "direct_orders": 1,
             "orders_count": {"$size": "$direct_orders"},
         }},
         {"$sort": {"direct_revenue": -1}},
         {"$limit": 10},
     ]).to_list(10)
     top_aff_ids = [a["_id"] for a in top_aff_agg]
-    # Cashback ganho por cada um (somando affiliate + network_gen para esses sponsors)
+    # Iter 42n: cashback APENAS dos pedidos via link de indicacao (nao a conta inteira).
+    # Para cada sponsor, soma comissoes cujo order_id pertence aos pedidos diretos dele.
     aff_commissions = {}
     if top_aff_ids:
-        comm_period = {"user_id": {"$in": top_aff_ids},
-                       "type": {"$in": ["affiliate", "network_gen"]}}
-        if has_period:
-            comm_period.update(period_filter)
-        async for c in db.commissions.aggregate([
-            {"$match": comm_period},
-            {"$group": {"_id": "$user_id",
-                        "commission_total": {"$sum": "$amount"},
-                        "commission_paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}}}}
-        ]):
-            aff_commissions[c["_id"]] = c
+        for a in top_aff_agg:
+            sponsor_id = a["_id"]
+            sponsor_order_ids = list(a.get("direct_orders") or [])
+            if not sponsor_order_ids:
+                aff_commissions[sponsor_id] = {"commission_total": 0, "commission_paid": 0}
+                continue
+            comm_match = {"user_id": sponsor_id, "order_id": {"$in": sponsor_order_ids}}
+            if has_period:
+                comm_match.update(period_filter)
+            rows = await db.commissions.aggregate([
+                {"$match": comm_match},
+                {"$group": {"_id": None,
+                            "commission_total": {"$sum": "$amount"},
+                            "commission_paid": {"$sum": {"$cond": [{"$eq": ["$status", "paid"]}, "$amount", 0]}}}}
+            ]).to_list(1)
+            if rows:
+                aff_commissions[sponsor_id] = rows[0]
+            else:
+                aff_commissions[sponsor_id] = {"commission_total": 0, "commission_paid": 0}
     aff_users = {}
     referral_counts = {}
     if top_aff_ids:
@@ -3169,6 +3179,32 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
         if st in ("pending", "paid"):
             by_source[key][st] = round(by_source[key].get(st, 0) + (s["total"] or 0), 2)
         by_source[key]["count"] += s["count"]
+
+    # Iter 42n: "Indicacoes diretas" = cashback gerado por pedidos feitos no link
+    # de indicacao DO USER (orders.sponsor_id == user_id), independente do type
+    # da comissao. Substitui o card "affiliate" do front (que so funcionava quando
+    # affiliate_commission_rate > 0). Tambem expoe o agg separado para outros usos.
+    ref_order_ids = await db.orders.distinct("order_id", {"sponsor_id": user["user_id"]})
+    ref_sales = {"pending": 0, "paid": 0, "count": 0, "orders_count": len(ref_order_ids)}
+    if ref_order_ids:
+        rs_agg = await db.commissions.aggregate([
+            {"$match": {"user_id": user["user_id"], "order_id": {"$in": ref_order_ids}}},
+            {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        ]).to_list(10)
+        for s in rs_agg:
+            st = s["_id"] or "pending"
+            if st in ("pending", "paid"):
+                ref_sales[st] = round(s["total"] or 0, 2)
+            ref_sales["count"] += s["count"]
+    # Sobrescreve "affiliate" no by_source para o card "Indicacoes Diretas" mostrar
+    # cashback de pedidos via link (visao mais util do que comissoes type=affiliate
+    # quando o rate de afiliado e' 0).
+    by_source["affiliate"] = {
+        "pending": ref_sales["pending"],
+        "paid": ref_sales["paid"],
+        "count": ref_sales["count"],
+        "orders_count": ref_sales["orders_count"],
+    }
 
     return {
         "network_type": network_type,

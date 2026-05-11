@@ -208,6 +208,12 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 - Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
 - Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
 
+## Iter 42n (Fev/2026): Indicações Diretas + Top 10 cashback contam APENAS pedidos via link
+- **Bug**: o card "Indicações Diretas" em `/minha-rede` mostrava R$ 0,00 mesmo quando havia cashback gerado por pedidos feitos no link do user (porque `affiliate_commission_rate=0` deixava o `type="affiliate"` zerado). E o Top 10 Indicadores do Dashboard somava TODO o cashback da conta do user, não só dos pedidos via link.
+- **Fix backend `/api/users/me/network`**: `by_source.affiliate` agora é redefinido como cashback de pedidos cujo `order.sponsor_id == user_id` (independente do `type`). Adicionado também `orders_count` no breakdown. Frontend atualizou subtítulo do card: "Cashback gerado por compras no meu link".
+- **Fix backend `/api/admin/dashboard` (top_affiliates)**: a agregação `aff_commissions` agora filtra `commissions.order_id IN sponsor.direct_orders` (os order_ids da agregação anterior), em vez de somar tudo do user. Resultado: `commission_total` reflete só os pedidos via link de indicação.
+- Testes: `test_iter42n_referral_only_metrics.py` (2 testes) — PASS. Total suíte iter42*: **44/44 passing**.
+
 ## Iter 42m (Fev/2026): "Compras por Indicação" no relatório admin + /minha-rede enxuto
 - **Admin Cashback por Geração**: nova 4ª categoria "Compras por Indicação" (verde) — cashbacks gerados por pedidos via link `?ref=` (filtro `order.sponsor_id != null`). Aparece como barra paralela (stackId="r") no gráfico, fatia adicional no pie e bloco extra na tabela "Resumo por geração". Texto explicativo deixa claro que estes valores **não somam** com Equipe 1/2 — é visão paralela.
 - **Backend**: helper `_build_referral_sales_summary(db, match)` retorna agregação por geração. Adicionado ao response de `/api/admin/commissions-by-generation` como `referral_sales_by_generation`.

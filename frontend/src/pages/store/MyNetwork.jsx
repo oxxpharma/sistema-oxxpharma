@@ -108,7 +108,7 @@ export default function MyNetwork() {
         <div className="grid sm:grid-cols-2 gap-3 mb-8" data-testid="commissions-by-source">
           <SourceCard
             label="Indicações diretas"
-            sub="Afiliado (1ª venda)"
+            sub="Cashback gerado por compras no meu link"
             data={data.by_source.affiliate || {}}
             color="from-emerald-500/10 to-emerald-500/5 text-emerald-700 border-emerald-200"
           />
