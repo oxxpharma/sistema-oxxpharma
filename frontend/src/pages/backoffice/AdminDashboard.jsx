@@ -10,6 +10,7 @@ import { Badge } from '../../components/ui/Badge';
 import {
   Users, ShoppingBag, DollarSign, TrendingUp, TrendingDown,
   Loader2, ArrowRight, Trophy, Award, Receipt, CircleDollarSign,
+  Package,
 } from 'lucide-react';
 
 const STATUS = {
@@ -217,6 +218,9 @@ export default function AdminDashboard() {
         <TopBuyersCard items={data.top_buyers || []} />
         <TopAffiliatesCard items={data.top_affiliates || []} />
       </div>
+
+      {/* Iter 42o: Top 10 produtos vendidos */}
+      <TopProductsCard items={data.top_products || []} />
 
       {/* Linha 4: Cashbacks consolidadas + Pedidos recentes */}
       <div className="grid lg:grid-cols-3 gap-4">
@@ -504,5 +508,61 @@ function RecentOrdersCard({ items, className = '' }) {
     </div>
   );
 }
+
+function TopProductsCard({ items }) {
+  return (
+    <div className="bg-white rounded-2xl border border-border p-5" data-testid="top-products-card">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Package className="w-5 h-5 text-indigo-600" />
+          <h2 className="font-heading font-black text-lg">Top 10 produtos mais vendidos</h2>
+        </div>
+        <span className="text-xs text-txt-secondary">por quantidade · pedidos pagos</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="text-sm text-txt-secondary py-8 text-center">Sem vendas no período.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-txt-secondary uppercase tracking-wider border-b border-border">
+                <th className="text-left p-2 w-12">#</th>
+                <th className="text-left p-2">Produto</th>
+                <th className="text-right p-2">Qtd vendida</th>
+                <th className="text-right p-2 hidden sm:table-cell">Pedidos</th>
+                <th className="text-right p-2">Receita</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((p, i) => (
+                <tr key={p.product_id || i} className="border-b border-border last:border-0" data-testid={`top-product-${i + 1}`}>
+                  <td className="p-2 font-mono text-xs text-txt-secondary">{i + 1}</td>
+                  <td className="p-2">
+                    <div className="flex items-center gap-3">
+                      {p.image ? (
+                        <img src={p.image} alt={p.name} className="w-9 h-9 rounded object-cover bg-bg-secondary shrink-0" />
+                      ) : (
+                        <div className="w-9 h-9 rounded bg-bg-secondary flex items-center justify-center text-txt-secondary shrink-0">
+                          <Package className="w-4 h-4" />
+                        </div>
+                      )}
+                      <Link to={`/backoffice/produtos/${p.product_id}`} className="font-semibold hover:text-brand-main truncate block max-w-[260px]">
+                        {p.name}
+                      </Link>
+                    </div>
+                  </td>
+                  <td className="p-2 text-right font-bold font-heading">{p.qty_sold}</td>
+                  <td className="p-2 text-right text-txt-secondary hidden sm:table-cell">{p.orders_count}</td>
+                  <td className="p-2 text-right font-semibold text-emerald-700">{formatCurrency(p.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 /* Recent orders card */

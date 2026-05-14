@@ -128,6 +128,35 @@ function ConfigTab() {
       </Card>
 
       <Card>
+        <h3 className="font-heading font-bold mb-1">Aprovação automática de adesões</h3>
+        <p className="text-xs text-txt-secondary mb-4">
+          Quando ativado, novas solicitações de adesão ao Programa de Benefícios são aprovadas automaticamente após o tempo definido. Útil para evitar acúmulo manual.
+        </p>
+        <div className="space-y-3">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!cfg.auto_approve_enrollment}
+              onChange={(e) => setCfg({ ...cfg, auto_approve_enrollment: e.target.checked })}
+              className="w-5 h-5 accent-brand-main"
+              data-testid="cfg-auto-approve"
+            />
+            <span className="font-semibold text-sm">Ativar aprovação automática</span>
+          </label>
+          <Field
+            label="Delay antes de aprovar (em minutos)"
+            value={cfg.auto_approve_delay_minutes}
+            onChange={(v) => setCfg({ ...cfg, auto_approve_delay_minutes: Math.max(0, parseInt(v || 0)) })}
+            type="number"
+            testId="cfg-auto-approve-delay"
+          />
+          <p className="text-[11px] text-txt-secondary">
+            Recomendado: 60 a 1440 minutos (1h a 24h). Use 0 para aprovar quase instantaneamente (verificação roda a cada minuto).
+          </p>
+        </div>
+      </Card>
+
+      <Card>
         <h3 className="font-heading font-bold mb-1">API do Cartão (cadastro de beneficiário)</h3>
         <p className="text-xs text-txt-secondary mb-4">Chamada opcional feita quando o usuário adere ao programa (envia os dados do formulário).</p>
         <div className="space-y-3">

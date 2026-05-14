@@ -72,12 +72,19 @@ def test_merge_skips_email_collision_with_third_user():
     db.users.delete_many({"user_id": {"$in": [keep_id, third_id]}})
 
 
-def test_resolve_pending_leaders_endpoint():
-    """Endpoint de varredura responde com stats."""
+def test_resolve_pending_leaders_endpoints():
+    """Endpoints de varredura (preview + apply) respondem corretamente."""
     token = _login()
+    # Preview
     r = requests.post(f"{API_URL}/api/admin/network/resolve-pending-leaders",
                       headers={"Authorization": f"Bearer {token}"}, timeout=30)
     assert r.status_code == 200, r.text
     d = r.json()
-    assert "scanned" in d and "resolved" in d and "still_pending" in d
-    assert isinstance(d["samples_still_pending"], list)
+    assert "scanned" in d and "resolvable" in d and "unresolvable" in d
+    assert isinstance(d["resolvable"], list)
+    # Apply com lista vazia
+    r2 = requests.post(f"{API_URL}/api/admin/network/resolve-pending-leaders/apply",
+                       json={"user_ids": []},
+                       headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    assert r2.status_code == 200
+    assert r2.json() == {"resolved": 0, "skipped": 0, "details": []}

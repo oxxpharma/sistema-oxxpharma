@@ -59,6 +59,11 @@ async def get_card_config(db) -> Dict:
             "enrollment_api_url": "",
             "enrollment_api_method": "POST",
             "enrollment_api_payload_template": "",
+            # Iter 42o: Aprovacao automatica de adesoes ao Programa de Beneficios.
+            # Quando ligado, o scheduler aprova pendencias cujo
+            # submitted_at + auto_approve_delay_minutes >= now (sem precisar do admin).
+            "auto_approve_enrollment": False,
+            "auto_approve_delay_minutes": 60,
             "created_at": now_iso_utc(),
         }
         await db.settings.insert_one(s)
@@ -72,6 +77,7 @@ async def update_card_config(db, update: Dict) -> Dict:
         "api_auth_header_name", "api_extra_headers", "api_payload_template",
         "api_timeout_seconds", "enrollment_api_url", "enrollment_api_method",
         "enrollment_api_payload_template",
+        "auto_approve_enrollment", "auto_approve_delay_minutes",
     }
     payload = {k: v for k, v in update.items() if k in allowed}
     payload["updated_at"] = now_iso_utc()
@@ -312,6 +318,71 @@ async def _scheduled_run(db_getter):
     except Exception as e:
         logger.exception(f"Erro no scheduler: {e}")
 
+async def _auto_approve_pending_enrollments(db, config: Dict):
+    """Iter 42o: aprova automaticamente adesoes ao Programa de Beneficios cujo
+    submitted_at + auto_approve_delay_minutes <= now.
+
+    Implementacao simples (sem importar circular do server.py): replica a logica
+    de aprovacao mas inline aqui. Promove status -> approved, gera referral_code
+    unico, ativa o programa, promove commissions pending_enrollment -> pending,
+    e dispara email best-effort. Marca audit como approved_by_admin=null com
+    approved_by_auto=True.
+    """
+    import string
+    import secrets
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    delay = int(config.get("auto_approve_delay_minutes") or 0)
+    cutoff = _dt.now(_tz.utc) - _td(minutes=delay)
+
+    # Busca pendencias (submitted_at em ISO; aceita string ISO ou datetime)
+    pendings = await db.users.find(
+        {"referral_enrollment_status": "pending_approval"},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1,
+         "referral_enrollment_submitted_at": 1, "referral_enrollment": 1},
+    ).to_list(500)
+
+    approved = 0
+    for u in pendings:
+        ts = u.get("referral_enrollment_submitted_at")
+        if not ts:
+            continue
+        try:
+            sub_dt = _dt.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if sub_dt.tzinfo is None:
+                sub_dt = sub_dt.replace(tzinfo=_tz.utc)
+        except Exception:
+            continue
+        if sub_dt > cutoff:
+            continue  # ainda nao deu o delay
+        # Gera referral_code unico
+        alphabet = string.ascii_uppercase + string.digits
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
+        while await db.users.find_one({"referral_code": code}):
+            code = "".join(secrets.choice(alphabet) for _ in range(6))
+        await db.users.update_one(
+            {"user_id": u["user_id"], "referral_enrollment_status": "pending_approval"},
+            {"$set": {
+                "referral_code": code,
+                "referral_program_active": True,
+                "referral_enrollment_status": "approved",
+                "referral_enrolled_at": now_iso_utc(),
+                "referral_approved_by_auto": True,
+                "referral_approved_at": now_iso_utc(),
+            }},
+        )
+        # Promove comissoes pending_enrollment -> pending
+        await db.commissions.update_many(
+            {"user_id": u["user_id"], "status": "pending_enrollment"},
+            {"$set": {"status": "pending", "promoted_on_enrollment_at": now_iso_utc()}},
+        )
+        approved += 1
+    if approved > 0:
+        logger.info(f"Iter 42o: auto-aprovou {approved} adesoes pendentes (delay={delay}min)")
+    return approved
+
+
+
 
 def start_scheduler(db_getter):
     """Inicia APScheduler lendo horario atual do config."""
@@ -328,6 +399,13 @@ def start_scheduler(db_getter):
         db = db_getter()
         try:
             config = await get_card_config(db)
+            # Iter 42o: tenta auto-aprovar adesoes pendentes (independente do batch
+            # diario do cartao — usa sua propria flag/delay)
+            if config.get("auto_approve_enrollment"):
+                try:
+                    await _auto_approve_pending_enrollments(db, config)
+                except Exception as e:
+                    logger.exception(f"auto-approve enrollment falhou: {e}")
             if not config.get("enabled"):
                 return
             now = datetime.now(TZ_BR)

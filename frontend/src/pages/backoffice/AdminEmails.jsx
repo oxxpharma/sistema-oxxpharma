@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
+import EmailTemplateEditor from '../../components/admin/EmailTemplateEditor';
 import { Mail, Plus, Edit, Trash2, X, RotateCcw, Send, FileText, Inbox, Settings as SettingsIcon, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime } from '../../lib/utils';
@@ -222,6 +223,16 @@ function TemplatesTab() {
 function TemplateEditor({ template, onClose }) {
   const [form, setForm] = useState(template);
   const [saving, setSaving] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await api.get('/api/site-settings');
+        setLogoUrl(s?.logo_url || '');
+      } catch { /* ignora */ }
+    })();
+  }, []);
 
   const save = async () => {
     setSaving(true);
@@ -245,8 +256,8 @@ function TemplateEditor({ template, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white border-b border-border p-5 flex items-center justify-between">
+      <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-border p-5 flex items-center justify-between z-10">
           <h2 className="font-heading font-black text-lg">{form._isNew ? 'Novo modelo' : 'Editar modelo'}</h2>
           <button onClick={onClose}><X className="w-5 h-5" /></button>
         </div>
@@ -254,23 +265,24 @@ function TemplateEditor({ template, onClose }) {
           <Input label="Slug (identificador)*" required value={form.slug || ''} onChange={e => setForm({ ...form, slug: e.target.value })} data-testid="tpl-slug" hint="Ex: welcome, order_paid" />
           <Input label="Nome*" required value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} />
           <Input className="md:col-span-2" label="Assunto*" required value={form.subject || ''} onChange={e => setForm({ ...form, subject: e.target.value })} data-testid="tpl-subject" />
-          <Textarea className="md:col-span-2" label="HTML" rows={14} value={form.body_html || ''} onChange={e => setForm({ ...form, body_html: e.target.value })} data-testid="tpl-html" />
-          <Textarea className="md:col-span-2" label="Texto puro (opcional)" rows={4} value={form.body_text || ''} onChange={e => setForm({ ...form, body_text: e.target.value })} />
+          <div className="md:col-span-2">
+            <label className="text-xs font-bold text-txt-secondary mb-1.5 block">Conteúdo do email</label>
+            <EmailTemplateEditor
+              value={form.body_html || ''}
+              onChange={(html) => setForm({ ...form, body_html: html })}
+              logoUrl={logoUrl}
+            />
+            <p className="text-[11px] text-txt-secondary mt-1.5">
+              Use a barra de ferramentas para adicionar imagens, divisores, links e variáveis dinâmicas.
+            </p>
+          </div>
+          <Textarea className="md:col-span-2" label="Texto puro (fallback, opcional)" rows={3} value={form.body_text || ''} onChange={e => setForm({ ...form, body_text: e.target.value })} />
           <label className="flex items-center gap-2 text-sm md:col-span-2">
             <input type="checkbox" checked={!!form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
             Modelo ativo
           </label>
         </div>
-        <div className="grid md:grid-cols-2 gap-4 p-5 pt-0">
-          <div className="text-xs text-txt-secondary bg-bg-secondary rounded-lg p-3">
-            <strong>Variáveis:</strong> <code>{`{{user.name}}`}</code>, <code>{`{{user.email}}`}</code>, <code>{`{{order.total}}`}</code>, <code>{`{{order_short_id}}`}</code>, <code>{`{{order_link}}`}</code>, <code>{`{{referral_link}}`}</code>, <code>{`{{commission.amount}}`}</code>, <code>{`{{customer_name}}`}</code>, <code>{`{{candidate.name}}`}</code>, etc.
-          </div>
-          <div>
-            <div className="text-xs font-bold text-txt-secondary mb-2">Prévia do HTML</div>
-            <div className="border border-border rounded-lg p-3 max-h-64 overflow-auto" dangerouslySetInnerHTML={{ __html: form.body_html }} />
-          </div>
-        </div>
-        <div className="p-5 border-t border-border flex gap-2">
+        <div className="p-5 border-t border-border flex gap-2 sticky bottom-0 bg-white">
           <Button onClick={save} loading={saving} data-testid="save-tpl-btn">Salvar</Button>
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
         </div>

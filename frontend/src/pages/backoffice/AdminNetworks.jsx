@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Upload, Users, Network, Loader2, Search, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
+import ResolvePendingLeadersModal from '../../components/admin/ResolvePendingLeadersModal';
 
 const PAGE_LIMIT = 20;
 
@@ -48,23 +49,8 @@ export default function AdminNetworks() {
     try { await api.post(`/api/admin/users/${uid}/revoke-network`); toast.success('Revogado'); load(page); } catch (err) { toast.error(err.message); }
   };
 
-  // Iter 42o: Varredura na rede — resolve leader_external_id pendentes
-  const [resolving, setResolving] = useState(false);
-  const onResolvePending = async () => {
-    if (!window.confirm('Varrer a rede e tentar vincular usuários que estão aguardando líder?')) return;
-    setResolving(true);
-    try {
-      const r = await api.post('/api/admin/network/resolve-pending-leaders');
-      const msg = `Varredura concluída: ${r.scanned} verificados · ${r.resolved} vinculados · ${r.still_pending} ainda pendentes`;
-      if (r.resolved > 0) toast.success(msg, { duration: 7000 });
-      else toast.info(msg, { duration: 7000 });
-      load(page);
-    } catch (e) {
-      toast.error('Erro na varredura: ' + (e.message || e));
-    } finally {
-      setResolving(false);
-    }
-  };
+  // Iter 42o: Varredura na rede — modal com preview e seleção
+  const [showResolveModal, setShowResolveModal] = useState(false);
 
   return (
     <div data-testid="admin-networks">
@@ -75,7 +61,7 @@ export default function AdminNetworks() {
         </div>
         {tab === 'network_1' && (
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onResolvePending} loading={resolving} data-testid="resolve-pending-btn">
+            <Button variant="outline" onClick={() => setShowResolveModal(true)} data-testid="resolve-pending-btn">
               <RefreshCw className="w-4 h-4" /> Varrer rede (vincular pendentes)
             </Button>
             <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Equipe 1</Button>
@@ -165,6 +151,11 @@ export default function AdminNetworks() {
       )}
 
       {showImport && <ImportModal onClose={() => { setShowImport(false); load(1); }} />}
+      <ResolvePendingLeadersModal
+        open={showResolveModal}
+        onClose={() => setShowResolveModal(false)}
+        onApplied={() => load(page)}
+      />
     </div>
   );
 }

@@ -2069,6 +2069,9 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
     top_aff_ids = [a["_id"] for a in top_aff_agg]
     # Iter 42n: cashback APENAS dos pedidos via link de indicacao (nao a conta inteira).
     # Para cada sponsor, soma comissoes cujo order_id pertence aos pedidos diretos dele.
+    # Iter 42o: NAO aplicar period_filter nas commissions — os order_ids ja foram
+    # restritos pelo periodo no top_aff_agg, e commissions podem ter created_at
+    # diferente do pedido (ex: recalculo retroativo) causando R$ 0,00 indevido.
     aff_commissions = {}
     if top_aff_ids:
         for a in top_aff_agg:
@@ -2078,8 +2081,6 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
                 aff_commissions[sponsor_id] = {"commission_total": 0, "commission_paid": 0}
                 continue
             comm_match = {"user_id": sponsor_id, "order_id": {"$in": sponsor_order_ids}}
-            if has_period:
-                comm_match.update(period_filter)
             rows = await db.commissions.aggregate([
                 {"$match": comm_match},
                 {"$group": {"_id": None,
@@ -2126,6 +2127,45 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
 
     avg_ticket = round(total_revenue / paid_count, 2) if paid_count else 0
 
+    # Iter 42o: Top 10 produtos mais vendidos (qty + receita) no periodo
+    prod_match = {"payment_status": "paid"}
+    if has_period:
+        prod_match.update(period_filter)
+    top_products_agg = await db.orders.aggregate([
+        {"$match": prod_match},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.product_id",
+            "name": {"$first": "$items.name"},
+            "qty_sold": {"$sum": "$items.quantity"},
+            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 0]}]}},
+            "orders_count": {"$addToSet": "$order_id"},
+        }},
+        {"$project": {
+            "product_id": "$_id", "name": 1, "qty_sold": 1, "revenue": 1,
+            "orders_count": {"$size": "$orders_count"}, "_id": 0,
+        }},
+        {"$sort": {"qty_sold": -1}},
+        {"$limit": 10},
+    ]).to_list(10)
+    # Enriquece com imagem do produto
+    top_products = []
+    if top_products_agg:
+        pids = [tp["product_id"] for tp in top_products_agg if tp.get("product_id")]
+        prods = {}
+        async for p in db.products.find({"product_id": {"$in": pids}}, {"_id": 0, "product_id": 1, "images": 1, "name": 1}):
+            prods[p["product_id"]] = p
+        for tp in top_products_agg:
+            p = prods.get(tp.get("product_id"), {})
+            top_products.append({
+                "product_id": tp.get("product_id"),
+                "name": tp.get("name") or p.get("name") or "(produto removido)",
+                "image": (p.get("images") or [None])[0],
+                "qty_sold": int(tp.get("qty_sold") or 0),
+                "revenue": round(tp.get("revenue") or 0, 2),
+                "orders_count": int(tp.get("orders_count") or 0),
+            })
+
     return {
         "total_users": total_users, "total_orders": total_orders, "month_orders": month_orders,
         "total_revenue": round(total_revenue, 2), "month_revenue": round(month_revenue, 2),
@@ -2143,6 +2183,7 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
         },
         "top_buyers": top_buyers,
         "top_affiliates": top_affiliates,
+        "top_products": top_products,
         "commissions_summary": commissions_summary,
         "filter": {"start": start, "end": end},
     }
@@ -3494,15 +3535,15 @@ async def resolve_leader_links(db, rows, id_map: dict) -> dict:
 
 
 @app.post("/api/admin/network/resolve-pending-leaders")
-async def admin_resolve_pending_leaders(request: Request, user: dict = Depends(require_admin())):
-    """Iter 42o: Varredura na rede - para cada usuario com leader_external_id setado
-    mas SEM network_sponsor_id resolvido (lider ainda nao existia quando foi importado),
-    tenta resolver agora consultando a base atual.
+async def admin_resolve_pending_leaders_preview(request: Request, user: dict = Depends(require_admin())):
+    """Iter 42o: PREVIEW da varredura na rede. NAO modifica nada — apenas retorna a lista
+    de usuarios com leader_external_id pendente, separando os que JA podem ser resolvidos
+    (line tem leader_uid encontrado) dos que ainda nao tem lider na base.
 
-    Retorna estatistica: {scanned, resolved, still_pending, samples_still_pending}.
+    Endpoint mantido com este path por compatibilidade — apenas em modo preview.
+    Para aplicar, use /apply com a lista de user_ids selecionados.
     """
     db = request.app.db
-    # Query: leader_external_id existe E network_sponsor_id eh vazio
     q = {
         "leader_external_id": {"$nin": [None, ""], "$exists": True},
         "$or": [
@@ -3511,39 +3552,91 @@ async def admin_resolve_pending_leaders(request: Request, user: dict = Depends(r
             {"network_sponsor_id": ""},
         ],
     }
+    resolvable = []
+    unresolvable = []
     scanned = 0
-    resolved = 0
-    still_pending = 0
-    samples_still_pending = []
     async for u in db.users.find(q, {"_id": 0, "user_id": 1, "name": 1, "email": 1,
-                                       "leader_external_id": 1, "external_id": 1}):
+                                       "leader_external_id": 1, "external_id": 1, "network_type": 1}):
         scanned += 1
         leader_ext = u.get("leader_external_id")
-        if not leader_ext:
-            continue
-        leader_doc = await db.users.find_one({"external_id": leader_ext}, {"_id": 0, "user_id": 1})
+        leader_doc = await db.users.find_one(
+            {"external_id": leader_ext},
+            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1},
+        ) if leader_ext else None
+        row = {
+            "user_id": u["user_id"],
+            "name": u.get("name") or u.get("email"),
+            "email": u.get("email"),
+            "external_id": u.get("external_id"),
+            "network_type": u.get("network_type"),
+            "leader_external_id": leader_ext,
+            "leader": leader_doc,
+        }
         if leader_doc:
-            await db.users.update_one(
-                {"user_id": u["user_id"]},
-                {"$set": {"network_sponsor_id": leader_doc["user_id"]}},
-            )
-            resolved += 1
+            resolvable.append(row)
         else:
-            still_pending += 1
-            if len(samples_still_pending) < 30:
-                samples_still_pending.append({
-                    "user_id": u["user_id"],
-                    "name": u.get("name") or u.get("email"),
-                    "external_id": u.get("external_id"),
-                    "leader_external_id": leader_ext,
-                })
+            unresolvable.append(row)
 
     return {
         "scanned": scanned,
-        "resolved": resolved,
-        "still_pending": still_pending,
-        "samples_still_pending": samples_still_pending,
+        "resolvable_count": len(resolvable),
+        "unresolvable_count": len(unresolvable),
+        "resolvable": resolvable,
+        "unresolvable": unresolvable[:100],  # limita amostra
     }
+
+
+class _ResolveLeadersApply(BaseModel):
+    user_ids: List[str]
+
+
+@app.post("/api/admin/network/resolve-pending-leaders/apply")
+async def admin_resolve_pending_leaders_apply(request: Request, data: _ResolveLeadersApply, user: dict = Depends(require_admin())):
+    """Aplica vinculo network_sponsor_id apenas nos user_ids selecionados.
+    Verifica novamente se o lider existe na base antes de aplicar (proteção contra
+    deletes concorrentes entre preview e apply).
+    """
+    db = request.app.db
+    if not data.user_ids:
+        return {"resolved": 0, "skipped": 0, "details": []}
+
+    resolved = 0
+    skipped = 0
+    details = []
+    for uid in data.user_ids:
+        u = await db.users.find_one(
+            {"user_id": uid},
+            {"_id": 0, "user_id": 1, "name": 1, "leader_external_id": 1, "network_sponsor_id": 1},
+        )
+        if not u or not u.get("leader_external_id"):
+            skipped += 1
+            details.append({"user_id": uid, "status": "skipped", "reason": "sem leader_external_id"})
+            continue
+        if u.get("network_sponsor_id"):
+            skipped += 1
+            details.append({"user_id": uid, "status": "skipped", "reason": "ja vinculado"})
+            continue
+        leader_doc = await db.users.find_one(
+            {"external_id": u["leader_external_id"]},
+            {"_id": 0, "user_id": 1, "name": 1},
+        )
+        if not leader_doc:
+            skipped += 1
+            details.append({"user_id": uid, "status": "skipped", "reason": "lider nao encontrado"})
+            continue
+        await db.users.update_one(
+            {"user_id": uid},
+            {"$set": {"network_sponsor_id": leader_doc["user_id"]}},
+        )
+        resolved += 1
+        details.append({
+            "user_id": uid, "status": "resolved",
+            "leader_user_id": leader_doc["user_id"],
+            "leader_name": leader_doc.get("name"),
+        })
+
+    return {"resolved": resolved, "skipped": skipped, "details": details}
+
 
 
 
