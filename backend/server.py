@@ -4,6 +4,7 @@ Backend API: Auth, Products, Categories, Cart, Checkout, Orders, Addresses, Admi
 """
 
 import os
+import re
 import uuid
 import asyncio
 import bcrypt
@@ -1408,18 +1409,44 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
         v_drop = drop.get(f)
         if v_drop and str(v_drop).strip():  # so substitui se drop tem valor
             update_set[f] = v_drop
-    # Email: garantir lower e nao colidir
+    # Email: garantir lower
     if "email" in update_set:
-        update_set["email"] = str(update_set["email"]).lower()
-        # Se ja existe outro user com esse email diferente do keep, abortar
-        coll = await db.users.find_one({"email": update_set["email"], "user_id": {"$nin": [data.keep_user_id, data.drop_user_id]}})
-        if coll:
-            raise HTTPException(status_code=409, detail=f"Email {update_set['email']} ja em uso por outro usuario")
-    # Recalcula cpf_digits se cpf veio
+        update_set["email"] = str(update_set["email"]).lower().strip()
+    # Recalcula cpf_digits/phone_digits se valor veio do drop
     if "cpf" in update_set:
         update_set["cpf_digits"] = _clean_cpf(update_set["cpf"]) or update_set.get("cpf_digits")
     if "phone" in update_set:
         update_set["phone_digits"] = _clean_phone(update_set["phone"]) or update_set.get("phone_digits")
+
+    # Iter 42o: check defensivo contra colisao com TERCEIRO usuario (alem de email).
+    # Se um campo unico do drop ja existe em outro user que NAO seja keep/drop,
+    # PULA aquele campo no update (mantem o do keep) em vez de quebrar com 500.
+    # Os index unique cobrem: email, cpf_digits, phone_digits, external_id, referral_code.
+    # Acumulamos warnings pra mostrar no response.
+    skipped_due_collision = {}
+    unique_indexed_fields = ("email", "cpf_digits", "phone_digits", "external_id", "referral_code")
+    for f in unique_indexed_fields:
+        if f not in update_set:
+            continue
+        val = update_set[f]
+        if not val:
+            continue
+        # case-insensitive p/ email; o resto compara exato
+        if f == "email":
+            query = {"email": {"$regex": f"^{re.escape(val)}$", "$options": "i"}}
+        else:
+            query = {f: val}
+        query["user_id"] = {"$nin": [data.keep_user_id, data.drop_user_id]}
+        coll = await db.users.find_one(query, {"_id": 0, "user_id": 1, "email": 1, "name": 1})
+        if coll:
+            skipped_due_collision[f] = {"value": val, "owned_by": coll}
+            # Remove do update_set: mantem o que ja esta no keep
+            del update_set[f]
+            # Tambem remove campos derivados se o pai foi pulado
+            if f == "cpf_digits" and "cpf" in update_set:
+                del update_set["cpf"]
+            if f == "phone_digits" and "phone" in update_set:
+                del update_set["phone"]
 
     # Mesclar enderecos: keep + drop, deduplicando por (zip+number)
     keep_addrs = keep.get("addresses") or []
@@ -1442,7 +1469,7 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     # referral_program_active: ficar TRUE se algum dos dois tiver
     if drop.get("referral_program_active") and not keep.get("referral_program_active"):
         update_set["referral_program_active"] = True
-        if drop.get("referral_code") and not keep.get("referral_code"):
+        if drop.get("referral_code") and not keep.get("referral_code") and "referral_code" not in skipped_due_collision:
             update_set["referral_code"] = drop.get("referral_code")
         if drop.get("referral_enrollment"):
             update_set["referral_enrollment"] = drop["referral_enrollment"]
@@ -1451,12 +1478,12 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     update_set["merged_from_user_ids"] = (keep.get("merged_from_user_ids") or []) + [data.drop_user_id]
 
     # Antes de aplicar o update no keep, precisamos liberar campos com indice unico
-    # (email, cpf_digits, external_id) que possam estar sendo "transferidos" do drop.
-    # Iter 42f: tornar mais robusto - sempre limpa do drop ANTES de tentar setar no keep,
-    # para evitar DuplicateKeyError no $set do keep.
+    # (email, cpf_digits, external_id, phone_digits, referral_code) que estao sendo
+    # transferidos do drop. Iter 42f: limpa do drop ANTES do $set no keep para evitar
+    # DuplicateKeyError. Iter 42o: tambem inclui referral_code.
     unset_on_drop = {}
-    for f in ("email", "cpf_digits", "external_id", "phone_digits"):
-        if drop.get(f):
+    for f in ("email", "cpf_digits", "external_id", "phone_digits", "referral_code"):
+        if drop.get(f) and f in update_set:
             unset_on_drop[f] = ""
     if unset_on_drop:
         try:
@@ -1467,7 +1494,6 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     try:
         await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
     except Exception as e:
-        # Provavel DuplicateKeyError (email/cpf/external_id colidindo com terceiro)
         raise HTTPException(status_code=409, detail=f"Conflito ao gravar dados do usuario principal: {str(e)[:200]}")
 
     # 2. Migrar relacionamentos (compras, pontos, comissoes, saques, batches do cartao,
@@ -1527,7 +1553,13 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     await db.users.delete_one({"user_id": data.drop_user_id})
 
     fresh = await db.users.find_one({"user_id": data.keep_user_id}, {"_id": 0, "password_hash": 0})
-    return {"success": True, "kept": fresh, "deleted_user_id": data.drop_user_id, "moved": moved}
+    return {
+        "success": True,
+        "kept": fresh,
+        "deleted_user_id": data.drop_user_id,
+        "moved": moved,
+        "skipped_due_collision": skipped_due_collision,
+    }
 
 
 @app.get("/api/admin/merge-audit-log")
@@ -3459,6 +3491,61 @@ async def resolve_leader_links(db, rows, id_map: dict) -> dict:
         "sponsors_pending": sponsors_pending,
         "leader_external_persisted": persisted,
     }
+
+
+@app.post("/api/admin/network/resolve-pending-leaders")
+async def admin_resolve_pending_leaders(request: Request, user: dict = Depends(require_admin())):
+    """Iter 42o: Varredura na rede - para cada usuario com leader_external_id setado
+    mas SEM network_sponsor_id resolvido (lider ainda nao existia quando foi importado),
+    tenta resolver agora consultando a base atual.
+
+    Retorna estatistica: {scanned, resolved, still_pending, samples_still_pending}.
+    """
+    db = request.app.db
+    # Query: leader_external_id existe E network_sponsor_id eh vazio
+    q = {
+        "leader_external_id": {"$nin": [None, ""], "$exists": True},
+        "$or": [
+            {"network_sponsor_id": None},
+            {"network_sponsor_id": {"$exists": False}},
+            {"network_sponsor_id": ""},
+        ],
+    }
+    scanned = 0
+    resolved = 0
+    still_pending = 0
+    samples_still_pending = []
+    async for u in db.users.find(q, {"_id": 0, "user_id": 1, "name": 1, "email": 1,
+                                       "leader_external_id": 1, "external_id": 1}):
+        scanned += 1
+        leader_ext = u.get("leader_external_id")
+        if not leader_ext:
+            continue
+        leader_doc = await db.users.find_one({"external_id": leader_ext}, {"_id": 0, "user_id": 1})
+        if leader_doc:
+            await db.users.update_one(
+                {"user_id": u["user_id"]},
+                {"$set": {"network_sponsor_id": leader_doc["user_id"]}},
+            )
+            resolved += 1
+        else:
+            still_pending += 1
+            if len(samples_still_pending) < 30:
+                samples_still_pending.append({
+                    "user_id": u["user_id"],
+                    "name": u.get("name") or u.get("email"),
+                    "external_id": u.get("external_id"),
+                    "leader_external_id": leader_ext,
+                })
+
+    return {
+        "scanned": scanned,
+        "resolved": resolved,
+        "still_pending": still_pending,
+        "samples_still_pending": samples_still_pending,
+    }
+
+
 
 
 @app.post("/api/admin/network1/import")

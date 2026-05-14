@@ -208,6 +208,11 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 - Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
 - Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
 
+## Iter 42o (Fev/2026): Fix merge-users (E11000 com terceiro) + Varredura na rede
+- **Fix bug merge-users**: o check de colisão de email só validava se o email do drop colidia com um keep/drop, mas ignorava colisão case-insensitive e os outros campos com índice único (`cpf_digits`, `phone_digits`, `external_id`, `referral_code`). Agora cada campo com índice único é verificado contra **TERCEIROS users**; em caso de colisão, o campo é **PULADO** (mantém o do keep) em vez de quebrar com 500. Resposta da API agora inclui `skipped_due_collision` listando quais campos foram preservados e qual user é o "dono" do valor em conflito. UI mostra warning amarelo de 10s.
+- **Varredura na rede (`POST /api/admin/network/resolve-pending-leaders`)**: novo endpoint admin que percorre todos users com `leader_external_id` setado mas `network_sponsor_id` vazio (líder ainda não importado quando foi criado), tenta resolver agora consultando a base. Botão "Varrer rede (vincular pendentes)" adicionado em `/backoffice/redes` (aba Equipe 1). Retorna `{scanned, resolved, still_pending, samples_still_pending}`.
+- Testes: `test_iter42o_merge_and_resolve.py` (2 testes — PASS). Suíte iter42*: **60/60 passing**.
+
 ## Iter 42n (Fev/2026): Indicações Diretas + Top 10 cashback contam APENAS pedidos via link
 - **Bug**: o card "Indicações Diretas" em `/minha-rede` mostrava R$ 0,00 mesmo quando havia cashback gerado por pedidos feitos no link do user (porque `affiliate_commission_rate=0` deixava o `type="affiliate"` zerado). E o Top 10 Indicadores do Dashboard somava TODO o cashback da conta do user, não só dos pedidos via link.
 - **Fix backend `/api/users/me/network`**: `by_source.affiliate` agora é redefinido como cashback de pedidos cujo `order.sponsor_id == user_id` (independente do `type`). Adicionado também `orders_count` no breakdown. Frontend atualizou subtítulo do card: "Cashback gerado por compras no meu link".

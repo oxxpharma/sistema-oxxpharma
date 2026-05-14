@@ -49,9 +49,17 @@ export default function AdminMergeUsers() {
         keep_user_id: confirming.keepId,
         drop_user_id: confirming.dropId,
       });
-      toast.success(`Fusão concluída. Conta ${confirming.dropId.slice(0, 8)}… absorvida.`);
+      const skipped = r?.skipped_due_collision || {};
+      const skippedCount = Object.keys(skipped).length;
+      if (skippedCount > 0) {
+        const lines = Object.entries(skipped).map(([f, info]) =>
+          `• ${f}: "${info.value}" já pertence a ${info?.owned_by?.name || info?.owned_by?.user_id || 'outro user'}`
+        ).join('\n');
+        toast.warning(`Fusão concluída — ${skippedCount} campo(s) preservado(s) do principal por conflito com terceiros:\n${lines}`, { duration: 10000 });
+      } else {
+        toast.success(`Fusão concluída. Conta ${confirming.dropId.slice(0, 8)}… absorvida.`);
+      }
       setConfirming(null);
-      // Mostra o que moveu (debug) brevemente
       console.log('moved counts:', r.moved);
       await load();
     } catch (e) {

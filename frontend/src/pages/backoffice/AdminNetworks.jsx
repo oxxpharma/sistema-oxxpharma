@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Upload, Users, Network, Loader2, Search, FileSpreadsheet } from 'lucide-react';
+import { Upload, Users, Network, Loader2, Search, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
@@ -48,6 +48,24 @@ export default function AdminNetworks() {
     try { await api.post(`/api/admin/users/${uid}/revoke-network`); toast.success('Revogado'); load(page); } catch (err) { toast.error(err.message); }
   };
 
+  // Iter 42o: Varredura na rede — resolve leader_external_id pendentes
+  const [resolving, setResolving] = useState(false);
+  const onResolvePending = async () => {
+    if (!window.confirm('Varrer a rede e tentar vincular usuários que estão aguardando líder?')) return;
+    setResolving(true);
+    try {
+      const r = await api.post('/api/admin/network/resolve-pending-leaders');
+      const msg = `Varredura concluída: ${r.scanned} verificados · ${r.resolved} vinculados · ${r.still_pending} ainda pendentes`;
+      if (r.resolved > 0) toast.success(msg, { duration: 7000 });
+      else toast.info(msg, { duration: 7000 });
+      load(page);
+    } catch (e) {
+      toast.error('Erro na varredura: ' + (e.message || e));
+    } finally {
+      setResolving(false);
+    }
+  };
+
   return (
     <div data-testid="admin-networks">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
@@ -56,7 +74,12 @@ export default function AdminNetworks() {
           <p className="text-sm text-txt-secondary mt-1">Gerencie usuários por tipo de rede.</p>
         </div>
         {tab === 'network_1' && (
-          <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Equipe 1</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onResolvePending} loading={resolving} data-testid="resolve-pending-btn">
+              <RefreshCw className="w-4 h-4" /> Varrer rede (vincular pendentes)
+            </Button>
+            <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Equipe 1</Button>
+          </div>
         )}
       </div>
 
