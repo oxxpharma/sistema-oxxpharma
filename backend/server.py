@@ -1477,24 +1477,60 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     update_set["updated_at"] = now_iso()
     update_set["merged_from_user_ids"] = (keep.get("merged_from_user_ids") or []) + [data.drop_user_id]
 
-    # Antes de aplicar o update no keep, precisamos liberar campos com indice unico
-    # (email, cpf_digits, external_id, phone_digits, referral_code) que estao sendo
-    # transferidos do drop. Iter 42f: limpa do drop ANTES do $set no keep para evitar
-    # DuplicateKeyError. Iter 42o: tambem inclui referral_code.
-    unset_on_drop = {}
-    for f in ("email", "cpf_digits", "external_id", "phone_digits", "referral_code"):
-        if drop.get(f) and f in update_set:
-            unset_on_drop[f] = ""
-    if unset_on_drop:
-        try:
-            await db.users.update_one({"user_id": data.drop_user_id}, {"$unset": unset_on_drop})
-        except Exception as e:
-            logger.warning(f"unset on drop falhou (nao bloqueia): {e}")
+    # Iter 42p: Estrategia robusta para evitar E11000 dup key error.
+    # PROBLEMA: ao fazer $set no keep com campos unicos do drop (email, cpf, etc),
+    # o indice unique do Mongo bloqueia se o valor existir em qualquer doc — incluindo
+    # o proprio drop, que ainda nao foi deletado. O $unset previo no drop funciona
+    # na maioria dos casos mas em alguns cenarios o Mongo mantem a chave em "snapshot"
+    # ate o commit final, gerando colisao.
+    # SOLUCAO DEFINITIVA: DELETAR o drop antes de fazer $set no keep. Os relacionamentos
+    # (orders, commissions, etc) sao migrados depois — eles nao dependem do user doc
+    # existir, so do user_id como string.
+    # Reforco: caso ainda persista (por race condition ou terceiro user nao identificado
+    # no pre-check), tentamos um retry removendo o campo problematico.
+    await db.users.delete_one({"user_id": data.drop_user_id})
 
-    try:
-        await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
-    except Exception as e:
-        raise HTTPException(status_code=409, detail=f"Conflito ao gravar dados do usuario principal: {str(e)[:200]}")
+    attempts = 0
+    max_attempts = 5
+    while True:
+        try:
+            await db.users.update_one({"user_id": data.keep_user_id}, {"$set": update_set})
+            break
+        except Exception as e:
+            err_str = str(e)
+            # Detecta DuplicateKeyError e tenta remover o campo problematico
+            if "E11000" not in err_str and "duplicate key" not in err_str.lower():
+                raise HTTPException(status_code=500, detail=f"Erro inesperado: {err_str[:300]}")
+            attempts += 1
+            if attempts > max_attempts:
+                raise HTTPException(status_code=409, detail=f"Conflito apos {max_attempts} tentativas: {err_str[:200]}")
+            # Tenta extrair o nome do indice/campo: "index: <field>_1 dup key"
+            m = re.search(r"index:\s*([a-zA-Z_]+?)_1", err_str)
+            field = m.group(1) if m else None
+            if not field or field not in update_set:
+                # Nao conseguiu identificar — log e propaga
+                logger.error(f"merge: dup key sem campo identificavel: {err_str[:300]}")
+                raise HTTPException(status_code=409, detail=f"Conflito ao gravar dados: {err_str[:200]}")
+            val = update_set.pop(field, None)
+            # Tenta achar o terceiro user dono pra informar na resposta
+            try:
+                third = await db.users.find_one(
+                    {field: val, "user_id": {"$ne": data.keep_user_id}},
+                    {"_id": 0, "user_id": 1, "name": 1, "email": 1},
+                )
+            except Exception:
+                third = None
+            skipped_due_collision[field] = {
+                "value": val,
+                "owned_by": third or {"detail": "nao identificado"},
+                "detected_via": "retry_on_duplicate_key",
+            }
+            # Tambem remove campos derivados se aplicavel
+            if field == "cpf_digits" and "cpf" in update_set:
+                update_set.pop("cpf", None)
+            if field == "phone_digits" and "phone" in update_set:
+                update_set.pop("phone", None)
+            logger.warning(f"merge: removeu campo {field}={val!r} apos E11000 e tenta de novo (attempt {attempts})")
 
     # 2. Migrar relacionamentos (compras, pontos, comissoes, saques, batches do cartao,
     #    referidos, indicacoes, e qualquer ref a user_id)
@@ -1549,8 +1585,8 @@ async def _do_merge_users(request: Request, data: _MergeBody, user: dict):
     except Exception as e:
         logger.warning(f"merge_audit_log insert failed: {e}")
 
-    # 6. Deletar o drop
-    await db.users.delete_one({"user_id": data.drop_user_id})
+    # 6. Drop ja foi deletado no inicio (Iter 42p) para liberar indices unicos
+    # antes do $set no keep. Nao deletar novamente aqui.
 
     fresh = await db.users.find_one({"user_id": data.keep_user_id}, {"_id": 0, "password_hash": 0})
     return {
@@ -6439,8 +6475,51 @@ async def admin_payments_webhook_logs(request: Request, page: int = 1, limit: in
 
 # ==================== CARTAO DE BENEFICIOS / GIFT CARD ====================
 
+def _is_valid_cpf(cpf: str) -> bool:
+    """Valida CPF brasileiro (digitos verificadores)."""
+    if not cpf:
+        return False
+    digits = "".join(c for c in str(cpf) if c.isdigit())
+    if len(digits) != 11 or digits == digits[0] * 11:
+        return False
+    # 1o digito
+    s = sum(int(digits[i]) * (10 - i) for i in range(9))
+    d1 = (s * 10) % 11
+    if d1 == 10:
+        d1 = 0
+    if d1 != int(digits[9]):
+        return False
+    # 2o digito
+    s = sum(int(digits[i]) * (11 - i) for i in range(10))
+    d2 = (s * 10) % 11
+    if d2 == 10:
+        d2 = 0
+    return d2 == int(digits[10])
+
+
+def _is_valid_birth_date(s: str) -> bool:
+    """Aceita DD/MM/YYYY ou YYYY-MM-DD. Ano 1900-(now)."""
+    if not s:
+        return False
+    s = str(s).strip()
+    from datetime import datetime as _dt
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            d = _dt.strptime(s, fmt)
+            if 1900 <= d.year <= _dt.now().year:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _validate_enrollment_payload(fields: List[Dict], data: Dict) -> Dict:
-    """Valida dados submetidos contra os campos configurados. Retorna dict sanitizado."""
+    """Valida dados submetidos contra os campos configurados. Retorna dict sanitizado.
+
+    Iter 42p: tambem aplica validacoes server-side por mask:
+      - mask=cpf -> valida com _is_valid_cpf
+      - type=date -> valida data
+    """
     clean = {}
     for f in fields or []:
         key = f.get("key")
@@ -6449,8 +6528,20 @@ def _validate_enrollment_payload(fields: List[Dict], data: Dict) -> Dict:
         val = data.get(key)
         if f.get("required") and (val is None or str(val).strip() == ""):
             raise HTTPException(status_code=400, detail=f"Campo obrigatorio: {f.get('label') or key}")
-        if val is not None:
-            clean[key] = val
+        if val is None or str(val).strip() == "":
+            continue
+        val_str = str(val).strip()
+        mask = (f.get("mask") or "").lower()
+        ftype = (f.get("type") or "text").lower()
+        # Validacao CPF
+        if mask == "cpf" or key.lower() in ("cpf",):
+            if not _is_valid_cpf(val_str):
+                raise HTTPException(status_code=400, detail=f"CPF invalido em '{f.get('label') or key}'")
+        # Validacao data
+        if ftype == "date" or key.lower() in ("birth_date", "data_nascimento", "data_de_nascimento", "nascimento"):
+            if not _is_valid_birth_date(val_str):
+                raise HTTPException(status_code=400, detail=f"Data invalida em '{f.get('label') or key}' (use DD/MM/AAAA)")
+        clean[key] = val_str
     return clean
 
 
@@ -6483,22 +6574,107 @@ async def submit_referral_enrollment(request: Request, user: dict = Depends(get_
     body = await request.json()
     cfg = await card_service.get_card_config(db)
     clean = _validate_enrollment_payload(cfg.get("enrollment_fields", []), body or {})
+
+    # Iter 42p: Auto-promocao de dados PF do formulario para o cadastro principal.
+    # Caso comum: usuario chegou via Maxx como PJ (nome empresa, CNPJ no campo cpf),
+    # mas ao se inscrever no Programa preenche dados PF reais. Espelhamos esses
+    # dados para o user, SEM sobrescrever cpf_digits/email se houver colisao com
+    # outro user, e SEM perder o endereco original (apenas adiciona se nao existir).
+    user_promotion = {}
+    # Nome PF
+    pf_name = (clean.get("full_name") or clean.get("nome") or clean.get("name") or "").strip()
+    if pf_name:
+        user_promotion["name"] = pf_name
+        # Tambem preserva o nome PJ original em campo de backup
+        if user.get("name") and not user.get("name_legacy"):
+            user_promotion["name_legacy"] = user.get("name")
+    # CPF (com validacao previa)
+    cpf_raw = (clean.get("cpf") or "").strip()
+    if cpf_raw:
+        cpf_digits = "".join(c for c in cpf_raw if c.isdigit())
+        # Checa colisao com terceiro user (raro)
+        existing = await db.users.find_one(
+            {"cpf_digits": cpf_digits, "user_id": {"$ne": user["user_id"]}},
+            {"_id": 0, "user_id": 1},
+        ) if cpf_digits else None
+        if not existing:
+            user_promotion["cpf"] = cpf_raw
+            user_promotion["cpf_digits"] = cpf_digits
+    # Data de nascimento
+    bdate = (clean.get("birth_date") or clean.get("data_nascimento") or "").strip()
+    if bdate:
+        user_promotion["birth_date"] = bdate
+    # Nome da mae
+    mname = (clean.get("mother_name") or clean.get("nome_mae") or "").strip()
+    if mname:
+        user_promotion["mother_name"] = mname
+    # Telefone (se enrollment trouxer e user nao tiver)
+    phone_form = (clean.get("phone") or clean.get("telefone") or clean.get("celular") or "").strip()
+    if phone_form and not user.get("phone"):
+        user_promotion["phone"] = phone_form
+        user_promotion["phone_digits"] = "".join(c for c in phone_form if c.isdigit())
+
+    # Endereco: se enrollment trouxer cep/rua/numero/cidade/uf, monta address
+    # e adiciona ao array `addresses` SE o user ainda nao tem nenhum.
+    addr_keys = {
+        "zip_code": ["cep", "zip", "zip_code", "postal_code"],
+        "street": ["rua", "street", "endereco", "logradouro"],
+        "number": ["numero", "number"],
+        "neighborhood": ["bairro", "neighborhood"],
+        "city": ["cidade", "city", "municipio"],
+        "state": ["uf", "state", "estado"],
+        "complement": ["complemento", "complement", "apto"],
+    }
+    addr = {}
+    for canonical, aliases in addr_keys.items():
+        for a in aliases:
+            v = clean.get(a)
+            if v:
+                addr[canonical] = str(v).strip()
+                break
+    has_min = addr.get("zip_code") or (addr.get("street") and addr.get("city"))
+    if has_min and not user.get("addresses"):
+        user_promotion["addresses"] = [{
+            "address_id": str(uuid.uuid4()),
+            "label": "Programa de Beneficios",
+            "street": addr.get("street") or "",
+            "number": addr.get("number") or "",
+            "neighborhood": addr.get("neighborhood") or "",
+            "city": addr.get("city") or "",
+            "state": addr.get("state") or "",
+            "zip_code": addr.get("zip_code") or "",
+            "complement": addr.get("complement") or "",
+        }]
+
     # Cria solicitacao em estado PENDING_APPROVAL (admin precisa aprovar)
-    await db.users.update_one(
-        {"user_id": user["user_id"]},
-        {"$set": {
-            "referral_program_active": False,
-            "referral_enrollment": clean,
-            "referral_enrollment_status": "pending_approval",
-            "referral_enrollment_submitted_at": now_iso(),
-        }, "$unset": {"referral_code": "", "referral_enrolled_at": "", "referral_rejected_reason": ""}},
-    )
+    set_block = {
+        "referral_program_active": False,
+        "referral_enrollment": clean,
+        "referral_enrollment_status": "pending_approval",
+        "referral_enrollment_submitted_at": now_iso(),
+        **user_promotion,
+    }
+    try:
+        await db.users.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": set_block, "$unset": {"referral_code": "", "referral_enrolled_at": "", "referral_rejected_reason": ""}},
+        )
+    except Exception as e:
+        # Se o auto-promote causou colisao de cpf/phone, tenta sem essas chaves
+        logger.warning(f"submit_referral_enrollment auto-promote colidiu, repete sem cpf/phone: {e}")
+        for k in ("cpf", "cpf_digits", "phone", "phone_digits"):
+            set_block.pop(k, None)
+        await db.users.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": set_block, "$unset": {"referral_code": "", "referral_enrolled_at": "", "referral_rejected_reason": ""}},
+        )
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
     return {
         "ok": True,
         "status": "pending_approval",
         "message": "Sua adesão foi enviada e está aguardando aprovação do administrador.",
         "enrollment": clean,
+        "promoted_to_profile": sorted(list(user_promotion.keys())),
         "user": u,
     }
 

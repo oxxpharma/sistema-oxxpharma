@@ -22,7 +22,43 @@ function applyMask(value, mask) {
   if (mask === 'cep') {
     return d.slice(0, 8).replace(/(\d{5})(\d{1,3})$/, '$1-$2');
   }
+  if (mask === 'date' || mask === 'birthdate') {
+    return d.slice(0, 8)
+      .replace(/(\d{2})(\d)/, '$1/$2')
+      .replace(/(\d{2})\/(\d{2})(\d)/, '$1/$2/$3');
+  }
   return value;
+}
+
+// Validacao de CPF (digitos verificadores)
+function isValidCpf(cpf) {
+  if (!cpf) return false;
+  const d = String(cpf).replace(/\D/g, '');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  let s = 0;
+  for (let i = 0; i < 9; i++) s += parseInt(d[i]) * (10 - i);
+  let r = (s * 10) % 11;
+  if (r === 10) r = 0;
+  if (r !== parseInt(d[9])) return false;
+  s = 0;
+  for (let i = 0; i < 10; i++) s += parseInt(d[i]) * (11 - i);
+  r = (s * 10) % 11;
+  if (r === 10) r = 0;
+  return r === parseInt(d[10]);
+}
+
+// Validacao de data DD/MM/AAAA
+function isValidBirthDate(s) {
+  if (!s) return false;
+  const m = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return false;
+  const [, dd, mm, yyyy] = m;
+  const d = parseInt(dd), mo = parseInt(mm), y = parseInt(yyyy);
+  if (y < 1900 || y > new Date().getFullYear()) return false;
+  if (mo < 1 || mo > 12) return false;
+  if (d < 1 || d > 31) return false;
+  const dt = new Date(y, mo - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
 }
 
 export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
@@ -48,11 +84,24 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    // Validar required
+    // Validar required + CPF + data
     for (const f of fields) {
-      if (f.required && !String(values[f.key] || '').trim()) {
+      const val = String(values[f.key] || '').trim();
+      if (f.required && !val) {
         toast.error(`Preencha o campo: ${f.label}`);
         return;
+      }
+      if (val) {
+        const isCpfField = f.mask === 'cpf' || /^cpf$/i.test(f.key);
+        if (isCpfField && !isValidCpf(val)) {
+          toast.error(`CPF inválido em "${f.label}"`);
+          return;
+        }
+        const isDateField = f.type === 'date' || /^(birth_?date|data_?nascimento|data_de_nascimento|nascimento)$/i.test(f.key);
+        if (isDateField && !isValidBirthDate(val)) {
+          toast.error(`Data inválida em "${f.label}" (use DD/MM/AAAA)`);
+          return;
+        }
       }
     }
     setSubmitting(true);
@@ -111,14 +160,21 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
 }
 
 function FieldRenderer({ field, value, onChange }) {
+  // Detecta se eh campo de data de nascimento (mesmo se tipo=date)
+  const isDateField = field.type === 'date' || /^(birth_?date|data_?nascimento|data_de_nascimento|nascimento)$/i.test(field.key);
+  const isCpfField = field.mask === 'cpf' || /^cpf$/i.test(field.key);
+
   const common = {
     value: value || '',
     onChange: (e) => {
       const v = e.target.value;
-      onChange(field.mask ? applyMask(v, field.mask) : v);
+      const effMask = isDateField ? 'date' : field.mask;
+      onChange(effMask ? applyMask(v, effMask) : v);
     },
     required: !!field.required,
-    placeholder: field.placeholder || '',
+    placeholder: isDateField ? 'DD/MM/AAAA' : (field.placeholder || ''),
+    inputMode: (isDateField || isCpfField) ? 'numeric' : undefined,
+    maxLength: isDateField ? 10 : (isCpfField ? 14 : undefined),
     className: 'w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:border-brand-main text-sm',
     'data-testid': `enroll-field-${field.key}`,
   };
@@ -150,12 +206,14 @@ function FieldRenderer({ field, value, onChange }) {
     );
   }
 
+  // Datas usam text com mascara (em vez de input type=date com calendario)
+  const inputType = isDateField ? 'text' : (field.type || 'text');
   return (
     <div>
       <label className="text-xs font-semibold text-txt-primary mb-1 block">
         {field.label}{field.required && ' *'}
       </label>
-      <input type={field.type || 'text'} {...common} />
+      <input type={inputType} {...common} />
       {field.help && <div className="text-xs text-txt-secondary mt-1">{field.help}</div>}
     </div>
   );
