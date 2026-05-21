@@ -249,7 +249,31 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 6. Templates de email específicos: clonar template global no admin e marcar tenant=pharmakon (para personalizar).
 
 
-## Iter 42o (Fev/2026): P0 (merge-users + varredura na rede) + P1 (aprovação auto + dashboard top produtos + fix top10 + editor email rico)
+## Iter 44 (Fev/2026): Aparência por marca (multi-tenant cosmético completo)
+
+### Contexto / Problema
+Após a Iter 43 introduzir o backbone multi-tenant (OxxPharma + Pharmakon), a página de Aparência continuava global — logos, banner, cores, rodapé e textos eram compartilhados. Resultado: a Pharmakon herdava a logo da OxxPharma e a aba "Logo por local" só permitia configurar um conjunto.
+
+### Solução
+- **Backend**: `db.settings` agora armazena um documento por marca (`{_id: "site:<tenant_id>"}`). `_get_site_settings(db, tenant_id)` resolve o doc da marca; quando o tenant é o primário e ainda não existe doc novo, faz **fallback automático para o doc legado `{_id: "site"}`** (zero migração para a OxxPharma). Tenants secundários sem doc próprio recebem `DEFAULT_SITE_SETTINGS` — **não herdam** da OxxPharma, evitando logos iguais.
+- **Endpoints**:
+  - `GET /api/site-settings` → usa `request.state.tenant` (resolvido pelo Host).
+  - `GET /api/admin/site-settings?tenant=<id>` → admin escolhe explicitamente qual marca ler.
+  - `PUT /api/admin/site-settings?tenant=<id>` → grava em `{_id: "site:<id>"}`. No primeiro PUT da OxxPharma, **migra o doc legado** para `{_id: "site:oxxpharma"}` antes de aplicar o patch (zero perda de dados).
+- **Callers internos** (checkout, calculate-shipping) passam `tenant_service.get_tenant(request)` — frete grátis e provider de envio podem variar por marca.
+- **Frontend `AdminAppearance.jsx`**: barra superior com pills das marcas ("Editando aparência de: [OxxPharma] [Pharmakon]"). Selecionar uma marca recarrega settings com `?tenant=`. O Save envia `?tenant=`. Persistência da marca ativa em `localStorage.appearance_tenant`.
+
+### Arquivos
+- `backend/server.py` — `_get_site_settings`, GET/PUT site-settings, 3 callers internos atualizados.
+- `frontend/src/pages/backoffice/AdminAppearance.jsx` — barra de marcas + load/save tenant-aware.
+
+### Como testar manualmente
+1. `/backoffice/aparencia` → ver pill "OxxPharma · principal" selecionada + valores históricos preservados.
+2. Clicar em "Pharmakon" → logos vazias, cores default azul, sliders no padrão. Configurar e Salvar.
+3. Voltar para OxxPharma → continua com os valores antigos (independentes).
+4. Acessar `pharmakon.com.br` (ou `?as_tenant=pharmakon`) → loja pública pega `/api/site-settings` da Pharmakon.
+
+
 
 ### P0 — Fix merge-users (E11000 com terceiro) + Varredura na rede
 - **Fix bug merge-users**: o check de colisão de email só validava se o email do drop colidia com um keep/drop, mas ignorava colisão case-insensitive e os outros campos com índice único (`cpf_digits`, `phone_digits`, `external_id`, `referral_code`). Agora cada campo com índice único é verificado contra **TERCEIROS users**; em caso de colisão, o campo é **PULADO** (mantém o do keep) em vez de quebrar com 500. Resposta da API agora inclui `skipped_due_collision` listando quais campos foram preservados e qual user é o "dono" do valor em conflito. UI mostra warning amarelo de 10s.

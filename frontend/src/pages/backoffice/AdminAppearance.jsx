@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
@@ -47,28 +47,48 @@ export default function AdminAppearance() {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('identity');
   const [userCategories, setUserCategories] = useState([]);
+  // Iter 44: aparencia por marca. Carrega tenants e escolhe um pra editar.
+  const [tenants, setTenants] = useState([]);
+  const [editingTenant, setEditingTenant] = useState(
+    () => localStorage.getItem('appearance_tenant') || ''
+  );
 
-  const load = async () => {
+  const load = async (tid) => {
+    setLoading(true);
     try {
-      const [settings, ucs] = await Promise.all([
-        api.get('/api/site-settings'),
+      const [tenantsResp, ucs] = await Promise.all([
+        api.get('/api/admin/tenants').catch(() => ({ items: [] })),
         api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
       ]);
+      const list = tenantsResp.items || [];
+      setTenants(list);
+      // Resolve tenant ativo
+      const stored = localStorage.getItem('appearance_tenant') || '';
+      const resolved = tid || stored || (list.find(x => x.is_primary)?.tenant_id) || list[0]?.tenant_id || 'oxxpharma';
+      setEditingTenant(resolved);
+      localStorage.setItem('appearance_tenant', resolved);
+      const settings = await api.get(`/api/admin/site-settings?tenant=${encodeURIComponent(resolved)}`);
       setS(settings);
       setUserCategories(ucs.categories || []);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-line */ }, []);
+
+  const switchTenant = async (tid) => {
+    if (tid === editingTenant) return;
+    localStorage.setItem('appearance_tenant', tid);
+    await load(tid);
+  };
 
   const set = (k, v) => setS(p => ({ ...p, [k]: v }));
 
   const save = async () => {
     setSaving(true);
     try {
-      const payload = { ...s }; delete payload.updated_at;
-      await api.put('/api/admin/site-settings', payload);
-      toast.success('Aparência salva!');
-      await load();
+      const payload = { ...s }; delete payload.updated_at; delete payload.tenant_id;
+      await api.put(`/api/admin/site-settings?tenant=${encodeURIComponent(editingTenant)}`, payload);
+      toast.success(`Aparência salva para ${tenants.find(t => t.tenant_id === editingTenant)?.name || editingTenant}!`);
+      await load(editingTenant);
       // invalida cache global do useSiteSettings → favicon, logos e título reagem na hora
       await refreshSiteSettings();
     } catch (e) { toast.error(e?.message); }
@@ -147,7 +167,7 @@ export default function AdminAppearance() {
 
   return (
     <div data-testid="admin-appearance">
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="font-heading font-black text-2xl flex items-center gap-3">
             <Palette className="w-7 h-7 text-brand-main" /> Aparência da Loja
@@ -158,6 +178,38 @@ export default function AdminAppearance() {
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
         </Button>
       </div>
+
+      {tenants.length > 1 && (
+        <div className="mb-5 rounded-2xl border-2 p-4 bg-white" style={{ borderColor: tenants.find(t => t.tenant_id === editingTenant)?.theme?.primary_color || '#E8731A' }} data-testid="appearance-tenant-bar">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Store className="w-5 h-5 text-txt-secondary" />
+            <div className="text-sm font-semibold">Editando aparência de:</div>
+            <div className="flex flex-wrap gap-2">
+              {tenants.map(t => {
+                const isActive = t.tenant_id === editingTenant;
+                const color = t?.theme?.primary_color || '#666';
+                return (
+                  <button
+                    key={t.tenant_id}
+                    type="button"
+                    onClick={() => switchTenant(t.tenant_id)}
+                    className="px-3 py-1.5 rounded-full border-2 text-sm font-bold transition"
+                    style={{ borderColor: color, color: isActive ? 'white' : color, background: isActive ? color : 'white' }}
+                    data-testid={`appearance-switch-${t.tenant_id}`}
+                  >
+                    <span className="inline-block w-2 h-2 rounded-full mr-2 align-middle" style={{ background: isActive ? 'white' : color }} />
+                    {t.name}{t.is_primary ? ' · principal' : ''}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="ml-auto flex items-start gap-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 max-w-md">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>Cada marca tem sua própria identidade visual, logos por local, banner, rodapé e textos. Salve para aplicar somente nesta marca.</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 mb-6 border-b border-border overflow-x-auto">
         {TABS.map(t => (

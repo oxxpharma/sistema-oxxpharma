@@ -1095,7 +1095,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                 "height_cm": prod.get("height_cm") if prod else None,
                 "quantity": it["quantity"],
             })
-        fs_settings_tmp = await _get_site_settings(db)
+        fs_settings_tmp = await _get_site_settings(db, tenant_service.get_tenant(request))
         provider = (fs_settings_tmp.get("shipping_provider") or "correios").lower()
         try:
             if provider == "melhorenvio":
@@ -1124,7 +1124,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         shipping = 0.0  # Em ultimo caso, evita cobrar valor fantasma
 
     # Aplica frete grátis se configurado em site_settings (espelha regras publicas)
-    fs_settings = await _get_site_settings(db)
+    fs_settings = await _get_site_settings(db, tenant_service.get_tenant(request))
     fs_label_default = fs_settings.get("free_shipping_label") or "Frete grátis"
     apply_free, _ = _evaluate_free_shipping(fs_settings, user, subtotal)
     if apply_free:
@@ -5441,7 +5441,7 @@ async def public_calculate_shipping(request: Request):
                 pass
 
     result = None
-    settings = await _get_site_settings(db)
+    settings = await _get_site_settings(db, tenant_service.get_tenant(request))
     provider = (settings.get("shipping_provider") or "correios").lower()
 
     # Roteamento por provider
@@ -5922,27 +5922,62 @@ DEFAULT_SITE_SETTINGS = {
 }
 
 
-async def _get_site_settings(db) -> dict:
-    s = await db.settings.find_one({"_id": "site"}) or {}
+async def _get_site_settings(db, tenant_id: Optional[str] = None) -> dict:
+    """Iter 44: site_settings agora eh por tenant. Doc primario: {_id: "site:<tid>"}.
+    Fallback: doc legado {_id: "site"} (interpretado como settings do tenant primario).
+    Tenants secundarios que ainda nao tem doc proprio recebem os DEFAULTS (nao
+    herdam de oxxpharma, evitando logos iguais entre marcas).
+    """
+    tid = (tenant_id or tenant_service.DEFAULT_TENANT).lower()
+    doc_id = f"site:{tid}"
+    s = await db.settings.find_one({"_id": doc_id})
+    if not s and tid == tenant_service.DEFAULT_TENANT:
+        # Migracao lazy: legado {_id: "site"} -> {_id: "site:oxxpharma"}
+        s = await db.settings.find_one({"_id": "site"}) or {}
     out = {**DEFAULT_SITE_SETTINGS}
-    for k, v in s.items():
+    for k, v in (s or {}).items():
         if k != "_id":
             out[k] = v
+    out["tenant_id"] = tid
     return out
 
 
 @app.get("/api/site-settings")
 async def public_site_settings(request: Request):
-    return await _get_site_settings(request.app.db)
+    tid = tenant_service.get_tenant(request)
+    return await _get_site_settings(request.app.db, tid)
+
+
+@app.get("/api/admin/site-settings")
+async def admin_get_site_settings(request: Request, user: dict = Depends(require_admin())):
+    """Iter 44: GET admin retorna settings da marca selecionada (via X-Tenant ou ?tenant=).
+    Se nao houver selecao explicita, retorna o tenant primario."""
+    db = request.app.db
+    sel = (request.query_params.get("tenant") or request.headers.get("x-tenant") or "").strip().lower()
+    tid = sel if sel and sel != "all" else tenant_service.DEFAULT_TENANT
+    return await _get_site_settings(db, tid)
 
 
 @app.put("/api/admin/site-settings")
 async def admin_site_settings(request: Request, user: dict = Depends(require_super_admin())):
     body = await request.json() or {}
+    body.pop("tenant_id", None)
     body["updated_at"] = now_iso()
     db = request.app.db
-    await db.settings.update_one({"_id": "site"}, {"$set": body}, upsert=True)
-    return await _get_site_settings(db)
+    sel = (request.query_params.get("tenant") or request.headers.get("x-tenant") or "").strip().lower()
+    tid = sel if sel and sel != "all" else tenant_service.DEFAULT_TENANT
+    doc_id = f"site:{tid}"
+    # Migracao lazy: se for o tenant primario e nao houver doc novo ainda, semeia
+    # com o doc legado (para nao perder configs antigas).
+    if tid == tenant_service.DEFAULT_TENANT:
+        new_doc = await db.settings.find_one({"_id": doc_id})
+        if not new_doc:
+            legacy = await db.settings.find_one({"_id": "site"}) or {}
+            legacy = {k: v for k, v in legacy.items() if k != "_id"}
+            if legacy:
+                await db.settings.update_one({"_id": doc_id}, {"$set": legacy}, upsert=True)
+    await db.settings.update_one({"_id": doc_id}, {"$set": body}, upsert=True)
+    return await _get_site_settings(db, tid)
 
 
 @app.post("/api/admin/upload-image")
