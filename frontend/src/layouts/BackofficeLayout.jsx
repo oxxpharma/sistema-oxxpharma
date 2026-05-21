@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
-  GitMerge, Calculator,
+  GitMerge, Calculator, LayoutGrid,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -61,6 +61,7 @@ const NAV_GROUPS = [
     label: 'Conteúdo',
     items: [
       { to: '/backoffice/aparencia', icon: Palette, label: 'Aparência', testId: 'nav-appearance', perm: 'integrations' },
+      { to: '/backoffice/page-builder', icon: LayoutGrid, label: 'Page Builder', testId: 'nav-page-builder', perm: 'integrations' },
       { to: '/backoffice/paginas', icon: FileEdit, label: 'Páginas (CMS)', testId: 'nav-pages', perm: 'integrations' },
     ],
   },

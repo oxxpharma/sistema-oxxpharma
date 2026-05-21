@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import ProductCard from '../../components/store/ProductCard';
 import HeroCarousel from '../../components/store/HeroCarousel';
+import DynamicBlocks from '../../components/store/DynamicBlocks';
 import { Loader2, ArrowRight, Pill, Baby, Heart, Sparkles, Droplets, Leaf } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 
@@ -22,12 +23,25 @@ export default function StoreHome() {
   const [products, setProducts] = useState([]);
   const [featured, setFeatured] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Iter 43.5: layout dinamico do Page Builder
+  const [pageLayout, setPageLayout] = useState(null);
   const settings = useSiteSettings();
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
+        // Tenta carregar layout dinamico para slug=home do tenant atual
+        if (!categoryFilter) {
+          try {
+            const layout = await api.get('/api/pages/home');
+            if (layout && Array.isArray(layout.blocks) && layout.blocks.length > 0 && !layout.is_default) {
+              setPageLayout(layout);
+              setLoading(false);
+              return;
+            }
+          } catch { /* fallback abaixo */ }
+        }
         const [cats, prods, feat] = await Promise.all([
           api.get('/api/categories'),
           api.get(`/api/products?limit=24${categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''}`),
@@ -44,6 +58,13 @@ export default function StoreHome() {
 
   return (
     <div data-testid="store-home">
+      {/* Iter 43.5: Se houver layout dinamico publicado, renderiza no lugar do default */}
+      {pageLayout && pageLayout.blocks?.length > 0 ? (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <DynamicBlocks blocks={pageLayout.blocks} />
+        </div>
+      ) : (
+      <>
       {/* Hero - carrossel multi-slide (com fallback retrocompativel para banner unico) */}
       {!categoryFilter && (() => {
         const slides = (settings?.hero_slides && settings.hero_slides.length > 0)
@@ -117,6 +138,8 @@ export default function StoreHome() {
           </div>
         )}
       </section>
+      </>
+      )}
     </div>
   );
 }

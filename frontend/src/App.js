@@ -4,6 +4,7 @@ import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RefProvider } from './contexts/RefContext';
 import { TenantProvider } from './contexts/TenantContext';
+import TenantPreviewBanner from './components/admin/TenantPreviewBanner';
 import { CartProvider } from './contexts/CartContext';
 import BrandHead from './components/branding/BrandHead';
 import ImpersonationBanner from './components/ImpersonationBanner';
@@ -48,6 +49,7 @@ import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
 import AdminInvoices from './pages/backoffice/AdminInvoices';
 import AdminEmails from './pages/backoffice/AdminEmails';
 import AdminTenants from './pages/backoffice/AdminTenants';
+import AdminPageBuilder from './pages/backoffice/AdminPageBuilder';
 import AdminWebhook from './pages/backoffice/AdminWebhook';
 import AdminGiftCards from './pages/backoffice/AdminGiftCards';
 import AdminPoints from './pages/backoffice/AdminPoints';
@@ -151,6 +153,7 @@ function AppRoutes() {
         <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="emails" element={<AdminEmails />} />
         <Route path="marcas" element={<AdminTenants />} />
+        <Route path="page-builder" element={<AdminPageBuilder />} />
         <Route path="webhook" element={<AdminWebhook />} />
         <Route path="configuracoes" element={<AdminSettings />} />
       </Route>
@@ -169,6 +172,7 @@ export default function App() {
             <CartProvider>
               <BrandHead />
               <ImpersonationBanner />
+              <TenantPreviewBanner />
               <AppRoutes />
               <Toaster richColors position="top-right" />
             </CartProvider>

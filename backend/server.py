@@ -561,6 +561,133 @@ async def admin_set_brands_unified(request: Request, user: dict = Depends(requir
     await tenant_service.reload_cache(db)
     return {"enabled": enabled}
 
+
+# ==================== PAGE BUILDER (Iter 43.5) ====================
+# Layouts publicaveis por tenant. Coleção `page_layouts`:
+# { layout_id, tenant_id, slug, blocks: [{id, type, props}], published, updated_at }
+# Tipos de bloco suportados: hero, hero_carousel, section_title, product_grid,
+# category_grid, text, image, cta_banner, divider, html.
+
+VALID_BLOCK_TYPES = {"hero", "hero_carousel", "section_title", "product_grid",
+                     "category_grid", "text", "image", "cta_banner", "divider", "html",
+                     "spacer"}
+
+
+def _default_home_blocks() -> list:
+    return [
+        {"id": gen_id("blk_"), "type": "hero", "props": {
+            "title": "Saúde e bem-estar na sua porta.",
+            "subtitle": "Os melhores suplementos e dermocosméticos com entrega rápida.",
+            "cta_label": "Ver produtos", "cta_link": "/loja",
+            "image_url": "", "tagline": "Frete grátis acima de R$ 199",
+        }},
+        {"id": gen_id("blk_"), "type": "section_title", "props": {
+            "title": "Em destaque",
+            "subtitle": "Selecionados pelos nossos especialistas",
+        }},
+        {"id": gen_id("blk_"), "type": "product_grid", "props": {
+            "source": "featured", "limit": 8, "columns": 4,
+        }},
+        {"id": gen_id("blk_"), "type": "section_title", "props": {
+            "title": "Categorias", "subtitle": "Encontre o que você precisa",
+        }},
+        {"id": gen_id("blk_"), "type": "category_grid", "props": {"limit": 6}},
+    ]
+
+
+@app.get("/api/pages/{slug}")
+async def public_get_page(request: Request, slug: str):
+    """Retorna o layout publicado da pagina para o tenant resolvido por Host/X-Tenant.
+    Se nao houver layout salvo, cria default minimo (apenas para slug='home')."""
+    db = request.app.db
+    tid = tenant_service.get_tenant(request)
+    doc = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug, "published": True}, {"_id": 0})
+    if not doc and slug == "home":
+        return {"tenant_id": tid, "slug": slug, "blocks": _default_home_blocks(), "is_default": True}
+    if not doc:
+        return {"tenant_id": tid, "slug": slug, "blocks": [], "is_default": True}
+    return doc
+
+
+@app.get("/api/admin/pages/{slug}")
+async def admin_get_page(request: Request, slug: str, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
+    db = request.app.db
+    tid = (tenant or request.headers.get("x-tenant") or tenant_service.DEFAULT_TENANT).strip().lower()
+    doc = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug}, {"_id": 0})
+    if not doc:
+        doc = {
+            "layout_id": gen_id("lay_"),
+            "tenant_id": tid,
+            "slug": slug,
+            "blocks": _default_home_blocks() if slug == "home" else [],
+            "published": False,
+            "updated_at": now_iso(),
+        }
+    return doc
+
+
+@app.put("/api/admin/pages/{slug}")
+async def admin_save_page(request: Request, slug: str, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
+    db = request.app.db
+    body = await request.json() or {}
+    tid = (tenant or request.headers.get("x-tenant") or tenant_service.DEFAULT_TENANT).strip().lower()
+    blocks = body.get("blocks") or []
+    # Sanitiza blocos
+    clean_blocks = []
+    for b in blocks:
+        btype = b.get("type")
+        if btype not in VALID_BLOCK_TYPES:
+            continue
+        clean_blocks.append({
+            "id": b.get("id") or gen_id("blk_"),
+            "type": btype,
+            "props": b.get("props") or {},
+        })
+    payload = {
+        "tenant_id": tid,
+        "slug": slug,
+        "blocks": clean_blocks,
+        "published": bool(body.get("published")),
+        "updated_at": now_iso(),
+    }
+    existing = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug})
+    if existing:
+        await db.page_layouts.update_one({"tenant_id": tid, "slug": slug}, {"$set": payload})
+    else:
+        payload["layout_id"] = gen_id("lay_")
+        payload["created_at"] = now_iso()
+        await db.page_layouts.insert_one(payload)
+    return await db.page_layouts.find_one({"tenant_id": tid, "slug": slug}, {"_id": 0})
+
+
+@app.get("/api/pages/_resolve/product-list")
+async def public_resolve_product_list(request: Request, source: str = "featured",
+                                      category: Optional[str] = None, limit: int = 8,
+                                      product_ids: Optional[str] = None):
+    """Resolve uma lista de produtos para o block product_grid baseado em filtros.
+    source: featured | discount | newest | category | manual."""
+    db = request.app.db
+    _tenant = tenant_service.get_tenant(request)
+    user = await get_optional_user(request)
+    limit = max(1, min(int(limit or 8), 24))
+    q = {"active": True}
+    if source == "category" and category:
+        q["category"] = category
+    elif source == "featured":
+        q["featured"] = True
+    elif source == "discount":
+        q["discount_price"] = {"$ne": None, "$gt": 0}
+    elif source == "manual" and product_ids:
+        ids = [p.strip() for p in product_ids.split(",") if p.strip()]
+        q["product_id"] = {"$in": ids}
+    sort_field = "created_at" if source == "newest" else None
+    cursor = db.products.find(q, {"_id": 0})
+    if sort_field:
+        cursor = cursor.sort(sort_field, -1)
+    prods = await cursor.limit(limit).to_list(limit)
+    prods = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in prods]
+    return {"products": prods}
+
 # ==================== AUTH ====================
 
 @app.post("/api/auth/register")

@@ -150,9 +150,19 @@ oxxpharma.com.br"
           <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
           Marca ativa
         </label>
-        <Button onClick={save} size="sm" data-testid={`save-tenant-${tenant.tenant_id}`}>
-          <Save className="w-4 h-4" /> Salvar
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(`/?as_tenant=${tenant.tenant_id}`, '_blank')}
+            data-testid={`preview-tenant-${tenant.tenant_id}`}
+          >
+            Ver site como {tenant.name}
+          </Button>
+          <Button onClick={save} size="sm" data-testid={`save-tenant-${tenant.tenant_id}`}>
+            <Save className="w-4 h-4" /> Salvar
+          </Button>
+        </div>
       </div>
     </div>
   );
