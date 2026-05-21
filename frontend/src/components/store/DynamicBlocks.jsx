@@ -23,6 +23,7 @@ function BlockRouter({ block }) {
   const t = block.type;
   const p = block.props || {};
   if (t === 'hero') return <HeroBlock {...p} />;
+  if (t === 'hero_carousel') return <HeroCarouselBlock {...p} />;
   if (t === 'section_title') return <SectionTitle {...p} />;
   if (t === 'product_grid') return <ProductGridBlock {...p} />;
   if (t === 'category_grid') return <CategoryGridBlock {...p} />;
@@ -33,6 +34,57 @@ function BlockRouter({ block }) {
   if (t === 'spacer') return <div style={{ height: `${p.height || 40}px` }} />;
   if (t === 'html') return <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: p.html || '' }} />;
   return null;
+}
+
+function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true }) {
+  const [idx, setIdx] = useState(0);
+  const count = slides.length;
+
+  useEffect(() => {
+    if (!count || !autoplay_seconds || autoplay_seconds <= 0) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % count), autoplay_seconds * 1000);
+    return () => clearInterval(t);
+  }, [count, autoplay_seconds]);
+
+  if (!count) return null;
+  const cur = slides[Math.min(idx, count - 1)] || slides[0];
+  const overlay = cur.overlay_opacity ?? 0.4;
+
+  return (
+    <section
+      className="relative rounded-2xl overflow-hidden text-white min-h-[280px] sm:min-h-[360px] flex items-center transition-[background] duration-700"
+      style={{
+        background: cur.image_url
+          ? `linear-gradient(135deg, rgba(0,0,0,${overlay}), rgba(0,0,0,${overlay})), url("${cur.image_url}") center/cover`
+          : 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
+      }}
+      data-testid="hero-carousel"
+    >
+      <div className="px-6 sm:px-10 py-10 sm:py-16 max-w-2xl">
+        <h1 className="font-heading font-black text-2xl sm:text-4xl md:text-5xl leading-tight">{cur.title}</h1>
+        {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{cur.subtitle}</p>}
+        {cur.cta_label && cur.cta_link && (
+          <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base mt-5 hover:bg-white/90">
+            {cur.cta_label} <ArrowRight className="w-4 h-4" />
+          </Link>
+        )}
+      </div>
+
+      {show_dots && count > 1 && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2" data-testid="hero-carousel-dots">
+          {slides.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setIdx(i)}
+              aria-label={`Ir para slide ${i + 1}`}
+              className={`w-2 h-2 rounded-full transition ${i === idx ? 'bg-white w-6' : 'bg-white/50 hover:bg-white/80'}`}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, overlay_opacity = 0.4 }) {

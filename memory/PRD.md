@@ -249,7 +249,7 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 6. Templates de email específicos: clonar template global no admin e marcar tenant=pharmakon (para personalizar).
 
 
-## Iter 44 (Fev/2026): Aparência por marca (multi-tenant cosmético completo)
+## Iter 44 (Fev/2026): Aparência por marca + Page Builder com carrossel e upload
 
 ### Contexto / Problema
 Após a Iter 43 introduzir o backbone multi-tenant (OxxPharma + Pharmakon), a página de Aparência continuava global — logos, banner, cores, rodapé e textos eram compartilhados. Resultado: a Pharmakon herdava a logo da OxxPharma e a aba "Logo por local" só permitia configurar um conjunto.
@@ -272,6 +272,12 @@ Após a Iter 43 introduzir o backbone multi-tenant (OxxPharma + Pharmakon), a p�
 2. Clicar em "Pharmakon" → logos vazias, cores default azul, sliders no padrão. Configurar e Salvar.
 3. Voltar para OxxPharma → continua com os valores antigos (independentes).
 4. Acessar `pharmakon.com.br` (ou `?as_tenant=pharmakon`) → loja pública pega `/api/site-settings` da Pharmakon.
+
+### Page Builder: bloco `hero_carousel` + upload de imagem
+- Novo bloco **Banner Carrossel** na biblioteca: lista de slides (título, subtítulo, imagem, CTA, link, escurecimento) + `autoplay_seconds` e `show_dots` no nível do bloco.
+- Renderer `HeroCarouselBlock` em `DynamicBlocks.jsx`: troca automática de slides (autoplay configurável, 0 = manual), indicadores clicáveis, transição CSS de background.
+- Backend `VALID_BLOCK_TYPES` já aceitava `hero_carousel` (incluído na lista do startup).
+- **Componente `ImageUploadField`** (botão "Enviar imagem" + preview + campo URL alternativo) substituiu os campos URL nos blocos `hero`, `image` e em cada slide do carrossel. Upload via `/api/admin/upload-image` (mesmo endpoint usado pela aba Aparência).
 
 
 
