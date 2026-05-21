@@ -22,11 +22,16 @@ function getToken() {
 
 async function request(path, { method = 'GET', body, headers = {}, ...rest } = {}) {
   const token = getToken();
+  // Iter 43: backoffice escolhe tenant ativo via dropdown — guardado em localStorage
+  // 'admin_tenant'. Frontend publico nao seta esse valor (deixa o backend resolver pelo Host).
+  const adminTenant = localStorage.getItem('admin_tenant');
+  const tenantHeader = adminTenant && adminTenant !== 'all' ? { 'X-Tenant': adminTenant } : {};
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...tenantHeader,
       ...headers,
     },
     credentials: 'include',

@@ -208,6 +208,38 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 - Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
 - Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
 
+## Iter 43 (Fev/2026): Multi-tenant — Fase 1 (Backbone OxxPharma + Pharmakon) + SKU/EAN
+
+### Arquitetura
+- **1 banco MongoDB, 1 deploy, 1 codebase** — isolamento por campo `tenant` em orders, carts, commissions, points_log, payment_webhook_logs, coupons, vouchers.
+- **Compartilhados**: users, products, categories, network MMN, pagamentos, frete.
+- **Tenant detection**: middleware lê `Host` → mapeia via coleção `tenants` (cache). Header `X-Tenant` override no admin.
+- **Toggle de fusão**: `brands_unified` em settings → quando true, força tenant=oxxpharma para todo tráfego.
+
+### Novos endpoints
+- `GET /api/tenant/current` (público) — frontend renderiza tema/nome.
+- `GET/PUT /api/admin/tenants[/<id>]` — CRUD de marcas.
+- `PUT /api/admin/brands-unified` — liga/desliga fusão.
+
+### Endpoints existentes adaptados
+- `/api/admin/dashboard?tenant=X` — filtra por marca.
+- `/api/admin/orders?tenant=X` — idem.
+- `/api/checkout` → order doc carrega `tenant`. `compute_order_commissions` propaga para cada comissão.
+- `/api/auth/register` → user ganha `home_tenant`.
+- `/api/products|/{id}|/cart` aplicam `price_by_tenant[tenant]` (override de preço por marca).
+
+### Frontend
+- `lib/api.js` envia `X-Tenant` quando admin escolhe marca no `TenantSwitcher`.
+- Novo `/backoffice/marcas`: toggle de fusão + edição de cada tenant (nome, cor, logo, domínios, email, label do programa).
+- `AdminProducts` ganha campos **SKU**, **EAN** + bloco "Preço por marca".
+
+### SKU + EAN no email de faturamento
+- Resumo do pedido enviado para financeiro inclui SKU/EAN como subtítulo de cada item.
+
+### Testes
+- `test_iter43_multi_tenant_backbone.py` (6 testes — PASS).
+
+
 ## Iter 42o (Fev/2026): P0 (merge-users + varredura na rede) + P1 (aprovação auto + dashboard top produtos + fix top10 + editor email rico)
 
 ### P0 — Fix merge-users (E11000 com terceiro) + Varredura na rede

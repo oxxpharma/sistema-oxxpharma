@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
+import TenantSwitcher from '../components/admin/TenantSwitcher';
 
 // ====== Menu agrupado em seções ======
 // perm: chave no objeto `can` do AuthContext. Sem `perm` => visível para todo admin.
@@ -78,6 +79,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/usuarios', icon: Users, label: 'Usuários', testId: 'nav-users', perm: 'commercial' },
       { to: '/backoffice/usuarios/duplicados', icon: GitMerge, label: 'Fundir duplicatas', testId: 'nav-merge-users', perm: 'manageRoles' },
       { to: '/backoffice/categorias-usuarios', icon: Tag, label: 'Cat. de usuários', testId: 'nav-user-categories', perm: 'commercial' },
+      { to: '/backoffice/marcas', icon: Store, label: 'Marcas (multi-tenant)', testId: 'nav-tenants', perm: 'manageRoles' },
       { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings', perm: 'integrations' },
     ],
   },
@@ -202,12 +204,17 @@ export default function BackofficeLayout() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="lg:hidden bg-white border-b border-border px-4 h-14 flex items-center justify-between">
-          <button onClick={() => setMobileOpen(true)} className="p-2 hover:bg-bg-secondary rounded-lg" data-testid="mobile-menu-btn">
+        <header className="bg-white border-b border-border px-4 h-14 flex items-center justify-between gap-2">
+          <button onClick={() => setMobileOpen(true)} className="p-2 hover:bg-bg-secondary rounded-lg lg:hidden" data-testid="mobile-menu-btn">
             <Menu className="w-5 h-5" />
           </button>
-          <BrandLogo slot="admin_topbar" variant="light" textClassName="font-heading font-black" />
-          <div className="w-9" />
+          <div className="lg:hidden">
+            <BrandLogo slot="admin_topbar" variant="light" textClassName="font-heading font-black" />
+          </div>
+          {/* Espaco flex no desktop */}
+          <div className="hidden lg:block flex-1" />
+          {/* Iter 43: seletor de tenant (visivel sempre no header do admin) */}
+          <TenantSwitcher />
         </header>
         <main className="flex-1 overflow-x-hidden p-4 md:p-8">
           <Outlet />

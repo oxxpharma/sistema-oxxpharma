@@ -16,6 +16,8 @@ const emptyForm = {
   active: true, featured: false, brand: '', points_value: 0,
   weight: null, length_cm: null, width_cm: null, height_cm: null,
   pricing_tiers: [],
+  sku: '', ean: '',
+  price_by_tenant: {},
 };
 
 export default function AdminProducts() {
@@ -75,6 +77,8 @@ export default function AdminProducts() {
       weight: p.weight ?? null, length_cm: p.length_cm ?? null,
       width_cm: p.width_cm ?? null, height_cm: p.height_cm ?? null,
       pricing_tiers: Array.isArray(p.pricing_tiers) ? p.pricing_tiers : [],
+      sku: p.sku || '', ean: p.ean || '',
+      price_by_tenant: p.price_by_tenant || {},
     });
     setShowForm(true);
   };
@@ -95,6 +99,13 @@ export default function AdminProducts() {
         stock: parseInt(form.stock, 10) || 0,
         points_value: parseFloat(form.points_value || 0),
         pricing_tiers: tiers,
+        sku: form.sku?.trim() || null,
+        ean: form.ean?.trim() || null,
+        price_by_tenant: Object.fromEntries(
+          Object.entries(form.price_by_tenant || {})
+            .map(([k, v]) => [k, parseFloat(v) || 0])
+            .filter(([, v]) => v > 0)
+        ),
       };
       if (editing) await api.put(`/api/admin/products/${editing}`, payload);
       else await api.post('/api/admin/products', payload);
@@ -231,6 +242,42 @@ export default function AdminProducts() {
               </div>
               <div className="grid grid-cols-1 gap-3">
                 <Input label="Pontos por unidade" type="number" step="0.01" value={form.points_value} onChange={e => setForm({ ...form, points_value: e.target.value })} placeholder="Ex: 10" />
+              </div>
+
+              {/* Iter 43: SKU + EAN (codigos fiscais/logisticos) */}
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="SKU (codigo interno)" value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} placeholder="Ex: VITC-500-30" data-testid="prod-sku" />
+                <Input label="EAN (codigo de barras)" value={form.ean} onChange={e => setForm({ ...form, ean: e.target.value })} placeholder="Ex: 7891234567890" data-testid="prod-ean" />
+              </div>
+
+              {/* Iter 43: Preco diferenciado por marca (Pharmakon) */}
+              <div className="border border-border rounded-lg p-4 bg-bg-secondary/40">
+                <div className="font-bold text-sm mb-1">Preço por marca (opcional)</div>
+                <div className="text-xs text-txt-secondary mb-3">
+                  Se deixar em branco, todas as marcas usam o preço base acima. Use só para definir um preço diferente em outra marca.
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-txt-secondary block mb-1">OxxPharma</label>
+                    <input
+                      type="number" step="0.01" placeholder="Usa preço base"
+                      value={form.price_by_tenant?.oxxpharma ?? ''}
+                      onChange={e => setForm({ ...form, price_by_tenant: { ...(form.price_by_tenant || {}), oxxpharma: e.target.value } })}
+                      className="w-full px-3 py-2 border border-border rounded-lg text-sm"
+                      data-testid="price-tenant-oxxpharma"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-txt-secondary block mb-1">Pharmakon</label>
+                    <input
+                      type="number" step="0.01" placeholder="Usa preço base"
+                      value={form.price_by_tenant?.pharmakon ?? ''}
+                      onChange={e => setForm({ ...form, price_by_tenant: { ...(form.price_by_tenant || {}), pharmakon: e.target.value } })}
+                      className="w-full px-3 py-2 border border-border rounded-lg text-sm"
+                      data-testid="price-tenant-pharmakon"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Preços por contexto */}

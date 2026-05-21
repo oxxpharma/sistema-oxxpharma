@@ -28,6 +28,7 @@ import card_service
 import payments_service
 import correios_service
 import maxx_service
+import tenant_service
 import melhorenvio_service
 import store_extras
 
@@ -267,6 +268,11 @@ class ProductCreate(BaseModel):
     height_cm: Optional[float] = None
     points_value: float = 0  # Pontos atribuidos por unidade comprada (manual pelo admin)
     pricing_tiers: List[Dict] = []  # [{type:'guest'|'logged'|'category', user_category_id?, price, label?}]
+    # Iter 43: identificacao fiscal/logistica
+    sku: Optional[str] = None
+    ean: Optional[str] = None
+    # Iter 43: override de preco por tenant {tenant_id: price}. Vazio = usa preco padrao.
+    price_by_tenant: Optional[Dict[str, float]] = None
 
 class CategoryCreate(BaseModel):
     name: str
@@ -448,6 +454,22 @@ async def lifespan(app: FastAPI):
     await seed_admin(app.db)
     await seed_categories(app.db)
     await seed_products(app.db)
+    # Iter 43: bootstrap multi-tenant
+    await tenant_service.bootstrap_tenants(app.db)
+    # Backfill: marca todos pedidos/carrinhos/comissoes existentes sem tenant -> oxxpharma
+    backfill_done = await app.db.migrations.find_one({"_id": "tenant_backfill_v1"})
+    if not backfill_done:
+        for coll in ("orders", "carts", "commissions", "points_log",
+                     "payment_webhook_logs", "coupons", "vouchers"):
+            try:
+                await app.db[coll].update_many(
+                    {"tenant": {"$exists": False}},
+                    {"$set": {"tenant": tenant_service.DEFAULT_TENANT}},
+                )
+            except Exception as e:
+                logger.warning(f"backfill tenant em {coll} falhou: {e}")
+        await app.db.migrations.insert_one({"_id": "tenant_backfill_v1", "ran_at": now_iso()})
+        logger.info("Iter 43: tenant backfill v1 aplicado (oxxpharma)")
     yield
     app.mongodb_client.close()
 
@@ -461,6 +483,76 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Iter 43: middleware de deteccao de tenant (lê Host header e expõe em request.state.tenant)
+@app.middleware("http")
+async def detect_tenant_middleware(request: Request, call_next):
+    try:
+        request.state.tenant = tenant_service.get_tenant_from_request(request)
+    except Exception:
+        request.state.tenant = tenant_service.DEFAULT_TENANT
+    response = await call_next(request)
+    # Expoe o tenant resolvido na resposta (debug / frontend)
+    try:
+        response.headers["X-Tenant-Resolved"] = request.state.tenant
+    except Exception:
+        pass
+    return response
+
+
+# ==================== TENANTS - PUBLIC + ADMIN ====================
+
+@app.get("/api/tenant/current")
+async def get_current_tenant(request: Request):
+    """Frontend usa pra saber qual tenant esta ativo (e renderizar tema)."""
+    tid = tenant_service.get_tenant(request)
+    doc = tenant_service.get_tenant_doc(tid)
+    return {
+        "tenant_id": tid,
+        "name": doc.get("name") or "OxxPharma",
+        "short_name": doc.get("short_name"),
+        "theme": doc.get("theme") or {},
+        "benefits_program_label": doc.get("benefits_program_label") or "Programa de Benefícios",
+        "brands_unified": tenant_service.is_brands_unified(),
+    }
+
+
+@app.get("/api/admin/tenants")
+async def admin_list_tenants(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    docs = await db.tenants.find({}, {"_id": 0}).sort("is_primary", -1).to_list(20)
+    cfg = await db.settings.find_one({"_id": "brands_unified"})
+    return {"items": docs, "brands_unified": bool(cfg and cfg.get("enabled"))}
+
+
+@app.put("/api/admin/tenants/{tenant_id}")
+async def admin_update_tenant(request: Request, tenant_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    body = await request.json() or {}
+    allowed = ("name", "short_name", "hostnames", "active", "theme", "email", "benefits_program_label")
+    payload = {k: v for k, v in body.items() if k in allowed}
+    payload["updated_at"] = now_iso()
+    await db.tenants.update_one({"tenant_id": tenant_id}, {"$set": payload})
+    await tenant_service.reload_cache(db)
+    doc = await db.tenants.find_one({"tenant_id": tenant_id}, {"_id": 0})
+    return doc
+
+
+@app.put("/api/admin/brands-unified")
+async def admin_set_brands_unified(request: Request, user: dict = Depends(require_admin())):
+    """Liga/desliga a fusao das marcas. Quando true, todo trafego eh forcado para
+    o tenant primario (oxxpharma) — pharmakon.com.br vira oxxpharma."""
+    db = request.app.db
+    body = await request.json() or {}
+    enabled = bool(body.get("enabled"))
+    await db.settings.update_one(
+        {"_id": "brands_unified"},
+        {"$set": {"enabled": enabled, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    await tenant_service.reload_cache(db)
+    return {"enabled": enabled}
 
 # ==================== AUTH ====================
 
@@ -495,6 +587,9 @@ async def register(request: Request, response: Response, data: AuthRegister):
         "network_type": NETWORK_CUSTOMER,
         "network_sponsor_id": None,
         "external_id": None,
+        # Iter 43: home_tenant = marca onde o user se cadastrou (para futura
+        # logica de redirect cross-domain apos login).
+        "home_tenant": tenant_service.get_tenant(request),
         "created_at": now_iso(),
     }
     await db.users.insert_one(user)
@@ -662,7 +757,8 @@ async def list_products(request: Request, category: Optional[str] = None, search
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     user = await get_optional_user(request)
-    products = [store_extras.apply_pricing_to_product(p, user) for p in products]
+    _tenant = tenant_service.get_tenant(request)
+    products = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in products]
     return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
 @app.get("/api/products/featured")
@@ -673,7 +769,8 @@ async def featured_products(request: Request, limit: int = 8):
         more = await db.products.find({"active": True, "featured": {"$ne": True}}, {"_id": 0}).limit(limit - len(prods)).to_list(limit - len(prods))
         prods.extend(more)
     user = await get_optional_user(request)
-    prods = [store_extras.apply_pricing_to_product(p, user) for p in prods]
+    _tenant = tenant_service.get_tenant(request)
+    prods = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in prods]
     return {"products": prods}
 
 @app.get("/api/products/{product_id}")
@@ -684,8 +781,9 @@ async def get_product(request: Request, product_id: str):
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
     related = await db.products.find({"category": p.get("category"), "product_id": {"$ne": product_id}, "active": True}, {"_id": 0}).limit(4).to_list(4)
     user = await get_optional_user(request)
-    p = store_extras.apply_pricing_to_product(p, user)
-    related = [store_extras.apply_pricing_to_product(r, user) for r in related]
+    _tenant = tenant_service.get_tenant(request)
+    p = store_extras.apply_pricing_to_product(p, user, tenant=_tenant)
+    related = [store_extras.apply_pricing_to_product(r, user, tenant=_tenant) for r in related]
     return {"product": p, "related": related}
 
 # ==================== PRODUCTS (ADMIN) ====================
@@ -738,15 +836,16 @@ async def get_cart(request: Request, user: dict = Depends(get_current_user)):
     items = cart.get("items", [])
     subtotal = 0
     enriched = []
+    _tenant = tenant_service.get_tenant(request)
     for item in items:
         prod = await db.products.find_one({"product_id": item["product_id"]}, {"_id": 0})
         if prod:
-            price_info = store_extras.effective_price(prod, user)
+            price_info = store_extras.effective_price(prod, user, tenant=_tenant)
             price = float(price_info["price"])
             original = float(price_info["original_price"])
             total = price * item["quantity"]
             subtotal += total
-            enriched.append({**item, "name": prod["name"], "price": price, "original_price": original, "tier_applied": price_info.get("applied_tier"), "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0), "points_value": float(prod.get("points_value") or 0)})
+            enriched.append({**item, "name": prod["name"], "price": price, "original_price": original, "tier_applied": price_info.get("applied_tier"), "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0), "points_value": float(prod.get("points_value") or 0), "sku": prod.get("sku"), "ean": prod.get("ean")})
     return {"items": enriched, "subtotal": round(subtotal, 2), "count": len(enriched)}
 
 @app.post("/api/cart/items")
@@ -819,18 +918,19 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     # Build order items
     items = []
     subtotal = 0
+    _tenant = tenant_service.get_tenant(request)
     for ci in cart["items"]:
         prod = await db.products.find_one({"product_id": ci["product_id"], "active": True}, {"_id": 0})
         if not prod:
             continue
         if prod.get("stock", 0) < ci["quantity"]:
             raise HTTPException(status_code=400, detail=f"Estoque insuficiente: {prod['name']}")
-        # preco efetivo considerando pricing_tiers do usuario
-        price_info = store_extras.effective_price(prod, user)
+        # preco efetivo considerando pricing_tiers do usuario E override por tenant
+        price_info = store_extras.effective_price(prod, user, tenant=_tenant)
         price = float(price_info["price"])
         total = round(price * ci["quantity"], 2)
         subtotal += total
-        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0], "points_value": float(prod.get("points_value") or 0), "tier_applied": price_info.get("applied_tier")})
+        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0], "points_value": float(prod.get("points_value") or 0), "tier_applied": price_info.get("applied_tier"), "sku": prod.get("sku"), "ean": prod.get("ean")})
         # Decrement stock
         await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
     if not items:
@@ -971,6 +1071,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         # mesmo se o user mudar de sponsor no futuro; usado por Top 10, comissoes MMN
         # e relatorios). Fallback para affiliate_id quando user nao tem sponsor proprio.
         "sponsor_id": (user.get("sponsor_id") or affiliate_id),
+        # Iter 43: tenant da marca onde o pedido foi feito (OxxPharma vs Pharmakon).
+        "tenant": tenant_service.get_tenant(request),
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
@@ -1037,11 +1139,15 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
 # ==================== ADMIN ORDERS ====================
 
 @app.get("/api/admin/orders")
-async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
     q = {}
     if status:
         q["order_status"] = status
+    # Iter 43: filtro por tenant (param ou header X-Tenant)
+    selected_tenant = (tenant or request.headers.get("x-tenant") or "").strip().lower() or None
+    if selected_tenant in {"oxxpharma", "pharmakon"}:
+        q["tenant"] = selected_tenant
     if search:
         q["$or"] = [{"order_id": {"$regex": search, "$options": "i"}}, {"customer_name": {"$regex": search, "$options": "i"}}, {"customer_email": {"$regex": search, "$options": "i"}}]
     total = await db.orders.count_documents(q)
@@ -1124,9 +1230,21 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
             qty = int(it.get("quantity") or 1)
             unit = float(it.get("price") or 0)
             total = float(it.get("total") or (qty * unit))
+            # Iter 43: SKU + EAN visiveis no resumo do faturamento
+            sku = (it.get("sku") or "").strip()
+            ean = (it.get("ean") or "").strip()
+            id_lines = []
+            if sku:
+                id_lines.append(f"<span style='color:#888;'>SKU: {sku}</span>")
+            if ean:
+                id_lines.append(f"<span style='color:#888;'>EAN: {ean}</span>")
+            id_html = "<br>".join(id_lines)
+            name_cell = (it.get('name') or it.get('product_name') or '')[:80]
+            if id_html:
+                name_cell = f"{name_cell}<br><small style='font-size:11px;'>{id_html}</small>"
             items_rows.append(
                 f"<tr>"
-                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;'>{(it.get('name') or it.get('product_name') or '')[:80]}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;'>{name_cell}</td>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:center;'>{qty}</td>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:right;'>R$ {unit:.2f}</td>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:right;font-weight:bold;'>R$ {total:.2f}</td>"
@@ -1812,6 +1930,8 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
     para ele em `/api/users/me/commissions` ate ele se inscrever. Quando ele ativa o
     programa, todas as comissoes pendentes dele sao promovidas para 'pending'.
 
+    Iter 43: cada comissao herda o `tenant` do pedido (para relatorios por marca).
+
     Reproduz a regra do /api/checkout (Iter 31), removendo apenas o filtro de inscricao:
       - afiliado: sponsor_id direto do customer recebe affiliate_commission_rate (gen 0)
       - MMN: sobe pela cadeia sponsor_id -> network_sponsor_id ate 6 niveis. Em cada nivel,
@@ -1825,6 +1945,8 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
     customer_id = customer["user_id"]
     customer_name = customer.get("name")
     affiliate_rate = float(settings.get("affiliate_commission_rate") or 0)
+    # Iter 43: tenant da comissao herda do pedido (fallback default)
+    order_tenant = order.get("tenant") or tenant_service.DEFAULT_TENANT
 
     out = []
 
@@ -1854,6 +1976,7 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                 "order_subtotal": round(subtotal, 2),
                 "status": status,
                 "program_active_at_creation": program_active,
+                "tenant": order_tenant,
                 "created_at": now_iso(),
             }
             if mark_retroactive:
@@ -1896,6 +2019,7 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                         "order_subtotal": round(subtotal, 2),
                         "status": status,
                         "program_active_at_creation": program_active,
+                        "tenant": order_tenant,
                         "created_at": now_iso(),
                     }
                     if mark_retroactive:
@@ -1961,9 +2085,11 @@ async def _create_commissions_for_paid_order(db, order_id: str, *, fire_emails: 
 # ==================== COMMISSION HELPER END ====================
 
 @app.get("/api/admin/dashboard")
-async def admin_dashboard(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+async def admin_dashboard(request: Request, start: Optional[str] = None, end: Optional[str] = None, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
     """Iter 41: aceita filtro de periodo (start/end em YYYY-MM-DD). Sem filtro = tudo.
-    Os comparativos semanais e os 30 dias de receita continuam baseados em hoje."""
+    Os comparativos semanais e os 30 dias de receita continuam baseados em hoje.
+    Iter 43: aceita ?tenant=oxxpharma|pharmakon (ou header X-Tenant) — filtra orders
+    e commissions por marca. Sem param = todos."""
     db = request.app.db
     n = datetime.now(timezone.utc)
     month_start = n.replace(day=1, hour=0, minute=0, second=0).isoformat()
@@ -1972,16 +2098,24 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
     prev_week_start = (today_start - timedelta(days=14)).isoformat()
     last_30_start = (today_start - timedelta(days=29)).isoformat()
 
+    # Iter 43: filtro de tenant — query param OU header X-Tenant. None = todos.
+    tenant_filter: Dict = {}
+    selected_tenant = (tenant or request.headers.get("x-tenant") or "").strip().lower() or None
+    if selected_tenant and selected_tenant in {"oxxpharma", "pharmakon"}:
+        tenant_filter = {"tenant": selected_tenant}
+
     # Filtro do periodo selecionado (para stats absolutos, top buyers, top indicadores)
-    period_filter: Dict = {}
+    period_filter: Dict = {**tenant_filter}
     if start:
         period_filter.setdefault("created_at", {})["$gte"] = start + "T00:00:00"
     if end:
         period_filter.setdefault("created_at", {})["$lte"] = end + "T23:59:59"
+    # has_period agora significa "tem algum filtro" (data ou tenant) — usado para
+    # decidir se aplica period_filter nas queries downstream.
     has_period = bool(period_filter)
 
     total_users = await db.users.count_documents({"role": "customer"})
-    orders_period_filter = {**period_filter} if has_period else {}
+    orders_period_filter = {**period_filter}
     total_orders = await db.orders.count_documents(orders_period_filter)
     month_orders = await db.orders.count_documents({"created_at": {"$gte": month_start}})
 

@@ -46,6 +46,7 @@ import AdminCommissionsByGeneration from './pages/backoffice/AdminCommissionsByG
 import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
 import AdminInvoices from './pages/backoffice/AdminInvoices';
 import AdminEmails from './pages/backoffice/AdminEmails';
+import AdminTenants from './pages/backoffice/AdminTenants';
 import AdminWebhook from './pages/backoffice/AdminWebhook';
 import AdminGiftCards from './pages/backoffice/AdminGiftCards';
 import AdminPoints from './pages/backoffice/AdminPoints';
@@ -148,6 +149,7 @@ function AppRoutes() {
         <Route path="saques" element={<AdminWithdrawals />} />
         <Route path="faturamento" element={<AdminInvoices />} />
         <Route path="emails" element={<AdminEmails />} />
+        <Route path="marcas" element={<AdminTenants />} />
         <Route path="webhook" element={<AdminWebhook />} />
         <Route path="configuracoes" element={<AdminSettings />} />
       </Route>

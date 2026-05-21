@@ -152,15 +152,24 @@ async def set_user_categories(db, user_id: str, category_ids: List[str]) -> Dict
 
 # ==================== PRICING TIERS ====================
 
-def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]], tenant: Optional[str] = None) -> Dict[str, Any]:
     """Calcula o preço efetivo aplicado a um produto dado o usuario.
 
     Retorna {price, original_price, applied_tier|None}
       - price: valor a cobrar
       - original_price: preco base (sem tier; usa discount_price se houver)
       - applied_tier: copia da tier aplicada (None se nao tiver)
+
+    Iter 43: se `tenant` informado e produto tem `price_by_tenant[tenant]`, usa
+    esse valor como base (override por marca).
     """
     base_price = float(product.get("price") or 0)
+    # Iter 43: override por tenant tem prioridade sobre price base
+    if tenant:
+        pbt = product.get("price_by_tenant") or {}
+        tenant_price = pbt.get(tenant) if isinstance(pbt, dict) else None
+        if tenant_price is not None and float(tenant_price) > 0:
+            base_price = float(tenant_price)
     disc = product.get("discount_price")
     base_effective = float(disc) if (disc is not None and float(disc) > 0) else base_price
 
@@ -211,16 +220,18 @@ def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> 
     }
 
 
-def apply_pricing_to_product(product: Dict[str, Any], user: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def apply_pricing_to_product(product: Dict[str, Any], user: Optional[Dict[str, Any]], tenant: Optional[str] = None) -> Dict[str, Any]:
     """Decora o produto com 'effective_price' e 'tier_applied' sem mutar o documento original.
 
     Iter 39: tambem expoe `club_price` (menor preco para tier `referral_active`),
     sempre visivel mesmo para visitantes/clientes nao-aderidos, para incentivar
     inscricao no Clube de Beneficios.
+
+    Iter 43: aceita tenant para resolver price_by_tenant override.
     """
     p = {**product}
     p.pop("_id", None)
-    info = effective_price(product, user)
+    info = effective_price(product, user, tenant=tenant)
     p["effective_price"] = info["price"]
     p["original_price"] = info["original_price"]
     p["tier_applied"] = info["applied_tier"]
