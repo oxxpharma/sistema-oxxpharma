@@ -137,7 +137,12 @@ async def create_preference(db, order: Dict, user: Dict, items_full: List[Dict],
         "auto_return": "approved",
         "notification_url": f"{backend_url}/api/payments/webhook/mercadopago",
         "external_reference": order["order_id"],
-        "statement_descriptor": "OXXPHARMA",
+        "statement_descriptor": (order.get("tenant") or "OXXPHARMA").upper()[:13],
+        # Iter 43: metadata para identificar a marca de origem do pagamento no webhook
+        "metadata": {
+            "tenant": order.get("tenant") or "oxxpharma",
+            "order_id": order["order_id"],
+        },
     }
 
     request_options = mercadopago.config.RequestOptions()

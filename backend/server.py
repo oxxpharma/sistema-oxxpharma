@@ -406,7 +406,14 @@ async def lifespan(app: FastAPI):
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
-    await app.db.email_templates.create_index("slug", unique=True)
+    # Iter 43: slug e' unico por tenant (None = global). Remove indice antigo se necessario.
+    try:
+        await app.db.email_templates.drop_index("slug_1")
+    except Exception:
+        pass
+    await app.db.email_templates.create_index(
+        [("slug", 1), ("tenant", 1)], unique=True, name="uq_slug_per_tenant"
+    )
     await app.db.email_templates.create_index("template_id", unique=True)
     await app.db.email_logs.create_index("log_id", unique=True)
     await app.db.email_logs.create_index("created_at")
@@ -3168,6 +3175,7 @@ async def register_points_from_order(db, order_id: str):
     if not user:
         return
     logs = []
+    _order_tenant = o.get("tenant") or tenant_service.DEFAULT_TENANT
     for it in o.get("items", []):
         pv = float(it.get("points_value") or 0)
         if pv <= 0:
@@ -3188,6 +3196,7 @@ async def register_points_from_order(db, order_id: str):
             "points_total": total_points,
             "registered_at": now_iso(),
             "applied_externally": False,
+            "tenant": _order_tenant,
         })
     if logs:
         await db.points_log.insert_many(logs)
@@ -3224,6 +3233,7 @@ async def register_points_from_order(db, order_id: str):
                         "source": "team1_indicated",
                         "indicated_user_id": user["user_id"],
                         "indicated_user_name": user.get("name"),
+                        "tenant": _order_tenant,
                     })
                 if mirrored:
                     await db.points_log.insert_many(mirrored)
@@ -3923,8 +3933,8 @@ async def _build_referral_sales_summary(db, match: dict) -> list:
 
 
 @app.get("/api/admin/commissions-by-generation")
-async def admin_commissions_by_generation(request: Request, status: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
-    """Iter 39: Relatorio visual por geracao.
+async def admin_commissions_by_generation(request: Request, status: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None, tenant: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+    """Iter 39: Relatorio visual por geracao. Iter 43: filtro por tenant.
 
     Retorna:
       - summary_by_generation: [{generation, label, network_type, total_amount, count, avg_rate_pct, beneficiaries}]
@@ -3941,6 +3951,10 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
         match.setdefault("created_at", {})["$gte"] = start
     if end:
         match.setdefault("created_at", {})["$lte"] = end
+    # Iter 43: filtro por tenant (param ou header)
+    selected_tenant = (tenant or request.headers.get("x-tenant") or "").strip().lower() or None
+    if selected_tenant in {"oxxpharma", "pharmakon"}:
+        match["tenant"] = selected_tenant
 
     # Agrega por (generation, type, network_type)
     pipeline = [
@@ -4078,9 +4092,10 @@ async def admin_commissions_by_generation(request: Request, status: Optional[str
 
 
 @app.get("/api/admin/commissions-report")
-async def admin_commissions_report(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(require_admin())):
+async def admin_commissions_report(request: Request, status: str = "paid", start: Optional[str] = None, end: Optional[str] = None, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
     """Relatorio agregado por usuario para envio a empresa de cartao de beneficios.
     Inclui breakdown por origem (Iter 35): Indicacao (afiliado), Equipe 1, Equipe 2.
+    Iter 43: filtro por tenant.
     """
     db = request.app.db
     match = {"status": status}
@@ -4088,6 +4103,7 @@ async def admin_commissions_report(request: Request, status: str = "paid", start
         match.setdefault("created_at", {})["$gte"] = start
     if end:
         match.setdefault("created_at", {})["$lte"] = end
+    match.update(tenant_service.get_admin_tenant_filter(request, tenant))
     # Agrupa por (user_id, origem) onde origem = (type + network_type)
     pipeline = [
         {"$match": match},
@@ -4334,10 +4350,11 @@ async def admin_issue_invoice(request: Request, order_id: str, user: dict = Depe
     return await build_invoice_data(db, o)
 
 @app.get("/api/admin/invoices")
-async def admin_list_invoices(request: Request, search: Optional[str] = None, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
-    """Lista pedidos com nota emitida (faturamento interno)."""
+async def admin_list_invoices(request: Request, search: Optional[str] = None, tenant: Optional[str] = None, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+    """Lista pedidos com nota emitida (faturamento interno). Iter 43: filtro por tenant."""
     db = request.app.db
     q = {"invoice_number": {"$ne": None}}
+    q.update(tenant_service.get_admin_tenant_filter(request, tenant))
     if search:
         q["$or"] = [
             {"invoice_number": {"$regex": search, "$options": "i"}},
@@ -4347,8 +4364,10 @@ async def admin_list_invoices(request: Request, search: Optional[str] = None, pa
     total = await db.orders.count_documents(q)
     orders = await db.orders.find(q, {"_id": 0}).sort("invoice_issued_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     # Agregado faturado
+    agg_match = {"invoice_number": {"$ne": None}}
+    agg_match.update(tenant_service.get_admin_tenant_filter(request, tenant))
     agg = await db.orders.aggregate([
-        {"$match": {"invoice_number": {"$ne": None}}},
+        {"$match": agg_match},
         {"$group": {"_id": None, "total": {"$sum": "$total"}, "subtotal": {"$sum": "$subtotal"}}},
     ]).to_list(1)
     totals = {"total": round((agg[0]["total"] if agg else 0), 2), "subtotal": round((agg[0]["subtotal"] if agg else 0), 2), "count": total}
@@ -4720,11 +4739,17 @@ async def list_email_templates(request: Request, user: dict = Depends(require_ad
 @app.post("/api/admin/email-templates")
 async def create_email_template(request: Request, data: EmailTemplateIn, user: dict = Depends(require_admin())):
     db = request.app.db
-    if await db.email_templates.find_one({"slug": data.slug}):
-        raise HTTPException(status_code=400, detail="slug ja existe")
+    body = await request.json()
+    # Iter 43: aceita tenant opcional (None = template global, usado quando nao houver versao por tenant)
+    tenant = (body.get("tenant") or "").strip().lower() or None
+    # Slug+tenant deve ser unico (slug pode repetir entre tenants diferentes)
+    existing = await db.email_templates.find_one({"slug": data.slug, "tenant": tenant})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"slug '{data.slug}' ja existe para tenant '{tenant or 'global'}'")
     doc = {
         "template_id": gen_id("tpl_"),
         **data.model_dump(),
+        "tenant": tenant,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -4735,8 +4760,10 @@ async def create_email_template(request: Request, data: EmailTemplateIn, user: d
 async def update_email_template(request: Request, template_id: str, user: dict = Depends(require_admin())):
     db = request.app.db
     body = await request.json()
-    allowed = {"name", "subject", "body_html", "body_text", "active", "slug"}
+    allowed = {"name", "subject", "body_html", "body_text", "active", "slug", "tenant"}
     update = {k: v for k, v in body.items() if k in allowed}
+    if "tenant" in update:
+        update["tenant"] = (update["tenant"] or "").strip().lower() or None
     update["updated_at"] = now_iso()
     await db.email_templates.update_one({"template_id": template_id}, {"$set": update})
     return await db.email_templates.find_one({"template_id": template_id}, {"_id": 0})
@@ -6506,6 +6533,7 @@ async def first_access_request(request: Request):
 @app.get("/api/admin/points-report")
 async def admin_points_report(request: Request, start: Optional[str] = None, end: Optional[str] = None,
                               user_id: Optional[str] = None, applied: Optional[bool] = None,
+                              tenant: Optional[str] = None,
                               page: int = 1, limit: int = 100, user: dict = Depends(require_admin())):
     db = request.app.db
     q = {}
@@ -6517,6 +6545,8 @@ async def admin_points_report(request: Request, start: Optional[str] = None, end
         q["user_id"] = user_id
     if applied is not None:
         q["applied_externally"] = applied
+    # Iter 43: filtro por tenant
+    q.update(tenant_service.get_admin_tenant_filter(request, tenant))
     total = await db.points_log.count_documents(q)
     logs = await db.points_log.find(q, {"_id": 0}).sort("registered_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     summary = await db.points_log.aggregate([

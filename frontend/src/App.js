@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RefProvider } from './contexts/RefContext';
+import { TenantProvider } from './contexts/TenantContext';
 import { CartProvider } from './contexts/CartContext';
 import BrandHead from './components/branding/BrandHead';
 import ImpersonationBanner from './components/ImpersonationBanner';
@@ -162,16 +163,18 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <RefProvider>
-          <CartProvider>
-            <BrandHead />
-            <ImpersonationBanner />
-            <AppRoutes />
-            <Toaster richColors position="top-right" />
-          </CartProvider>
-        </RefProvider>
-      </AuthProvider>
+      <TenantProvider>
+        <AuthProvider>
+          <RefProvider>
+            <CartProvider>
+              <BrandHead />
+              <ImpersonationBanner />
+              <AppRoutes />
+              <Toaster richColors position="top-right" />
+            </CartProvider>
+          </RefProvider>
+        </AuthProvider>
+      </TenantProvider>
     </BrowserRouter>
   );
 }

@@ -208,36 +208,45 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 - Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
 - Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
 
-## Iter 43 (Fev/2026): Multi-tenant — Fase 1 (Backbone OxxPharma + Pharmakon) + SKU/EAN
+## Iter 43 (Fev/2026): Multi-tenant Fases 1-4 (OxxPharma + Pharmakon)
 
-### Arquitetura
-- **1 banco MongoDB, 1 deploy, 1 codebase** — isolamento por campo `tenant` em orders, carts, commissions, points_log, payment_webhook_logs, coupons, vouchers.
-- **Compartilhados**: users, products, categories, network MMN, pagamentos, frete.
-- **Tenant detection**: middleware lê `Host` → mapeia via coleção `tenants` (cache). Header `X-Tenant` override no admin.
-- **Toggle de fusão**: `brands_unified` em settings → quando true, força tenant=oxxpharma para todo tráfego.
+### Fase 1 — Backbone (já entregue)
+- Middleware FastAPI detecta tenant pelo Host / X-Tenant.
+- Coleção `tenants` com cache, bootstrap automático (OxxPharma laranja + Pharmakon azul).
+- Backfill: pedidos/carrinhos/comissões/cupons/points_log antigos → `tenant=oxxpharma`.
+- Toggle `brands_unified` força tenant primary.
+- Frontend: `TenantSwitcher` no header admin + página `/backoffice/marcas`.
 
-### Novos endpoints
-- `GET /api/tenant/current` (público) — frontend renderiza tema/nome.
-- `GET/PUT /api/admin/tenants[/<id>]` — CRUD de marcas.
-- `PUT /api/admin/brands-unified` — liga/desliga fusão.
+### Fase 2 — Filtros tenant em endpoints admin
+- `/api/admin/dashboard?tenant=X`, `/api/admin/orders?tenant=X`, `/api/admin/commissions-by-generation?tenant=X`, `/api/admin/commissions-report?tenant=X`, `/api/admin/invoices?tenant=X`, `/api/admin/points-report?tenant=X`.
+- Helper `tenant_service.get_admin_tenant_filter(request, qparam)` reutilizado.
+- `points_log` gravado com tenant herdado do pedido.
 
-### Endpoints existentes adaptados
-- `/api/admin/dashboard?tenant=X` — filtra por marca.
-- `/api/admin/orders?tenant=X` — idem.
-- `/api/checkout` → order doc carrega `tenant`. `compute_order_commissions` propaga para cada comissão.
-- `/api/auth/register` → user ganha `home_tenant`.
-- `/api/products|/{id}|/cart` aplicam `price_by_tenant[tenant]` (override de preço por marca).
+### Fase 3 — Tema visual dinâmico (TenantContext)
+- Novo `contexts/TenantContext.js` carrega `/api/tenant/current` no boot.
+- Aplica `--brand-main` CSS var (cor da marca) automaticamente.
+- Atualiza `document.title` com nome da marca.
+- Plugado no `App.js` como provider raiz (envolve Auth/Ref/Cart).
 
-### Frontend
-- `lib/api.js` envia `X-Tenant` quando admin escolhe marca no `TenantSwitcher`.
-- Novo `/backoffice/marcas`: toggle de fusão + edição de cada tenant (nome, cor, logo, domínios, email, label do programa).
-- `AdminProducts` ganha campos **SKU**, **EAN** + bloco "Preço por marca".
-
-### SKU + EAN no email de faturamento
-- Resumo do pedido enviado para financeiro inclui SKU/EAN como subtítulo de cada item.
+### Fase 4 — Pagamento e Emails por tenant
+- MercadoPago `metadata.tenant` no body de criação de preference + `statement_descriptor` por marca.
+- `email_templates` ganhou campo `tenant` (null = global). Índice composto `(slug, tenant)` unique.
+- `get_template(slug, tenant)` busca específico-por-tenant primeiro, fallback global.
+- `send_template` / `trigger` aceitam `tenant=` opcional.
+- Admin CRUD aceita `tenant` no body (permite mesmo slug em marcas diferentes).
 
 ### Testes
-- `test_iter43_multi_tenant_backbone.py` (6 testes — PASS).
+- **Fase 1**: `test_iter43_multi_tenant_backbone.py` (6 testes — PASS).
+- **Fases 2-4**: `test_iter43_multi_tenant_filters.py` (4 testes — PASS).
+- **Total iter43**: **10/10 passing**.
+
+### Passo a passo final para ativar Pharmakon
+1. DNS: `pharmakon.com.br` e `www.pharmakon.com.br` apontando para o IP do servidor da OxxPharma.
+2. Nginx: adicionar bloco `server_name pharmakon.com.br www.pharmakon.com.br;` no mesmo `proxy_pass` do frontend.
+3. Em `/backoffice/marcas` ajustar logo/cor/nome do programa do Pharmakon (default azul, "Clube Pharmakon").
+4. Em produtos: deixar default visível em ambas; para preço diferente, abrir produto e preencher "Preço por marca → Pharmakon".
+5. Resend: verificar domínio `pharmakon.com.br` (se quiser emails com from específico) — colocar email em `/backoffice/marcas`.
+6. Templates de email específicos: clonar template global no admin e marcar tenant=pharmakon (para personalizar).
 
 
 ## Iter 42o (Fev/2026): P0 (merge-users + varredura na rede) + P1 (aprovação auto + dashboard top produtos + fix top10 + editor email rico)

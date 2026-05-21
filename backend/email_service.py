@@ -36,8 +36,20 @@ def render_template(text: str, ctx: Dict[str, Any]) -> str:
     return re.sub(r"\{\{\s*([^}]+?)\s*\}\}", replacer, text)
 
 
-async def get_template(db, slug: str) -> Optional[Dict]:
-    return await db.email_templates.find_one({"slug": slug}, {"_id": 0})
+async def get_template(db, slug: str, tenant: Optional[str] = None) -> Optional[Dict]:
+    """Iter 43: busca template por slug, preferindo a versao do tenant especifico.
+    Se nao houver versao para o tenant, faz fallback para o template "global" (sem tenant).
+    Slugs sao unicos quando combinados com tenant (ou globais).
+    """
+    if tenant:
+        t = await db.email_templates.find_one({"slug": slug, "tenant": tenant}, {"_id": 0})
+        if t:
+            return t
+    # Fallback: template sem tenant especifico (compatibilidade)
+    return await db.email_templates.find_one(
+        {"slug": slug, "$or": [{"tenant": None}, {"tenant": {"$exists": False}}]},
+        {"_id": 0},
+    ) or await db.email_templates.find_one({"slug": slug}, {"_id": 0})
 
 
 async def wrap_email_html(db, inner_html: str) -> str:
@@ -155,29 +167,31 @@ async def send_email(db, to: List[str] | str, subject: str, html: str, text: Opt
         return {"sent": False, "reason": str(e)}
 
 
-async def send_template(db, slug: str, to: List[str] | str, ctx: Dict, override_subject: Optional[str] = None, meta: Optional[Dict] = None):
+async def send_template(db, slug: str, to: List[str] | str, ctx: Dict, override_subject: Optional[str] = None, meta: Optional[Dict] = None, tenant: Optional[str] = None):
     """Renderiza um template salvo no BD, envelopa com header/footer da marca e envia.
-    Se template nao existe, abort silencioso."""
-    tmpl = await get_template(db, slug)
+    Se template nao existe, abort silencioso.
+    Iter 43: aceita tenant — busca template especifico, com fallback p/ global.
+    """
+    tmpl = await get_template(db, slug, tenant=tenant)
     if not tmpl or not tmpl.get("active", True):
-        logger.info(f"Template '{slug}' ausente/inativo; email nao enviado")
+        logger.info(f"Template '{slug}' (tenant={tenant}) ausente/inativo; email nao enviado")
         return {"sent": False, "reason": "template_missing"}
     subject = override_subject or render_template(tmpl.get("subject", ""), ctx)
     inner_html = render_template(tmpl.get("body_html", ""), ctx)
     # Envelope com logo no topo/rodape (baseado em site_settings)
     html = await wrap_email_html(db, inner_html)
     text = render_template(tmpl.get("body_text", ""), ctx) if tmpl.get("body_text") else None
-    return await send_email(db, to, subject, html, text, meta={"slug": slug, **(meta or {})})
+    return await send_email(db, to, subject, html, text, meta={"slug": slug, "tenant": tenant, **(meta or {})})
 
 
-async def trigger(db, slug: str, to: List[str] | str, ctx: Dict, meta: Optional[Dict] = None):
+async def trigger(db, slug: str, to: List[str] | str, ctx: Dict, meta: Optional[Dict] = None, tenant: Optional[str] = None):
     """Dispara um template gatilho se o trigger estiver ligado nas settings."""
     from server import get_settings
     settings = await get_settings(db)
     trigger_key = f"email_trigger_{slug}"
     if trigger_key in settings and not settings.get(trigger_key):
         return {"sent": False, "reason": "trigger_disabled"}
-    return await send_template(db, slug, to, ctx, meta=meta)
+    return await send_template(db, slug, to, ctx, meta=meta, tenant=tenant)
 
 
 # ==================== TEMPLATES DEFAULT ====================

@@ -125,6 +125,15 @@ def get_tenant(request) -> str:
     return getattr(request.state, "tenant", DEFAULT_TENANT)
 
 
+def get_admin_tenant_filter(request, query_param: Optional[str] = None) -> dict:
+    """Iter 43: helper para endpoints admin — retorna {tenant: X} ou {} (todos).
+    Prioriza query param explicito, fallback para header X-Tenant. None/all/vazio = sem filtro."""
+    sel = (query_param or request.headers.get("x-tenant") or "").strip().lower() or None
+    if sel and sel in _TENANTS_CACHE:
+        return {"tenant": sel}
+    return {}
+
+
 def get_tenant_doc(tenant_id: str) -> dict:
     """Retorna config completa do tenant (cached)."""
     return _TENANTS_CACHE.get(tenant_id) or _TENANTS_CACHE.get(DEFAULT_TENANT) or {}
