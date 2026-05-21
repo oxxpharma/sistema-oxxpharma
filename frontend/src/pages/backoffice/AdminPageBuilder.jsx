@@ -222,7 +222,7 @@ export default function AdminPageBuilder() {
             {blocks.length > 0 && (
               <div className="mt-6 border-t border-border pt-4">
                 <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary mb-3">Pré-visualização</div>
-                <div className="bg-bg-secondary rounded-lg p-3 space-y-6 max-h-[40vh] overflow-y-auto">
+                <div className="bg-bg-secondary rounded-lg p-3 space-y-6 max-h-[40vh] overflow-y-auto overflow-x-hidden">
                   <DynamicBlocks blocks={blocks} />
                 </div>
               </div>

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import ProductCard from './ProductCard';
 
 /**
@@ -38,47 +38,89 @@ function BlockRouter({ block }) {
 
 function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true }) {
   const [idx, setIdx] = useState(0);
-  const count = slides.length;
+  const total = slides.length;
+  const interval = Math.max(0, Number(autoplay_seconds ?? 6)) * 1000;
+
+  const next = useCallback(() => setIdx((i) => (i + 1) % Math.max(1, total)), [total]);
+  const prev = useCallback(() => setIdx((i) => (i - 1 + total) % Math.max(1, total)), [total]);
 
   useEffect(() => {
-    if (!count || !autoplay_seconds || autoplay_seconds <= 0) return;
-    const t = setInterval(() => setIdx((i) => (i + 1) % count), autoplay_seconds * 1000);
+    if (total <= 1 || interval === 0) return;
+    const t = setInterval(next, interval);
     return () => clearInterval(t);
-  }, [count, autoplay_seconds]);
+  }, [total, interval, next]);
 
-  if (!count) return null;
-  const cur = slides[Math.min(idx, count - 1)] || slides[0];
-  const overlay = cur.overlay_opacity ?? 0.4;
+  if (!total) return null;
+  const cur = slides[Math.min(idx, total - 1)] || {};
+  const overlay = Number(cur.overlay_opacity ?? 0.4);
+  // Break-out do container pai (max-w-7xl) para 100% da viewport
+  const breakout = { width: '100vw', marginLeft: 'calc(-50vw + 50%)' };
 
   return (
     <section
-      className="relative rounded-2xl overflow-hidden text-white min-h-[280px] sm:min-h-[360px] flex items-center transition-[background] duration-700"
-      style={{
-        background: cur.image_url
-          ? `linear-gradient(135deg, rgba(0,0,0,${overlay}), rgba(0,0,0,${overlay})), url("${cur.image_url}") center/cover`
-          : 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
-      }}
+      className="relative text-white overflow-hidden"
+      style={breakout}
       data-testid="hero-carousel"
+      data-current-slide={idx}
     >
-      <div className="px-6 sm:px-10 py-10 sm:py-16 max-w-2xl">
-        <h1 className="font-heading font-black text-2xl sm:text-4xl md:text-5xl leading-tight">{cur.title}</h1>
-        {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{cur.subtitle}</p>}
-        {cur.cta_label && cur.cta_link && (
-          <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base mt-5 hover:bg-white/90">
-            {cur.cta_label} <ArrowRight className="w-4 h-4" />
-          </Link>
-        )}
+      {/* Fundos com fade entre slides */}
+      <div className="absolute inset-0">
+        {slides.map((sl, i) => (
+          <div
+            key={i}
+            className="absolute inset-0 transition-opacity duration-700"
+            style={
+              sl.image_url
+                ? {
+                    opacity: i === idx ? 1 : 0,
+                    backgroundImage: `url("${sl.image_url}")`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }
+                : {
+                    opacity: i === idx ? 1 : 0,
+                    background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
+                  }
+            }
+          />
+        ))}
+        <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
 
-      {show_dots && count > 1 && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2" data-testid="hero-carousel-dots">
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
+        <div className="max-w-2xl w-full">
+          <h1 className="font-heading font-black text-2xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight">{cur.title}</h1>
+          {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{cur.subtitle}</p>}
+          {cur.cta_label && cur.cta_link && (
+            <div className="mt-5 sm:mt-8">
+              <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base hover:bg-white/90 transition">
+                {cur.cta_label} <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {total > 1 && (
+        <>
+          <button onClick={prev} className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center transition" aria-label="Slide anterior" data-testid="hero-carousel-prev">
+            <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
+          <button onClick={next} className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center transition" aria-label="Próximo slide" data-testid="hero-carousel-next">
+            <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
+        </>
+      )}
+
+      {total > 1 && show_dots && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2" data-testid="hero-carousel-dots">
           {slides.map((_, i) => (
             <button
               key={i}
               type="button"
               onClick={() => setIdx(i)}
               aria-label={`Ir para slide ${i + 1}`}
-              className={`w-2 h-2 rounded-full transition ${i === idx ? 'bg-white w-6' : 'bg-white/50 hover:bg-white/80'}`}
+              className={`h-2 rounded-full transition-all ${i === idx ? 'bg-white w-8' : 'bg-white/40 w-2 hover:bg-white/60'}`}
             />
           ))}
         </div>
@@ -88,28 +130,33 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
 }
 
 function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, overlay_opacity = 0.4 }) {
+  const breakout = { width: '100vw', marginLeft: 'calc(-50vw + 50%)' };
   return (
-    <section
-      className="relative rounded-2xl overflow-hidden text-white min-h-[280px] sm:min-h-[360px] flex items-center"
-      style={{
-        background: image_url
-          ? `linear-gradient(135deg, rgba(0,0,0,${overlay_opacity}), rgba(0,0,0,${overlay_opacity})), url("${image_url}") center/cover`
-          : 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
-      }}
-    >
-      <div className="px-6 sm:px-10 py-10 sm:py-16 max-w-2xl">
-        {tagline && (
-          <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-semibold px-3 py-1.5 rounded-full mb-3 sm:mb-4">
-            {tagline}
-          </div>
-        )}
-        <h1 className="font-heading font-black text-2xl sm:text-4xl md:text-5xl leading-tight">{title}</h1>
-        {subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{subtitle}</p>}
-        {cta_label && cta_link && (
-          <Link to={cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base mt-5 hover:bg-white/90">
-            {cta_label} <ArrowRight className="w-4 h-4" />
-          </Link>
-        )}
+    <section className="relative text-white overflow-hidden" style={breakout} data-testid="hero-block">
+      <div
+        className="absolute inset-0"
+        style={
+          image_url
+            ? { backgroundImage: `url("${image_url}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
+            : { background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)' }
+        }
+      />
+      {image_url && <div className="absolute inset-0 bg-black" style={{ opacity: overlay_opacity }} />}
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
+        <div className="max-w-2xl w-full">
+          {tagline && (
+            <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-semibold px-3 py-1.5 rounded-full mb-3 sm:mb-4">
+              {tagline}
+            </div>
+          )}
+          <h1 className="font-heading font-black text-2xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight">{title}</h1>
+          {subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{subtitle}</p>}
+          {cta_label && cta_link && (
+            <Link to={cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base mt-5 hover:bg-white/90">
+              {cta_label} <ArrowRight className="w-4 h-4" />
+            </Link>
+          )}
+        </div>
       </div>
     </section>
   );
