@@ -249,7 +249,24 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 6. Templates de email específicos: clonar template global no admin e marcar tenant=pharmakon (para personalizar).
 
 
-## Iter 45 (Fev/2026): CPF + CEP obrigatórios — bloqueio na origem + correção retroativa
+## Iter 46 (Fev/2026): SKU na fatura por e-mail (com fallback retroativo)
+
+### Contexto
+Equipe de faturamento pediu para o SKU dos produtos aparecer no e-mail da fatura detalhada — facilita separação/conferência. Iteração 43 já snapshotava SKU/EAN nos itens novos, mas:
+- Estava renderizado em letra pequena embaixo do nome do produto (pouca visibilidade).
+- Pedidos legados (pre-Iter 43) não tinham SKU snapshotado e portanto não exibiam nada.
+
+### Solução
+Em `_send_admin_invoice_if_configured`:
+- Tabela de itens ganhou **coluna dedicada "SKU"** entre "Produto" e "Qtd", em fonte monoespaçada para destacar.
+- EAN, quando existir, aparece em segunda linha pequena dentro da mesma célula.
+- **Fallback retroativo**: para pedidos legados sem SKU no snapshot, faz 1 batch lookup em `db.products` (1 query só, independente da quantidade de itens) e completa SKU/EAN no render.
+
+### Validação (script local)
+1. Pedido legacy (item com `sku=""`) + produto cadastrado com `sku="OZX-SPORT-60"` → renderiza `OZX-SPORT-60` na coluna SKU.
+2. Pedido novo (item com `sku="ABC-001"`) → usa snapshot direto.
+
+
 
 ### Contexto / Problema
 Faturas chegando ao cliente sem CPF e/ou CEP. Causa raiz:

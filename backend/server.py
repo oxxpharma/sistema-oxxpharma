@@ -1588,26 +1588,32 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
         ctx = order_ctx(order, order_user)
         # Pre-renderiza HTML com items, endereco, totais (o render_template nao suporta loops)
         items = order.get("items") or []
+        # Iter 46: enriquece SKU/EAN para pedidos legados que nao snapshotaram esses
+        # campos. Faz 1 lookup batch para nao impactar performance.
+        missing_sku_ids = [it.get("product_id") for it in items if it.get("product_id") and not (it.get("sku") or "").strip()]
+        sku_lookup: dict = {}
+        if missing_sku_ids:
+            cur = db.products.find({"product_id": {"$in": missing_sku_ids}}, {"_id": 0, "product_id": 1, "sku": 1, "ean": 1})
+            async for p in cur:
+                sku_lookup[p["product_id"]] = {"sku": p.get("sku") or "", "ean": p.get("ean") or ""}
         items_rows = []
         for it in items:
             qty = int(it.get("quantity") or 1)
             unit = float(it.get("price") or 0)
             total = float(it.get("total") or (qty * unit))
-            # Iter 43: SKU + EAN visiveis no resumo do faturamento
+            # Iter 43/46: SKU + EAN no email da fatura (coluna dedicada).
             sku = (it.get("sku") or "").strip()
             ean = (it.get("ean") or "").strip()
-            id_lines = []
-            if sku:
-                id_lines.append(f"<span style='color:#888;'>SKU: {sku}</span>")
-            if ean:
-                id_lines.append(f"<span style='color:#888;'>EAN: {ean}</span>")
-            id_html = "<br>".join(id_lines)
+            if (not sku or not ean) and it.get("product_id") in sku_lookup:
+                sku = sku or sku_lookup[it["product_id"]]["sku"]
+                ean = ean or sku_lookup[it["product_id"]]["ean"]
+            sku_cell = sku or "—"
+            ean_html = f"<br><span style='color:#999;font-size:10px;'>EAN: {ean}</span>" if ean else ""
             name_cell = (it.get('name') or it.get('product_name') or '')[:80]
-            if id_html:
-                name_cell = f"{name_cell}<br><small style='font-size:11px;'>{id_html}</small>"
             items_rows.append(
                 f"<tr>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;'>{name_cell}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;font-family:monospace;font-size:12px;color:#222;white-space:nowrap;'>{sku_cell}{ean_html}</td>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:center;'>{qty}</td>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:right;'>R$ {unit:.2f}</td>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;text-align:right;font-weight:bold;'>R$ {total:.2f}</td>"
@@ -1617,6 +1623,7 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
             "<table width='100%' cellspacing='0' cellpadding='0' style='border-collapse:collapse;font-size:13px;'>"
             "<thead><tr style='background:#F7F7F7;'>"
             "<th style='padding:6px 8px;text-align:left;'>Produto</th>"
+            "<th style='padding:6px 8px;text-align:left;'>SKU</th>"
             "<th style='padding:6px 8px;text-align:center;'>Qtd</th>"
             "<th style='padding:6px 8px;text-align:right;'>Unit.</th>"
             "<th style='padding:6px 8px;text-align:right;'>Total</th>"
