@@ -19,7 +19,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, BackgroundTasks, Header
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from motor.motor_asyncio import AsyncIOMotorClient
 import jwt
 
@@ -249,6 +249,22 @@ class AddressCreate(BaseModel):
     state: str
     zip_code: str
     is_default: bool = False
+
+    @field_validator("zip_code")
+    @classmethod
+    def _validate_zip(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v or "")
+        if len(digits) != 8:
+            raise ValueError("CEP invalido: precisa ter 8 digitos (ex: 01310-100)")
+        # Normaliza para 12345-678 (mantem formato comum no Brasil)
+        return f"{digits[:5]}-{digits[5:]}"
+
+    @field_validator("street", "number", "neighborhood", "city", "state")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("Campo obrigatorio nao preenchido")
+        return v.strip()
 
 class ProductCreate(BaseModel):
     name: str
@@ -1049,6 +1065,23 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     addr = next((a for a in addrs if a.get("address_id") == data.address_id), None)
     if not addr:
         raise HTTPException(status_code=400, detail="Endereco nao encontrado")
+    # Iter 45: GARANTIA HARD de CPF + CEP no pedido (faturas vinham incompletas).
+    # CPF: validacao do user (precisa ter pelo menos 11 digitos).
+    user_cpf_digits = re.sub(r"\D", "", (user.get("cpf") or user.get("cpf_digits") or ""))
+    if len(user_cpf_digits) < 11:
+        raise HTTPException(
+            status_code=400,
+            detail="CPF obrigatorio para finalizar o pedido. Cadastre seu CPF em Minha conta antes de continuar.",
+        )
+    # CEP: valida o endereco selecionado (legacy: enderecos antigos podem ter zip vazio).
+    addr_zip_digits = re.sub(r"\D", "", str(addr.get("zip_code") or ""))
+    if len(addr_zip_digits) != 8:
+        raise HTTPException(
+            status_code=400,
+            detail="CEP obrigatorio no endereco de entrega. Edite seu endereco e informe o CEP completo (8 digitos).",
+        )
+    # Normaliza zip_code dentro do addr antes de virar shipping_address no order
+    addr = {**addr, "zip_code": f"{addr_zip_digits[:5]}-{addr_zip_digits[5:]}"}
     # Build order items
     items = []
     subtotal = 0
@@ -1186,6 +1219,11 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     order = {
         "order_id": gen_id("ord_"), "user_id": user["user_id"],
         "customer_name": user.get("name"), "customer_email": user.get("email"),
+        # Iter 45: snapshot do CPF + telefone do cliente no momento da compra
+        # (preserva dado fiscal mesmo se o user editar/limpar o perfil depois).
+        "customer_cpf": user.get("cpf") or "",
+        "customer_cpf_digits": user_cpf_digits,
+        "customer_phone": user.get("phone") or "",
         "items": items, "subtotal": round(subtotal, 2),
         "shipping_cost": shipping,
         **shipping_meta,
@@ -1273,7 +1311,7 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
 # ==================== ADMIN ORDERS ====================
 
 @app.get("/api/admin/orders")
-async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
     q = {}
     if status:
@@ -1284,9 +1322,65 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
         q["tenant"] = selected_tenant
     if search:
         q["$or"] = [{"order_id": {"$regex": search, "$options": "i"}}, {"customer_name": {"$regex": search, "$options": "i"}}, {"customer_email": {"$regex": search, "$options": "i"}}]
+    # Iter 45: filtro de pedidos com dados fiscais/logisticos faltantes (CPF ou CEP).
+    if missing_data:
+        q["$and"] = (q.get("$and") or []) + [{"$or": [
+            {"customer_cpf_digits": {"$in": [None, ""]}},
+            {"customer_cpf_digits": {"$exists": False}},
+            {"shipping_address.zip_code": {"$in": [None, ""]}},
+            {"shipping_address.zip_code": {"$not": {"$regex": r"\d{5}-?\d{3}"}}},
+        ]}]
     total = await db.orders.count_documents(q)
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"orders": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+
+@app.put("/api/admin/orders/{order_id}/fix-missing")
+async def admin_fix_order_missing(request: Request, order_id: str, user: dict = Depends(require_admin())):
+    """Iter 45: permite ao admin completar CPF e/ou endereco de pedidos legados
+    que vieram sem dados fiscais/logisticos. Tambem replica para o user master se solicitado."""
+    db = request.app.db
+    body = await request.json() or {}
+    o = await db.orders.find_one({"order_id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    patch = {}
+    # CPF
+    cpf_raw = (body.get("customer_cpf") or "").strip()
+    if cpf_raw:
+        digits = re.sub(r"\D", "", cpf_raw)
+        if len(digits) != 11:
+            raise HTTPException(status_code=400, detail="CPF deve ter 11 digitos")
+        patch["customer_cpf"] = f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+        patch["customer_cpf_digits"] = digits
+        if body.get("propagate_to_user"):
+            await db.users.update_one(
+                {"user_id": o.get("user_id")},
+                {"$set": {"cpf": patch["customer_cpf"], "cpf_digits": digits}},
+            )
+    # Endereco (campo a campo dentro de shipping_address)
+    addr_patch = body.get("shipping_address") or {}
+    if addr_patch:
+        current = dict(o.get("shipping_address") or {})
+        for k in ("street", "number", "complement", "neighborhood", "city", "state", "zip_code", "name"):
+            v = addr_patch.get(k)
+            if v is not None and str(v).strip():
+                current[k] = str(v).strip()
+        # Valida CEP final
+        zip_digits = re.sub(r"\D", "", str(current.get("zip_code") or ""))
+        if zip_digits:
+            if len(zip_digits) != 8:
+                raise HTTPException(status_code=400, detail="CEP deve ter 8 digitos")
+            current["zip_code"] = f"{zip_digits[:5]}-{zip_digits[5:]}"
+        patch["shipping_address"] = current
+    if not patch:
+        raise HTTPException(status_code=400, detail="Nada a atualizar")
+    patch["updated_at"] = now_iso()
+    patch["data_fixed_by"] = user["user_id"]
+    patch["data_fixed_at"] = now_iso()
+    await db.orders.update_one({"order_id": order_id}, {"$set": patch})
+    return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+
 
 @app.put("/api/admin/orders/{order_id}/status")
 async def admin_update_order_status(request: Request, order_id: str, user: dict = Depends(require_admin())):
@@ -1394,11 +1488,17 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
             "</tr></thead><tbody>" + "".join(items_rows) + "</tbody></table>"
         )
         addr = order.get("shipping_address") or {}
+        # Iter 45: usa CEP do snapshot direto; valida e formata por seguranca
+        zip_digits = re.sub(r"\D", "", str(addr.get('zip_code') or ''))
+        zip_fmt = f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else (addr.get('zip_code') or '— CEP nao informado —')
+        cpf_snapshot = order.get("customer_cpf") or order_user.get("cpf") or ""
+        cpf_line = f"CPF: {cpf_snapshot}<br>" if cpf_snapshot else ""
         address_html = (
             f"{addr.get('name') or order_user.get('name') or ''}<br>"
+            f"{cpf_line}"
             f"{addr.get('street') or ''}, {addr.get('number') or ''} {addr.get('complement') or ''}<br>"
             f"{addr.get('neighborhood') or ''} - {addr.get('city') or ''}/{addr.get('state') or ''}<br>"
-            f"CEP {addr.get('zip_code') or ''}"
+            f"CEP {zip_fmt}"
         )
         ctx["invoice"] = {
             "items_table_html": items_table,

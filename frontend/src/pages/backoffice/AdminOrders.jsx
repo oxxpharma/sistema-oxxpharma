@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2 } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
@@ -25,12 +26,25 @@ const STATUS_LABELS = {
 
 const PAGE_LIMIT = 20;
 
+// Iter 45: detecta pedidos com CPF ou CEP faltantes/invalidos
+const isMissingCpf = (o) => {
+  const d = (o.customer_cpf_digits || (o.customer_cpf || '').replace(/\D/g, ''));
+  return !d || d.length < 11;
+};
+const isMissingCep = (o) => {
+  const zip = (o.shipping_address?.zip_code || '').replace(/\D/g, '');
+  return zip.length !== 8;
+};
+const orderHasGaps = (o) => isMissingCpf(o) || isMissingCep(o);
+
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
+  const [missingOnly, setMissingOnly] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [fixing, setFixing] = useState(null);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -41,6 +55,7 @@ export default function AdminOrders() {
       const q = new URLSearchParams();
       if (status) q.set('status', status);
       if (search) q.set('search', search);
+      if (missingOnly) q.set('missing_data', 'true');
       q.set('page', String(targetPage));
       q.set('limit', String(PAGE_LIMIT));
       const d = await api.get(`/api/admin/orders?${q}`);
@@ -50,7 +65,7 @@ export default function AdminOrders() {
       setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly]);
 
   const updateStatus = async (orderId, newStatus) => {
     try {
@@ -102,6 +117,11 @@ export default function AdminOrders() {
         <select value={status} onChange={e => setStatus(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" data-testid="status-filter">
           {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
+        <label className={`h-10 px-3 inline-flex items-center gap-2 rounded-lg text-sm cursor-pointer border ${missingOnly ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-bg-secondary border-border'}`} data-testid="missing-data-filter">
+          <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
+          <AlertTriangle className="w-4 h-4" />
+          Dados incompletos
+        </label>
         <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
 
@@ -122,9 +142,18 @@ export default function AdminOrders() {
               <tbody>
                 {orders.map(o => {
                   const s = STATUS_LABELS[o.order_status] || STATUS_LABELS.pending;
+                  const gaps = orderHasGaps(o);
                   return (
-                    <tr key={o.order_id} className="border-t border-border hover:bg-bg-secondary/50" data-testid={`order-row-${o.order_id}`}>
-                      <td className="p-3 font-mono text-xs">#{o.order_id.slice(-8).toUpperCase()}</td>
+                    <tr key={o.order_id} className={`border-t border-border hover:bg-bg-secondary/50 ${gaps ? 'bg-rose-50/40' : ''}`} data-testid={`order-row-${o.order_id}`}>
+                      <td className="p-3 font-mono text-xs">
+                        #{o.order_id.slice(-8).toUpperCase()}
+                        {gaps && (
+                          <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded" title={[isMissingCpf(o) && 'CPF', isMissingCep(o) && 'CEP'].filter(Boolean).join(' + ')}>
+                            <AlertTriangle className="w-3 h-3" />
+                            {isMissingCpf(o) ? 'CPF' : ''}{isMissingCpf(o) && isMissingCep(o) ? '+' : ''}{isMissingCep(o) ? 'CEP' : ''}
+                          </span>
+                        )}
+                      </td>
                       <td className="p-3">
                         <div className="font-semibold">{o.customer_name}</div>
                         <div className="text-xs text-txt-secondary">{o.customer_email}</div>
@@ -133,6 +162,11 @@ export default function AdminOrders() {
                       <td className="p-3 text-right font-bold">{formatCurrency(o.total)}</td>
                       <td className="p-3 text-center"><Badge variant={s.variant}>{s.label}</Badge></td>
                       <td className="p-3 text-right">
+                        {gaps && (
+                          <button onClick={() => setFixing(o)} className="p-2 hover:bg-rose-100 rounded ml-1" data-testid={`fix-order-${o.order_id}`} title="Completar CPF/CEP">
+                            <FileEdit className="w-4 h-4 text-rose-600" />
+                          </button>
+                        )}
                         <button onClick={() => setSelected(o)} className="p-2 hover:bg-bg-secondary rounded" data-testid={`view-order-${o.order_id}`}><Eye className="w-4 h-4" /></button>
                         <button onClick={() => deleteOrder(o)} className="p-2 hover:bg-red-50 rounded ml-1" data-testid={`delete-order-${o.order_id}`} title="Deletar pedido"><Trash2 className="w-4 h-4 text-red-500" /></button>
                       </td>
@@ -246,6 +280,117 @@ export default function AdminOrders() {
           </div>
         </div>
       )}
+      {fixing && (
+        <FixOrderModal
+          order={fixing}
+          onClose={() => setFixing(null)}
+          onSaved={(updated) => {
+            setOrders((prev) => prev.map((x) => (x.order_id === updated.order_id ? updated : x)));
+            if (selected?.order_id === updated.order_id) setSelected(updated);
+            setFixing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function FixOrderModal({ order, onClose, onSaved }) {
+  const initialCpfDigits = (order.customer_cpf_digits || (order.customer_cpf || '').replace(/\D/g, ''));
+  const addr0 = order.shipping_address || {};
+  const [cpf, setCpf] = useState(initialCpfDigits);
+  const [propagate, setPropagate] = useState(true);
+  const [zip, setZip] = useState(addr0.zip_code || '');
+  const [street, setStreet] = useState(addr0.street || '');
+  const [number, setNumber] = useState(addr0.number || '');
+  const [complement, setComplement] = useState(addr0.complement || '');
+  const [neighborhood, setNeighborhood] = useState(addr0.neighborhood || '');
+  const [city, setCity] = useState(addr0.city || '');
+  const [state, setState] = useState(addr0.state || '');
+  const [saving, setSaving] = useState(false);
+
+  const formatCpf = (raw) => {
+    const d = (raw || '').replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+    if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  };
+  const formatZip = (raw) => {
+    const d = (raw || '').replace(/\D/g, '').slice(0, 8);
+    return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
+  };
+
+  const save = async () => {
+    const cpfDigits = (cpf || '').replace(/\D/g, '');
+    const zipDigits = (zip || '').replace(/\D/g, '');
+    const body = {};
+    if (cpfDigits && cpfDigits !== initialCpfDigits) {
+      if (cpfDigits.length !== 11) { toast.error('CPF precisa ter 11 dígitos'); return; }
+      body.customer_cpf = cpfDigits;
+      body.propagate_to_user = propagate;
+    }
+    const addrPatch = {};
+    if (zipDigits) {
+      if (zipDigits.length !== 8) { toast.error('CEP precisa ter 8 dígitos'); return; }
+      addrPatch.zip_code = zipDigits;
+    }
+    [['street', street], ['number', number], ['complement', complement], ['neighborhood', neighborhood], ['city', city], ['state', state]]
+      .forEach(([k, v]) => { if (v && v.trim()) addrPatch[k] = v.trim(); });
+    if (Object.keys(addrPatch).length) body.shipping_address = addrPatch;
+    if (!body.customer_cpf && !body.shipping_address) { toast.error('Nada a atualizar'); return; }
+    setSaving(true);
+    try {
+      const updated = await api.put(`/api/admin/orders/${order.order_id}/fix-missing`, body);
+      toast.success('Pedido atualizado');
+      onSaved(updated);
+    } catch (err) { toast.error(err.message || 'Erro'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose} data-testid="fix-order-modal">
+      <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-border p-5 flex items-center justify-between">
+          <div>
+            <h2 className="font-heading font-black text-lg flex items-center gap-2"><FileEdit className="w-5 h-5 text-rose-600" /> Completar dados do pedido</h2>
+            <div className="text-xs text-txt-secondary">#{order.order_id.slice(-8).toUpperCase()} · {order.customer_name}</div>
+          </div>
+          <button onClick={onClose} data-testid="close-fix-modal"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-5">
+          <section className="space-y-2">
+            <div className="font-bold text-sm flex items-center gap-2">CPF do cliente {isMissingCpf(order) && <span className="text-[10px] uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded">faltando</span>}</div>
+            <Input value={formatCpf(cpf)} onChange={(e) => setCpf(e.target.value)} placeholder="000.000.000-00" data-testid="fix-cpf-input" />
+            <label className="flex items-center gap-2 text-xs text-txt-secondary cursor-pointer">
+              <input type="checkbox" checked={propagate} onChange={(e) => setPropagate(e.target.checked)} data-testid="fix-propagate-user" />
+              Salvar também no cadastro do cliente
+            </label>
+          </section>
+
+          <section className="space-y-2">
+            <div className="font-bold text-sm flex items-center gap-2">Endereço de entrega {isMissingCep(order) && <span className="text-[10px] uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded">CEP faltando</span>}</div>
+            <Input label="CEP*" value={formatZip(zip)} onChange={(e) => setZip(e.target.value)} placeholder="00000-000" maxLength={9} data-testid="fix-zip-input" />
+            <div className="grid grid-cols-3 gap-2">
+              <Input className="col-span-2" label="Rua" value={street} onChange={(e) => setStreet(e.target.value)} data-testid="fix-street-input" />
+              <Input label="Número" value={number} onChange={(e) => setNumber(e.target.value)} data-testid="fix-number-input" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Complemento" value={complement} onChange={(e) => setComplement(e.target.value)} />
+              <Input label="Bairro" value={neighborhood} onChange={(e) => setNeighborhood(e.target.value)} data-testid="fix-neighborhood-input" />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Input className="col-span-2" label="Cidade" value={city} onChange={(e) => setCity(e.target.value)} data-testid="fix-city-input" />
+              <Input label="UF" value={state} onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))} maxLength={2} data-testid="fix-state-input" />
+            </div>
+          </section>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <Button variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button onClick={save} loading={saving} data-testid="save-fix-btn"><Save className="w-4 h-4" /> Salvar correções</Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

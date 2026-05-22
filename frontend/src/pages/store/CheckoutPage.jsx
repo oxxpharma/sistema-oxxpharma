@@ -152,6 +152,13 @@ export default function CheckoutPage() {
   const selectedAddrObj = addresses.find(a => a.address_id === selectedAddr);
   const selectedAddrCep = selectedAddrObj?.zip_code || '';
 
+  // Iter 45: GARANTIA de CPF e CEP - exigidos antes do checkout
+  const userCpfDigits = (user?.cpf_digits || (user?.cpf || '').replace(/\D/g, '') || '');
+  const hasCpf = userCpfDigits.length >= 11;
+  const selectedAddrZipDigits = (selectedAddrObj?.zip_code || '').replace(/\D/g, '');
+  const hasValidCep = selectedAddrZipDigits.length === 8;
+  const canCheckout = hasCpf && hasValidCep && selectedAddr;
+
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
 
   return (
@@ -165,6 +172,22 @@ export default function CheckoutPage() {
             <div className="font-semibold text-brand-main">Compra indicada por {refName}</div>
             <div className="text-xs text-txt-secondary">Sua compra gerará cashback para o afiliado.</div>
           </div>
+        </div>
+      )}
+
+      {/* Iter 45: bloqueio claro quando CPF nao esta no cadastro */}
+      {!hasCpf && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-xl p-4 flex items-start gap-3 mb-6" data-testid="checkout-need-cpf">
+          <FileText className="w-5 h-5 text-rose-600 mt-0.5 shrink-0" />
+          <div className="flex-1 text-sm">
+            <div className="font-bold text-rose-700">CPF obrigatório para finalizar a compra</div>
+            <div className="text-rose-700/80 text-xs mt-1">
+              Precisamos do seu CPF para emitir corretamente a nota e o pedido.
+            </div>
+          </div>
+          <Link to="/minha-conta" className="text-xs font-bold bg-rose-600 text-white px-3 py-1.5 rounded-lg whitespace-nowrap" data-testid="checkout-fill-cpf-btn">
+            Cadastrar CPF
+          </Link>
         </div>
       )}
 
@@ -379,9 +402,18 @@ export default function CheckoutPage() {
               <span className="font-bold">Total</span>
               <span className="font-heading font-black text-2xl text-brand-main">{formatCurrency(total)}</span>
             </div>
-            <Button onClick={submit} loading={submitting} className="w-full mt-5" size="lg" data-testid="confirm-order-btn" disabled={!selectedAddr || (!isFreeShippingByRule && !selectedShipping)}>
+            <Button onClick={submit} loading={submitting} className="w-full mt-5" size="lg" data-testid="confirm-order-btn" disabled={!canCheckout || (!isFreeShippingByRule && !selectedShipping)}>
               Confirmar pedido
             </Button>
+            {!canCheckout && (
+              <div className="mt-3 text-[11px] text-rose-600 font-semibold text-center" data-testid="checkout-block-reason">
+                {!hasCpf
+                  ? 'É preciso cadastrar seu CPF antes de finalizar o pedido.'
+                  : !hasValidCep
+                    ? 'O endereço selecionado está sem CEP válido (8 dígitos).'
+                    : 'Selecione um endereço de entrega.'}
+              </div>
+            )}
             <Link to="/carrinho" className="block text-center mt-3 text-xs text-txt-secondary">Voltar ao carrinho</Link>
           </div>
         </div>

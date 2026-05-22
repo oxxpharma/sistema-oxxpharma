@@ -63,9 +63,20 @@ async function request(path, { method = 'GET', body, headers = {}, ...rest } = {
     }
   }
   if (!res.ok) {
-    const msg = data?.detail
-      ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))
-      : `Erro ${res.status}`;
+    let msg;
+    if (typeof data?.detail === 'string') {
+      msg = data.detail;
+    } else if (Array.isArray(data?.detail)) {
+      // Iter 45: Erros 422 do Pydantic vem como lista [{loc, msg, ...}]; extrai mensagens legiveis.
+      msg = data.detail
+        .map((d) => (d?.msg || '').replace(/^Value error,\s*/, ''))
+        .filter(Boolean)
+        .join(' · ') || `Erro ${res.status}`;
+    } else if (data?.detail) {
+      msg = JSON.stringify(data.detail);
+    } else {
+      msg = `Erro ${res.status}`;
+    }
     throw new Error(msg);
   }
   return data;

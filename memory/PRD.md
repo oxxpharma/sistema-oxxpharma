@@ -249,6 +249,41 @@ Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`
 6. Templates de email específicos: clonar template global no admin e marcar tenant=pharmakon (para personalizar).
 
 
+## Iter 45 (Fev/2026): CPF + CEP obrigatórios — bloqueio na origem + correção retroativa
+
+### Contexto / Problema
+Faturas chegando ao cliente sem CPF e/ou CEP. Causa raiz:
+- `user.cpf` podia ficar vazio; nada validava no checkout.
+- `AddressCreate.zip_code: str` aceitava string vazia.
+- O CPF não era snapshotado no pedido — se o user limpasse o cadastro depois, a fatura perdia o dado.
+- Não havia ferramenta para o admin corrigir pedidos legados.
+
+### Solução
+**Backend**
+- `AddressCreate` ganhou `@field_validator("zip_code")` (exige 8 dígitos, normaliza para `12345-678`) e `_non_empty` em street/number/neighborhood/city/state.
+- `POST /api/checkout` bloqueia (HTTP 400 com mensagem PT-BR) quando o user não tem 11 dígitos de CPF ou o endereço escolhido tem CEP inválido. Antes de gravar, normaliza o `zip_code` no `shipping_address`.
+- Snapshot no doc do pedido: `customer_cpf` (formatado), `customer_cpf_digits` (somente dígitos) e `customer_phone`.
+- Fatura HTML usa `order.customer_cpf` com fallback ao `user.cpf` — preserva dado mesmo se o user editar o perfil depois.
+- `GET /api/admin/orders?missing_data=true` filtra pedidos sem CPF ou com CEP inválido (regex `\d{5}-?\d{3}`).
+- `PUT /api/admin/orders/{order_id}/fix-missing` aceita `{customer_cpf, propagate_to_user, shipping_address}` e atualiza patch-style (registra `data_fixed_by/at`).
+
+**Frontend**
+- `lib/api.js`: erros 422 do Pydantic (array de objetos) agora são serializados em mensagens humanas (sem "Value error,").
+- `CheckoutPage.jsx`: banner vermelho "CPF obrigatório" com link direto para `/minha-conta` quando falta CPF; botão "Confirmar pedido" fica desabilitado e mostra motivo em PT-BR.
+- `AdminOrders.jsx`: novo filtro "Dados incompletos" (chip vermelho), linha pintada de rosa para pedidos com gaps, etiqueta "⚠ CPF/CEP" e botão `FileEdit` que abre o modal `FixOrderModal` (CPF + endereço completo, com checkbox "Salvar também no cadastro do cliente").
+
+### Arquivos
+- `backend/server.py` — `AddressCreate`, `checkout` (validações + snapshot), template fatura, `admin_list_orders` (filtro), novo `admin_fix_order_missing`.
+- `frontend/src/lib/api.js`
+- `frontend/src/pages/store/CheckoutPage.jsx`
+- `frontend/src/pages/backoffice/AdminOrders.jsx`
+
+### Validação automática (curl)
+1. POST endereço com `zip_code: "123"` → 422 com `"CEP invalido: precisa ter 8 digitos (ex: 01310-100)"`.
+2. GET `/api/admin/orders?missing_data=true` → 44 pedidos legados detectados.
+3. PUT `/fix-missing` com CPF de 3 dígitos → 400 com `"CPF deve ter 11 digitos"`.
+4. PUT `/fix-missing` válido → grava `123.456.789-01` e `01310-100` (formatados).
+
 ## Iter 44 (Fev/2026): Aparência por marca + Page Builder com carrossel e upload
 
 ### Contexto / Problema
