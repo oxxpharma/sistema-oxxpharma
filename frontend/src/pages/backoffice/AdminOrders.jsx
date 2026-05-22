@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2 } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
@@ -88,6 +88,19 @@ export default function AdminOrders() {
       setOrders(prev => prev.map(o => o.order_id === orderId ? updated : o));
       if (selected?.order_id === orderId) setSelected(updated);
     } catch (err) { toast.error(err.message); }
+  };
+
+  const resendInvoice = async (o, withPrompt = false) => {
+    let to = '';
+    if (withPrompt) {
+      const ans = window.prompt('Reenviar fatura detalhada para qual e-mail?\n\nDeixe vazio para usar o e-mail de faturamento padrão.');
+      if (ans === null) return;
+      to = ans;
+    }
+    try {
+      const r = await api.post(`/api/admin/orders/${o.order_id}/resend-invoice`, to.trim() ? { to: to.trim() } : {});
+      toast.success(`Fatura reenviada para ${r.sent_to}`);
+    } catch (err) { toast.error(err.message || 'Falha ao reenviar e-mail'); }
   };
 
   const deleteOrder = async (o) => {
@@ -202,6 +215,7 @@ export default function AdminOrders() {
                           </button>
                         )}
                         <button onClick={() => setSelected(o)} className="p-2 hover:bg-bg-secondary rounded" data-testid={`view-order-${o.order_id}`}><Eye className="w-4 h-4" /></button>
+                        <button onClick={() => resendInvoice(o, false)} className="p-2 hover:bg-emerald-50 rounded ml-1" data-testid={`resend-invoice-${o.order_id}`} title="Reenviar fatura detalhada por e-mail"><Mail className="w-4 h-4 text-emerald-600" /></button>
                         <button onClick={() => deleteOrder(o)} className="p-2 hover:bg-red-50 rounded ml-1" data-testid={`delete-order-${o.order_id}`} title="Deletar pedido"><Trash2 className="w-4 h-4 text-red-500" /></button>
                       </td>
                     </tr>
@@ -256,6 +270,17 @@ export default function AdminOrders() {
                   <div className="text-xs">Código {selected.affiliate_code} · {formatCurrency(selected.affiliate_commission)}</div>
                 </div>
               )}
+
+              <div className="border border-emerald-200 bg-emerald-50/40 rounded-lg p-3 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-bold text-emerald-700 flex items-center gap-2"><Mail className="w-4 h-4" /> Fatura detalhada por e-mail</div>
+                  <div className="text-[11px] text-txt-secondary">Envia ao destinatário configurado em Faturamento ou para um e-mail específico.</div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => resendInvoice(selected, false)} data-testid="resend-invoice-modal-btn">Reenviar</Button>
+                  <Button size="sm" variant="ghost" onClick={() => resendInvoice(selected, true)} data-testid="resend-invoice-other-btn">Outro e-mail…</Button>
+                </div>
+              </div>
 
               {selected.invoice_number ? (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center justify-between">

@@ -1470,6 +1470,45 @@ async def admin_backfill_missing_orders(request: Request, user: dict = Depends(r
     return stats
 
 
+@app.post("/api/admin/orders/{order_id}/resend-invoice")
+async def admin_resend_invoice_email(request: Request, order_id: str, user: dict = Depends(require_admin())):
+    """Iter 46: reenvia o e-mail de fatura detalhada (mesmo template
+    'invoice_admin_paid' disparado quando o pedido vira pago) para o destinatario
+    configurado em 'order_invoice_email_to'. Permite opcionalmente sobrescrever
+    o destinatario via body {"to": "outro@email.com"}."""
+    db = request.app.db
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    order_user = await db.users.find_one({"user_id": o.get("user_id")}, {"_id": 0, "password_hash": 0}) or {}
+    body = {}
+    try:
+        body = await request.json() or {}
+    except Exception:
+        body = {}
+    override_to = (body.get("to") or "").strip()
+    if override_to:
+        # Trocamos temporariamente o destinatario salvo nas settings antes de chamar
+        # a funcao existente (que ja sabe montar SKU/EAN/endereco/CPF perfeitamente).
+        s = await get_settings(db)
+        original = s.get("order_invoice_email_to") or ""
+        await db.settings.update_one({"_id": "global"}, {"$set": {"order_invoice_email_to": override_to}}, upsert=True)
+        try:
+            await _send_admin_invoice_if_configured(db, o, order_user)
+        finally:
+            await db.settings.update_one({"_id": "global"}, {"$set": {"order_invoice_email_to": original}}, upsert=True)
+    else:
+        s = await get_settings(db)
+        to_addr = (s.get("order_invoice_email_to") or "").strip()
+        if not to_addr:
+            raise HTTPException(
+                status_code=400,
+                detail="Defina o e-mail de faturamento em Configuracoes > E-mails (campo 'order_invoice_email_to') antes de reenviar.",
+            )
+        await _send_admin_invoice_if_configured(db, o, order_user)
+    return {"ok": True, "sent_to": override_to or (await get_settings(db)).get("order_invoice_email_to")}
+
+
 @app.put("/api/admin/orders/{order_id}/fix-missing")
 async def admin_fix_order_missing(request: Request, order_id: str, user: dict = Depends(require_admin())):
     """Iter 45: permite ao admin completar CPF e/ou endereco de pedidos legados
