@@ -278,6 +278,14 @@ Faturas chegando ao cliente sem CPF e/ou CEP. Causa raiz:
 - `frontend/src/pages/store/CheckoutPage.jsx`
 - `frontend/src/pages/backoffice/AdminOrders.jsx`
 
+### Backfill automatizado (lote)
+- `POST /api/admin/orders/backfill-missing-data`: varre TODOS os pedidos com gaps e tenta preencher puxando de:
+  1. `users.cpf`/`users.cpf_digits` (cadastro / Clube de Benefícios já caem aqui — sao salvos no mesmo doc do user)
+  2. `users.addresses[]` (default primeiro, depois primeiro com CEP de 8 dígitos)
+  3. `shipping_address` de pedidos anteriores do mesmo user com CEP válido
+- Retorna estatísticas por fonte (`cpf_sources.user`, `cep_sources.user_address`, `cep_sources.prior_order`) e lista do que ainda falta para correção manual.
+- Botão "Preencher CPF/CEP automaticamente" no topo de `/backoffice/pedidos` + card de resultado com o resumo.
+
 ### Validação automática (curl)
 1. POST endereço com `zip_code: "123"` → 422 com `"CEP invalido: precisa ter 8 digitos (ex: 01310-100)"`.
 2. GET `/api/admin/orders?missing_data=true` → 44 pedidos legados detectados.

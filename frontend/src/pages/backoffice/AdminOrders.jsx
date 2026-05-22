@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
@@ -48,6 +48,20 @@ export default function AdminOrders() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState(null);
+
+  const runBackfill = async () => {
+    if (!window.confirm('Tentar preencher CPF e CEP de TODOS os pedidos com dados faltantes a partir do cadastro do cliente, endereços salvos e pedidos anteriores?\n\nIsso pode levar alguns segundos.')) return;
+    setBackfilling(true);
+    try {
+      const r = await api.post('/api/admin/orders/backfill-missing-data');
+      setBackfillResult(r);
+      toast.success(`${r.fully_fixed} pedido(s) corrigidos automaticamente. ${r.still_missing.length} ainda precisam de correção manual.`);
+      await load(1);
+    } catch (err) { toast.error(err.message || 'Erro ao executar backfill'); }
+    finally { setBackfilling(false); }
+  };
 
   const load = async (targetPage = page) => {
     setLoading(true);
@@ -100,7 +114,27 @@ export default function AdminOrders() {
 
   return (
     <div data-testid="admin-orders">
-      <h1 className="font-heading font-black text-3xl text-txt-primary mb-6">Pedidos</h1>
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+        <h1 className="font-heading font-black text-3xl text-txt-primary">Pedidos</h1>
+        <Button onClick={runBackfill} loading={backfilling} variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-50" data-testid="backfill-missing-btn">
+          <Wand2 className="w-4 h-4" /> Preencher CPF/CEP automaticamente
+        </Button>
+      </div>
+
+      {backfillResult && (
+        <div className="mb-4 bg-white border border-emerald-200 rounded-xl p-4 flex flex-wrap items-center gap-4" data-testid="backfill-result-card">
+          <div className="flex-1 min-w-[260px]">
+            <div className="text-sm font-bold text-emerald-700">Backfill concluído</div>
+            <div className="text-xs text-txt-secondary mt-1">
+              {backfillResult.total_scanned} pedido(s) escaneados · {backfillResult.filled_cpf} CPF preenchido(s) ({backfillResult.cpf_sources?.user || 0} do cadastro) · {backfillResult.filled_cep} CEP preenchido(s) ({backfillResult.cep_sources?.user_address || 0} do cadastro, {backfillResult.cep_sources?.prior_order || 0} de pedidos anteriores)
+            </div>
+            <div className="text-xs font-semibold text-rose-700 mt-1">
+              {backfillResult.still_missing?.length || 0} pedido(s) ainda precisam de correção manual (clientes sem CPF cadastrado em lugar nenhum).
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setBackfillResult(null)} data-testid="close-backfill-result"><X className="w-4 h-4" /></Button>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-border p-4 mb-4 flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">

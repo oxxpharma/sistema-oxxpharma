@@ -1335,6 +1335,141 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
     return {"orders": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
 
+@app.post("/api/admin/orders/backfill-missing-data")
+async def admin_backfill_missing_orders(request: Request, user: dict = Depends(require_admin())):
+    """Iter 45: varre TODOS os pedidos com CPF/CEP faltantes e tenta preencher
+    automaticamente puxando dados de:
+      1) cadastro do usuario (users.cpf, users.cpf_digits)
+      2) addresses[] do usuario (default ou primeiro com CEP de 8 digitos)
+      3) shipping_address de pedidos anteriores do mesmo user com CEP valido
+    Retorna estatisticas e a lista do que ainda continua faltando (para correcao manual)."""
+    db = request.app.db
+    query_missing = {"$or": [
+        {"customer_cpf_digits": {"$in": [None, ""]}},
+        {"customer_cpf_digits": {"$exists": False}},
+        {"shipping_address.zip_code": {"$in": [None, ""]}},
+        {"shipping_address.zip_code": {"$not": {"$regex": r"\d{5}-?\d{3}"}}},
+    ]}
+    orders = await db.orders.find(query_missing, {"_id": 0}).to_list(length=None)
+
+    def _fmt_cpf(d: str) -> str:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+
+    def _fmt_zip(d: str) -> str:
+        return f"{d[:5]}-{d[5:]}"
+
+    def _valid_zip_in_addr(addr: dict) -> Optional[str]:
+        if not addr:
+            return None
+        z = re.sub(r"\D", "", str(addr.get("zip_code") or ""))
+        return _fmt_zip(z) if len(z) == 8 else None
+
+    stats = {
+        "total_scanned": len(orders),
+        "filled_cpf": 0,
+        "filled_cep": 0,
+        "fully_fixed": 0,
+        "still_missing": [],  # [{order_id, customer, gaps}]
+        "cpf_sources": {"user": 0},
+        "cep_sources": {"order_own": 0, "user_address": 0, "prior_order": 0},
+    }
+
+    # Cache user e ultimo endereco bom por user_id
+    user_cache: Dict[str, dict] = {}
+    prior_good_addr_cache: Dict[str, dict] = {}
+
+    async def _get_user(uid: str) -> dict:
+        if uid in user_cache:
+            return user_cache[uid]
+        u = await db.users.find_one({"user_id": uid}, {"_id": 0, "cpf": 1, "cpf_digits": 1, "addresses": 1, "name": 1}) or {}
+        user_cache[uid] = u
+        return u
+
+    async def _prior_good_address(uid: str, exclude_order_id: str) -> Optional[dict]:
+        if uid in prior_good_addr_cache:
+            return prior_good_addr_cache[uid]
+        cur = db.orders.find(
+            {"user_id": uid, "order_id": {"$ne": exclude_order_id}, "shipping_address": {"$exists": True}},
+            {"_id": 0, "shipping_address": 1},
+        ).sort("created_at", -1).limit(20)
+        found = None
+        async for o in cur:
+            addr = o.get("shipping_address") or {}
+            if _valid_zip_in_addr(addr):
+                found = addr
+                break
+        prior_good_addr_cache[uid] = found
+        return found
+
+    for o in orders:
+        uid = o.get("user_id")
+        patch = {}
+
+        # ===== CPF =====
+        current_cpf_digits = re.sub(r"\D", "", (o.get("customer_cpf_digits") or o.get("customer_cpf") or ""))
+        if len(current_cpf_digits) < 11:
+            u = await _get_user(uid) if uid else {}
+            user_cpf = re.sub(r"\D", "", (u.get("cpf") or u.get("cpf_digits") or ""))
+            if len(user_cpf) == 11:
+                patch["customer_cpf"] = _fmt_cpf(user_cpf)
+                patch["customer_cpf_digits"] = user_cpf
+                stats["filled_cpf"] += 1
+                stats["cpf_sources"]["user"] += 1
+
+        # ===== CEP / endereco =====
+        current_addr = dict(o.get("shipping_address") or {})
+        if not _valid_zip_in_addr(current_addr):
+            new_addr: Optional[dict] = None
+            source: Optional[str] = None
+            # 1) tentar reaproveitar campos do proprio endereco do pedido se houver outros campos preenchidos
+            #    + buscar zip no user.addresses
+            u = await _get_user(uid) if uid else {}
+            user_addresses = u.get("addresses") or []
+            # default primeiro, depois qualquer um com CEP valido
+            chosen = next((a for a in user_addresses if a.get("is_default") and _valid_zip_in_addr(a)), None) \
+                or next((a for a in user_addresses if _valid_zip_in_addr(a)), None)
+            if chosen:
+                # mescla: preserva campos preenchidos no pedido se existirem (ex: nome), mas sobrescreve com endereco bom
+                new_addr = {**current_addr, **{k: v for k, v in chosen.items() if v}}
+                new_addr["zip_code"] = _valid_zip_in_addr(chosen)
+                source = "user_address"
+            else:
+                prior = await _prior_good_address(uid, o.get("order_id")) if uid else None
+                if prior:
+                    new_addr = {**current_addr, **{k: v for k, v in prior.items() if v}}
+                    new_addr["zip_code"] = _valid_zip_in_addr(prior)
+                    source = "prior_order"
+            if new_addr:
+                patch["shipping_address"] = new_addr
+                stats["filled_cep"] += 1
+                stats["cep_sources"][source] = stats["cep_sources"].get(source, 0) + 1
+
+        if patch:
+            patch["updated_at"] = now_iso()
+            patch["data_fixed_by"] = user["user_id"]
+            patch["data_fixed_at"] = now_iso()
+            patch["data_fixed_source"] = "backfill"
+            await db.orders.update_one({"order_id": o["order_id"]}, {"$set": patch})
+
+        # Verifica se ainda esta faltando algo apos o patch
+        merged = {**o, **patch}
+        merged_addr = patch.get("shipping_address") or o.get("shipping_address") or {}
+        cpf_after = re.sub(r"\D", "", (merged.get("customer_cpf_digits") or merged.get("customer_cpf") or ""))
+        zip_after = _valid_zip_in_addr(merged_addr)
+        if len(cpf_after) == 11 and zip_after and patch:
+            stats["fully_fixed"] += 1
+        if len(cpf_after) < 11 or not zip_after:
+            stats["still_missing"].append({
+                "order_id": o.get("order_id"),
+                "customer_name": o.get("customer_name"),
+                "customer_email": o.get("customer_email"),
+                "missing_cpf": len(cpf_after) < 11,
+                "missing_cep": not zip_after,
+            })
+
+    return stats
+
+
 @app.put("/api/admin/orders/{order_id}/fix-missing")
 async def admin_fix_order_missing(request: Request, order_id: str, user: dict = Depends(require_admin())):
     """Iter 45: permite ao admin completar CPF e/ou endereco de pedidos legados
