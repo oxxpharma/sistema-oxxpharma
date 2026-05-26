@@ -2,7 +2,7 @@
   "name": "oxxpharma-frontend",
   "version": "1.0.0",
   "private": true,
-  "proxy": "http://localhost:8001",
+  "proxy": "http://localhost:8000",
   "dependencies": {
     "@tiptap/extension-image": "^3.23.4",
     "@tiptap/extension-link": "^3.23.4",
