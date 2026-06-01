@@ -5765,6 +5765,10 @@ async def public_calculate_shipping(request: Request):
     else:
         result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
 
+    # Garante que result é um dict
+    if not isinstance(result, dict):
+        result = {"options": [], "error": "Nenhuma opção disponível"}
+
     # Aplica frete grátis se configurado em site_settings
     fs_label = settings.get("free_shipping_label") or "Frete grátis"
     subtotal = float(body.get("subtotal") or declared_value or 0)
@@ -5796,6 +5800,10 @@ async def public_calculate_shipping(request: Request):
             result["free_shipping_threshold"] = fs_info["free_shipping_threshold"]
             result["free_shipping_remaining"] = fs_info["free_shipping_remaining"]
 
+    # Garante que options lista existe
+    if not result.get("options"):
+        result["options"] = []
+
     # Adiciona opção de retirada no local se habilitada
     if settings.get("correios_pickup_enabled"):
         pickup_option = {
@@ -5807,10 +5815,7 @@ async def public_calculate_shipping(request: Request):
             "delivery_days": 0,
             "provider": "pickup",
         }
-        if isinstance(result, dict):
-            if not result.get("options"):
-                result["options"] = []
-            result["options"].append(pickup_option)
+        result["options"].append(pickup_option)
 
     return result
 
