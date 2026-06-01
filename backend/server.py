@@ -5765,9 +5765,9 @@ async def public_calculate_shipping(request: Request):
     else:
         result = await correios_service.calculate_freight(db, cep, full_items, declared_value)
 
-    # Garante que result é um dict
+    # Garanta que result é um dict (pode retornar None em casos extremos)
     if not isinstance(result, dict):
-        result = {"options": [], "error": "Nenhuma opção disponível"}
+        result = {}
 
     # Aplica frete grátis se configurado em site_settings
     fs_label = settings.get("free_shipping_label") or "Frete grátis"
@@ -5800,12 +5800,15 @@ async def public_calculate_shipping(request: Request):
             result["free_shipping_threshold"] = fs_info["free_shipping_threshold"]
             result["free_shipping_remaining"] = fs_info["free_shipping_remaining"]
 
-    # Garante que options lista existe
+    # Garanta que options lista existe
     if not result.get("options"):
         result["options"] = []
 
     # Adiciona opção de retirada no local se habilitada
-    if settings.get("correios_pickup_enabled"):
+    # IMPORTANTE: Esta opção funciona INDEPENDENTEMENTE do provider de frete (Melhor Envio, Correios, etc.)
+    # Verifica pickup_local_enabled (novo) ou correios_pickup_enabled (backward compat)
+    pickup_enabled = settings.get("pickup_local_enabled") or settings.get("correios_pickup_enabled")
+    if pickup_enabled:
         pickup_option = {
             "service_id": "pickup_local",
             "service_name": settings.get("correios_pickup_label") or "Retirada no Local",
