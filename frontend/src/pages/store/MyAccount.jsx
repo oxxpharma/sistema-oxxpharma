@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -14,6 +14,17 @@ export default function MyAccount() {
     cpf: user?.cpf || '',
   });
   const [saving, setSaving] = useState(false);
+
+  // Sincroniza o formulário quando o usuário é carregado
+  useEffect(() => {
+    if (user) {
+      setForm({
+        name: user.name || '',
+        phone: user.phone || '',
+        cpf: user.cpf || '',
+      });
+    }
+  }, [user]);
 
   const submit = async (e) => {
     e.preventDefault();

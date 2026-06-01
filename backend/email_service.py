@@ -249,6 +249,9 @@ DEFAULT_TEMPLATES = [
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
   <h1 style="color:#E8731A;">Saiu para entrega</h1>
   <p>Boas noticias, {{user.name}}! Seu pedido <strong>#{{order_short_id}}</strong> esta a caminho.</p>
+  {% if order.tracking_code %}<p style="background:#f0f0f0;padding:12px;border-radius:6px;margin:12px 0;">
+    <strong>Código de rastreamento:</strong> <code style="font-size:14px;font-weight:bold;">{{order.tracking_code}}</code>
+  </p>{% endif %}
   <p><a href="{{order_link}}" style="background:#E8731A;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Acompanhar</a></p>
 </div>""",
         "active": True,

@@ -38,6 +38,8 @@ const EMPTY_ADDR = {
 
 export default function UserCreateModal({ onClose, onCreated }) {
   const { isSuperAdmin } = useAuth();
+  const [allRoles, setAllRoles] = useState([]);
+  
   const ROLE_OPTIONS = isSuperAdmin
     ? [...ROLE_OPTIONS_BASE, ...ROLE_OPTIONS_SUPER]
     : ROLE_OPTIONS_BASE;
@@ -45,6 +47,7 @@ export default function UserCreateModal({ onClose, onCreated }) {
     name: '', email: '', phone: '', cpf: '',
     external_id: '',
     role: 'customer',
+    profile_id: null,
     status: 'active',
     network_type: 'customer',
     network_sponsor_id: '',
@@ -60,11 +63,43 @@ export default function UserCreateModal({ onClose, onCreated }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get('/api/admin/user-categories').then(r => setAllCats(r.categories || [])).catch(() => {});
+    const loadData = async () => {
+      try {
+        const [catsRes, rolesRes] = await Promise.all([
+          api.get('/api/admin/user-categories'),
+          api.get('/api/admin/role-profiles'),
+        ]);
+        setAllCats(catsRes.categories || []);
+        
+        // Converte perfis do backend para formato de opções
+        const roleOptions = (rolesRes.profiles || []).map(p => ({
+          value: p.profile_id,
+          label: p.name,
+        }));
+        setAllRoles(roleOptions);
+      } catch (e) {
+        console.error('Erro ao carregar roles:', e);
+      }
+    };
+    loadData();
   }, []);
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
   const setA = (k, v) => setAddr(prev => ({ ...prev, [k]: v }));
+
+  const handleRoleChange = (v) => {
+    // Verifica se é um system profile (role) ou customizado (profile_id)
+    const systemRoles = ['customer', 'comercial', 'financeiro', 'admin', 'super_admin'];
+    if (systemRoles.includes(v)) {
+      // É um role de sistema
+      set('role', v);
+      set('profile_id', null);
+    } else {
+      // É um perfil customizado (prof_xxx)
+      set('profile_id', v);
+      set('role', 'customer');
+    }
+  };
 
   const toggleCat = (cid) => {
     const cur = new Set(form.category_ids || []);
@@ -120,7 +155,13 @@ export default function UserCreateModal({ onClose, onCreated }) {
 
           {/* Acesso e perfil */}
           <Section title="Acesso e perfil">
-            <Select label="Perfil" value={form.role} onChange={(v) => set('role', v)} options={ROLE_OPTIONS} testId="create-role" />
+            <Select 
+              label="Perfil" 
+              value={form.profile_id || form.role}
+              onChange={handleRoleChange}
+              options={allRoles.length > 0 ? allRoles : ROLE_OPTIONS} 
+              testId="create-role" 
+            />
             <Select label="Status" value={form.status} onChange={(v) => set('status', v)} options={STATUS_OPTIONS} testId="create-status" />
           </Section>
 

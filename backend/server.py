@@ -332,6 +332,7 @@ class RoleProfileCreate(BaseModel):
     name: str
     description: Optional[str] = None
     pages: List[str]  # Lista de páginas que o perfil pode acessar
+    admin_access: bool = False  # Se True, usuário com este perfil acessa o backoffice
 
 
 class RoleProfileUpdate(BaseModel):
@@ -339,6 +340,7 @@ class RoleProfileUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     pages: Optional[List[str]] = None
+    admin_access: Optional[bool] = None
 
 # ==================== LIFESPAN ====================
 
@@ -1578,6 +1580,7 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
     db = request.app.db
     body = await request.json()
     status = body.get("status")
+    tracking_code = body.get("tracking_code")
     if not status:
         raise HTTPException(status_code=400, detail="Status obrigatorio")
     o = await db.orders.find_one({"order_id": order_id})
@@ -1594,6 +1597,8 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
             update["invoice_issued_at"] = inv["issued_at"]
     elif status == "shipped":
         update["shipped_at"] = now_iso()
+        if tracking_code:
+            update["tracking_code"] = tracking_code
     elif status == "delivered":
         update["delivered_at"] = now_iso()
     elif status == "cancelled":
@@ -5791,6 +5796,22 @@ async def public_calculate_shipping(request: Request):
             result["free_shipping_threshold"] = fs_info["free_shipping_threshold"]
             result["free_shipping_remaining"] = fs_info["free_shipping_remaining"]
 
+    # Adiciona opção de retirada no local se habilitada
+    if settings.get("correios_pickup_enabled"):
+        pickup_option = {
+            "service_id": "pickup_local",
+            "service_name": settings.get("correios_pickup_label") or "Retirada no Local",
+            "price": float(settings.get("correios_pickup_price") or 0),
+            "company_name": "Local",
+            "carrier": "Local",
+            "delivery_days": 0,
+            "provider": "pickup",
+        }
+        if isinstance(result, dict):
+            if not result.get("options"):
+                result["options"] = []
+            result["options"].append(pickup_option)
+
     return result
 
 
@@ -6401,10 +6422,26 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         raise HTTPException(status_code=400, detail="Email ja cadastrado")
 
     role = body.get("role") or "customer"
-    # Valida papel solicitado: somente super_admin pode criar admin/super_admin
-    creator_role = _role_of(user)
-    if role in ("admin", "super_admin") and creator_role != "super_admin":
-        raise HTTPException(status_code=403, detail="Apenas Super Admin pode criar Admin ou Super Admin")
+    profile_id = body.get("profile_id") or None
+    
+    # Se profile_id foi enviado, valida se é um perfil válido
+    if profile_id:
+        # Checa se é um system profile ou customizado
+        is_system = profile_id in role_profiles.SYSTEM_PROFILES
+        if is_system:
+            # Se é system profile, usa como role
+            role = profile_id
+            profile_id = None  # Não duplica, system profiles já estão no role
+        else:
+            # Se é customizado, valida se existe
+            custom_profile = await db.role_profiles.find_one({"profile_id": profile_id})
+            if not custom_profile:
+                raise HTTPException(status_code=400, detail="Perfil nao encontrado")
+    
+    # Resolve custom_profile para usar admin_access
+    custom_profile_doc = None
+    if profile_id:
+        custom_profile_doc = await db.role_profiles.find_one({"profile_id": profile_id}, {"_id": 0})
     if role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
         raise HTTPException(status_code=400, detail="Papel invalido")
     network_type = body.get("network_type") or NETWORK_CUSTOMER
@@ -6433,7 +6470,8 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         "cpf_digits": _clean_cpf(body.get("cpf")),
         "external_id": (body.get("external_id") or "").strip() or None,
         "role": role,
-        "access_level": 0 if role in ("super_admin", "admin") else (1 if role in ("comercial", "financeiro") else int(body.get("access_level") or 99)),
+        "profile_id": profile_id,
+        "access_level": 0 if role in ("super_admin", "admin") else (1 if role in ("comercial", "financeiro") else (1 if (custom_profile_doc and custom_profile_doc.get("admin_access")) else int(body.get("access_level") or 99))),
         "status": body.get("status") or "active",
         "addresses": body.get("addresses") or [],
         "pix_key": body.get("pix_key") or None,
@@ -6489,12 +6527,35 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
         "name", "email", "phone", "cpf", "status", "role", "access_level",
         "network_type", "network_sponsor_id", "sponsor_id", "sponsor_code",
         "external_id", "leader_external_id", "addresses", "pix_key", "pix_key_type",
-        "referral_program_active", "must_set_password",
+        "referral_program_active", "must_set_password", "profile_id",
     }
     update = {}
     for k, v in body.items():
         if k in allowed:
             update[k] = v
+    
+    # Validação de profile_id se foi alterado
+    if "profile_id" in update:
+        profile_id = update["profile_id"]
+        if profile_id:
+            # Valida se é um perfil válido (customizado)
+            is_system = profile_id in role_profiles.SYSTEM_PROFILES
+            if is_system:
+                # Se é system profile, converter para role
+                if "role" not in update:
+                    update["role"] = profile_id
+                del update["profile_id"]  # Remove profile_id, vai usar role
+            else:
+                # Se é customizado, valida se existe e usa admin_access para definir access_level
+                custom_profile = await db.role_profiles.find_one({"profile_id": profile_id})
+                if not custom_profile:
+                    raise HTTPException(status_code=400, detail="Perfil nao encontrado")
+                # Define access_level baseado no admin_access do perfil
+                if custom_profile.get("admin_access"):
+                    update["access_level"] = 1
+                else:
+                    update["access_level"] = 99
+    
     # Iter 38: somente super_admin pode promover alguem a admin/super_admin
     if "role" in update:
         new_role = update["role"]
@@ -7936,7 +7997,8 @@ async def admin_create_role_profile(request: Request, data: RoleProfileCreate, u
             name=data.name,
             description=data.description or "",
             pages=data.pages,
-            created_by=user["user_id"]
+            created_by=user["user_id"],
+            admin_access=data.admin_access or False,
         )
         return profile
     except ValueError as e:
@@ -7966,8 +8028,18 @@ async def admin_update_role_profile(request: Request, profile_id: str, data: Rol
             profile_id=profile_id,
             name=data.name,
             description=data.description,
-            pages=data.pages
+            pages=data.pages,
+            admin_access=data.admin_access,
         )
+        
+        # Se admin_access mudou, recalcula access_level de todos os usuários com este perfil
+        if data.admin_access is not None:
+            new_access_level = 1 if data.admin_access else 99
+            await db.users.update_many(
+                {"profile_id": profile_id},
+                {"$set": {"access_level": new_access_level, "updated_at": now_iso()}}
+            )
+        
         return updated_profile
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

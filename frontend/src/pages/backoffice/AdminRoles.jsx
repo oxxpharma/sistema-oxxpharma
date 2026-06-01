@@ -16,6 +16,7 @@ export default function AdminRoles() {
     name: '',
     description: '',
     pages: [],
+    admin_access: false,
   });
 
   const loadData = async () => {
@@ -83,6 +84,7 @@ export default function AdminRoles() {
       name: profile.name,
       description: profile.description || '',
       pages: profile.pages || [],
+      admin_access: profile.admin_access || false,
     });
     setShowForm(true);
   };
@@ -94,6 +96,7 @@ export default function AdminRoles() {
       name: '',
       description: '',
       pages: [],
+      admin_access: false,
     });
   };
 
@@ -173,6 +176,9 @@ export default function AdminRoles() {
             onSubmit={handleSubmit}
             onCancel={resetForm}
             onTogglePage={togglePage}
+            onChangeName={(name) => setFormData(prev => ({ ...prev, name }))}
+            onChangeDescription={(description) => setFormData(prev => ({ ...prev, description }))}
+            onChangeAdminAccess={(v) => setFormData(prev => ({ ...prev, admin_access: v }))}
           />
         )}
 
@@ -228,16 +234,14 @@ export default function AdminRoles() {
   );
 }
 
-function ProfileForm({ formData, availablePages, isEditMode, onSubmit, onCancel, onTogglePage }) {
+function ProfileForm({ formData, availablePages, isEditMode, onSubmit, onCancel, onTogglePage, onChangeName, onChangeDescription, onChangeAdminAccess }) {
   return (
     <form onSubmit={onSubmit} className="bg-bg-secondary border-2 border-border rounded-lg p-5 space-y-4">
       <div>
         <label className="block text-sm font-medium mb-2">Nome do Perfil *</label>
         <Input
           value={formData.name}
-          onChange={(e) => {
-            formData.name = e.target.value;
-          }}
+          onChange={(e) => onChangeName(e.target.value)}
           placeholder="Ex: Gerenciador de Pedidos"
           required
         />
@@ -247,13 +251,28 @@ function ProfileForm({ formData, availablePages, isEditMode, onSubmit, onCancel,
         <label className="block text-sm font-medium mb-2">Descrição</label>
         <textarea
           value={formData.description}
-          onChange={(e) => {
-            formData.description = e.target.value;
-          }}
+          onChange={(e) => onChangeDescription(e.target.value)}
           placeholder="Descreva o propósito deste perfil"
           className="w-full px-4 py-2 rounded-lg border-2 border-border focus:border-brand-main focus:outline-none text-sm"
           rows="3"
         />
+      </div>
+
+      <div>
+        <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition"
+          style={{ borderColor: formData.admin_access ? 'var(--brand-main)' : undefined,
+                   background: formData.admin_access ? 'var(--brand-light)' : undefined }}>
+          <input
+            type="checkbox"
+            checked={formData.admin_access}
+            onChange={(e) => onChangeAdminAccess(e.target.checked)}
+            className="w-4 h-4 rounded cursor-pointer"
+          />
+          <div>
+            <span className="text-sm font-semibold block">Acesso ao Painel Admin</span>
+            <span className="text-xs text-txt-secondary">Usuários com este perfil poderão acessar o backoffice</span>
+          </div>
+        </label>
       </div>
 
       <div>
@@ -289,13 +308,18 @@ function ProfileForm({ formData, availablePages, isEditMode, onSubmit, onCancel,
 }
 
 function ProfileCard({ profile, availablePages, onEdit, onDelete }) {
-  const pageLabels = profile.pages.map(p => availablePages[p] || p);
-
   return (
     <div className="bg-white border-2 border-border rounded-lg p-4 hover:border-brand-main transition">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
-          <h3 className="font-heading font-bold text-lg">{profile.name}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-heading font-bold text-lg">{profile.name}</h3>
+            {profile.admin_access && (
+              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 rounded-full">
+                <Shield className="w-3 h-3" /> Acesso Admin
+              </span>
+            )}
+          </div>
           {profile.description && (
             <p className="text-sm text-txt-secondary mt-1">{profile.description}</p>
           )}

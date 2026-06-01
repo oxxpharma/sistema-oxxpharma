@@ -139,7 +139,7 @@ async def has_page_access(db, user: dict, page: str) -> bool:
     return page in allowed_pages
 
 
-async def create_profile(db, name: str, description: str, pages: List[str], created_by: str):
+async def create_profile(db, name: str, description: str, pages: List[str], created_by: str, admin_access: bool = False):
     """Cria um novo perfil personalizado."""
     from uuid import uuid4
     
@@ -153,17 +153,20 @@ async def create_profile(db, name: str, description: str, pages: List[str], crea
         "name": name,
         "description": description,
         "pages": pages,
+        "admin_access": admin_access,
         "created_by": created_by,
         "is_system": False,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
     
-    await db.role_profiles.insert_one(profile)
+    result = await db.role_profiles.insert_one(profile)
+    # Remove _id do MongoDB para retornar (é um ObjectId não-serializável)
+    profile.pop("_id", None)
     return profile
 
 
-async def update_profile(db, profile_id: str, name: str = None, description: str = None, pages: List[str] = None):
+async def update_profile(db, profile_id: str, name: str = None, description: str = None, pages: List[str] = None, admin_access: bool = None):
     """Atualiza um perfil personalizado."""
     # Não permite atualizar perfis de sistema via essa função
     if profile_id in SYSTEM_PROFILES:
@@ -175,6 +178,8 @@ async def update_profile(db, profile_id: str, name: str = None, description: str
         update["name"] = name
     if description:
         update["description"] = description
+    if admin_access is not None:
+        update["admin_access"] = admin_access
     if pages:
         # Valida páginas
         invalid = [p for p in pages if p not in AVAILABLE_PAGES]
@@ -199,19 +204,13 @@ async def delete_profile(db, profile_id: str):
     if profile_id in SYSTEM_PROFILES:
         raise ValueError("Não é possível deletar perfis de sistema")
     
-    result = await db.role_profiles.delete_one({"profile_id": profile_id})
-    if result.deleted_count == 0:
-        raise ValueError("Perfil não encontrado")
-    return {"deleted": True}
-    
     # Verifica se há usuários usando esse perfil
-    users_with_profile = await db.users.count_documents({"role": profile_id})
+    users_with_profile = await db.users.count_documents({"profile_id": profile_id})
     if users_with_profile > 0:
         raise ValueError(f"Não é possível deletar um perfil que está em uso por {users_with_profile} usuário(s)")
     
     result = await db.role_profiles.delete_one({"profile_id": profile_id})
-    
     if result.deleted_count == 0:
         raise ValueError("Perfil não encontrado")
     
-    return True
+    return {"deleted": True}

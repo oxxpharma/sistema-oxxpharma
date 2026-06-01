@@ -12,14 +12,18 @@ const STATUSES = [
   { value: '', label: 'Todos' },
   { value: 'pending', label: 'Aguardando pagamento' },
   { value: 'paid', label: 'Pago' },
+  { value: 'separating', label: 'Em separação' },
   { value: 'shipped', label: 'Enviado' },
+  { value: 'available_for_pickup', label: 'Disponível para Retirada' },
   { value: 'delivered', label: 'Entregue' },
   { value: 'cancelled', label: 'Cancelado' },
 ];
 const STATUS_LABELS = {
   pending: { label: 'Aguardando', variant: 'warning' },
   paid: { label: 'Pago', variant: 'success' },
+  separating: { label: 'Em separação', variant: 'warning' },
   shipped: { label: 'Enviado', variant: 'info' },
+  available_for_pickup: { label: 'Retirada', variant: 'info' },
   delivered: { label: 'Entregue', variant: 'success' },
   cancelled: { label: 'Cancelado', variant: 'error' },
 };
@@ -50,6 +54,8 @@ export default function AdminOrders() {
   const [total, setTotal] = useState(0);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState(null);
+  const [trackingModal, setTrackingModal] = useState(null);
+  const [trackingCode, setTrackingCode] = useState('');
 
   const runBackfill = async () => {
     if (!window.confirm('Tentar preencher CPF e CEP de TODOS os pedidos com dados faltantes a partir do cadastro do cliente, endereços salvos e pedidos anteriores?\n\nIsso pode levar alguns segundos.')) return;
@@ -82,11 +88,37 @@ export default function AdminOrders() {
   useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly]);
 
   const updateStatus = async (orderId, newStatus) => {
+    // Se o novo status é "shipped", abre modal para adicionar tracking code
+    if (newStatus === 'shipped') {
+      setTrackingModal(orderId);
+      setTrackingCode('');
+      return;
+    }
+
     try {
       const updated = await api.put(`/api/admin/orders/${orderId}/status`, { status: newStatus });
       toast.success('Status atualizado');
       setOrders(prev => prev.map(o => o.order_id === orderId ? updated : o));
       if (selected?.order_id === orderId) setSelected(updated);
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const submitTrackingCode = async () => {
+    if (!trackingCode.trim()) {
+      toast.error('Digite o código de rastreamento');
+      return;
+    }
+
+    try {
+      const updated = await api.put(`/api/admin/orders/${trackingModal}/status`, { 
+        status: 'shipped',
+        tracking_code: trackingCode.trim()
+      });
+      toast.success('Status atualizado e email com rastreamento enviado');
+      setOrders(prev => prev.map(o => o.order_id === trackingModal ? updated : o));
+      if (selected?.order_id === trackingModal) setSelected(updated);
+      setTrackingModal(null);
+      setTrackingCode('');
     } catch (err) { toast.error(err.message); }
   };
 
@@ -313,7 +345,7 @@ export default function AdminOrders() {
               <div className="border-t border-border pt-4">
                 <div className="text-sm font-bold mb-2">Atualizar status</div>
                 <div className="flex flex-wrap gap-2">
-                  {['pending', 'paid', 'shipped', 'delivered', 'cancelled'].map(st => (
+                  {['pending', 'paid', 'separating', 'shipped', 'available_for_pickup', 'delivered', 'cancelled'].map(st => (
                     <button
                       key={st}
                       onClick={() => updateStatus(selected.order_id, st)}
@@ -349,6 +381,25 @@ export default function AdminOrders() {
             setFixing(null);
           }}
         />
+      )}
+      {trackingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-xl max-w-sm w-full mx-4">
+            <h2 className="text-lg font-bold mb-4">Adicionar código de rastreamento</h2>
+            <Input
+              type="text"
+              placeholder="Ex: AA123456789BR"
+              value={trackingCode}
+              onChange={e => setTrackingCode(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submitTrackingCode()}
+              className="mb-4"
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => { setTrackingModal(null); setTrackingCode(''); }} className="flex-1">Cancelar</Button>
+              <Button onClick={submitTrackingCode} className="flex-1">Enviar com rastreamento</Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

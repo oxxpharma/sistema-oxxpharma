@@ -13,7 +13,9 @@ import { toast } from 'sonner';
 const STATUS_LABELS = {
   pending: { label: 'Aguardando pagamento', variant: 'warning' },
   paid: { label: 'Pago', variant: 'success' },
+  separating: { label: 'Em separação', variant: 'warning' },
   shipped: { label: 'Enviado', variant: 'info' },
+  available_for_pickup: { label: 'Disponível para retirada', variant: 'info' },
   delivered: { label: 'Entregue', variant: 'success' },
   cancelled: { label: 'Cancelado', variant: 'error' },
 };

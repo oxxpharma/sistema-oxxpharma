@@ -35,6 +35,8 @@ const STATUS_OPTIONS = [
 
 export default function UserEditModal({ userId, onClose, onSaved }) {
   const { isSuperAdmin } = useAuth();
+  const [allRoles, setAllRoles] = useState([]);
+  
   const ROLE_OPTIONS = isSuperAdmin
     ? [...ROLE_OPTIONS_BASE, ...ROLE_OPTIONS_SUPER]
     : ROLE_OPTIONS_BASE;
@@ -46,14 +48,22 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
 
   const load = async () => {
     try {
-      const [r, ucs] = await Promise.all([
+      const [r, ucs, rolesRes] = await Promise.all([
         api.get(`/api/admin/users/${userId}`),
         api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
+        api.get('/api/admin/role-profiles').catch(() => ({ profiles: [] })),
       ]);
       if (!Array.isArray(r.category_ids)) r.category_ids = [];
       setU(r);
       setOriginal(r);
       setAllCats(ucs.categories || []);
+      
+      // Carrega perfis
+      const roleOptions = (rolesRes.profiles || []).map(p => ({
+        value: p.profile_id,
+        label: p.name,
+      }));
+      setAllRoles(roleOptions);
     } catch (e) { toast.error(e?.message); }
     finally { setLoading(false); }
   };
@@ -66,6 +76,20 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
     setU(prev => ({ ...prev, category_ids: [...cur] }));
   };
 
+  const handleRoleChange = (v) => {
+    // Verifica se é um system profile (role) ou customizado (profile_id)
+    const systemRoles = ['customer', 'comercial', 'financeiro', 'admin', 'super_admin'];
+    if (systemRoles.includes(v)) {
+      // É um role de sistema
+      set('role', v);
+      set('profile_id', null);
+    } else {
+      // É um perfil customizado (prof_xxx)
+      set('profile_id', v);
+      set('role', 'customer');
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -73,7 +97,7 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         name: u.name, email: u.email, phone: u.phone, cpf: u.cpf,
         external_id: u.external_id, sponsor_code: u.sponsor_code,
         leader_external_id: u.leader_external_id || null,
-        status: u.status, role: u.role, network_type: u.network_type,
+        status: u.status, role: u.role, profile_id: u.profile_id || null, network_type: u.network_type,
         // access_level agora e sincronizado pelo backend baseado no role
       };
       // Se o admin alterou leader_external_id mas NAO tocou no network_sponsor_id,
@@ -149,7 +173,13 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
           <Field key={f.key} label={f.label} type={f.type} value={u[f.key]} onChange={(v) => set(f.key, v)} testId={`edit-${f.key}`} />
         ))}
         <Select label="Status" value={u.status || 'active'} onChange={(v) => set('status', v)} options={STATUS_OPTIONS} testId="edit-status" />
-        <Select label="Perfil" value={u.role || 'customer'} onChange={(v) => set('role', v)} options={ROLE_OPTIONS} testId="edit-role" />
+        <Select 
+          label="Perfil" 
+          value={u.profile_id || u.role || 'customer'} 
+          onChange={handleRoleChange} 
+          options={allRoles.length > 0 ? allRoles : ROLE_OPTIONS} 
+          testId="edit-role" 
+        />
         <Select label="Equipe" value={u.network_type || 'customer'} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="edit-network" />
         <Field label="ID externo do líder (leader_external_id)" value={u.leader_external_id} onChange={(v) => set('leader_external_id', v || null)} testId="edit-leader-external-id" />
         <Field label="ID do líder na rede Equipe (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />

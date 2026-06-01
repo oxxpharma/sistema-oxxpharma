@@ -378,6 +378,13 @@ export default function CheckoutPage() {
                   <span className="text-xs text-txt-secondary">selecione uma opção</span>
                 )}
               </div>
+
+              {selectedShipping?.id === 'pickup_local' && settings?.correios_pickup_address && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                  <div className="font-semibold text-blue-900 mb-1">📍 Local de retirada:</div>
+                  <div className="text-blue-800">{settings.correios_pickup_address}</div>
+                </div>
+              )}
               {(remainingForFree > 0 || isFreeShippingByRule) && subtotal > 0 && fsThreshold > 0 && (
                 <FreeShippingProgress
                   subtotal={subtotal}
