@@ -315,6 +315,7 @@ class CheckoutData(BaseModel):
     shipping_service_id: Optional[str] = None
     shipping_delivery_days: Optional[int] = None
     voucher_amount: Optional[float] = None  # Iter 36: usa saldo de voucher pre-pago (parcial ou total)
+    pickup: Optional[bool] = False  # Iter 47: cliente quer retirar no local (zera frete, usa endereco da loja)
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -1079,28 +1080,64 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     cart = await db.carts.find_one({"user_id": user["user_id"]})
     if not cart or not cart.get("items"):
         raise HTTPException(status_code=400, detail="Carrinho vazio")
-    # Get address
-    addrs = user.get("addresses", [])
-    addr = next((a for a in addrs if a.get("address_id") == data.address_id), None)
-    if not addr:
-        raise HTTPException(status_code=400, detail="Endereco nao encontrado")
-    # Iter 45: GARANTIA HARD de CPF + CEP no pedido (faturas vinham incompletas).
-    # CPF: validacao do user (precisa ter pelo menos 11 digitos).
+
+    # Iter 47: pickup (retirada no local). Pula validacao de endereco do usuario e
+    # usa o endereco/contato da loja configurado em settings.
+    is_pickup = bool(getattr(data, "pickup", False))
+    pickup_snapshot: Dict = {}
+    addr: Dict = {}
+    if is_pickup:
+        cfg = await correios_service.get_config(db)
+        if not cfg.get("pickup_enabled"):
+            raise HTTPException(status_code=400, detail="Retirada no local nao esta disponivel no momento.")
+        pickup_addr = (cfg.get("pickup_address") or "").strip()
+        if not pickup_addr:
+            raise HTTPException(status_code=400, detail="Endereco de retirada nao configurado pelo lojista.")
+        pickup_snapshot = {
+            "address": pickup_addr,
+            "phone": cfg.get("pickup_phone") or "",
+            "hours": cfg.get("pickup_hours") or "",
+            "instructions": cfg.get("pickup_instructions") or "",
+        }
+        # Endereco do pedido vira o da loja (mantem mesma estrutura para compat)
+        addr = {
+            "address_id": "pickup",
+            "label": "Retirada no local",
+            "name": user.get("name") or "",
+            "street": pickup_addr,
+            "number": "—",
+            "complement": pickup_snapshot["hours"],
+            "neighborhood": "",
+            "city": "",
+            "state": "",
+            "zip_code": "00000-000",
+            "is_pickup": True,
+        }
+    else:
+        # Get address normal
+        addrs = user.get("addresses", [])
+        addr = next((a for a in addrs if a.get("address_id") == data.address_id), None)
+        if not addr:
+            raise HTTPException(status_code=400, detail="Endereco nao encontrado")
+
+    # Iter 45: GARANTIA HARD de CPF no pedido (faturas vinham incompletas).
     user_cpf_digits = re.sub(r"\D", "", (user.get("cpf") or user.get("cpf_digits") or ""))
     if len(user_cpf_digits) < 11:
         raise HTTPException(
             status_code=400,
             detail="CPF obrigatorio para finalizar o pedido. Cadastre seu CPF em Minha conta antes de continuar.",
         )
-    # CEP: valida o endereco selecionado (legacy: enderecos antigos podem ter zip vazio).
-    addr_zip_digits = re.sub(r"\D", "", str(addr.get("zip_code") or ""))
-    if len(addr_zip_digits) != 8:
-        raise HTTPException(
-            status_code=400,
-            detail="CEP obrigatorio no endereco de entrega. Edite seu endereco e informe o CEP completo (8 digitos).",
-        )
-    # Normaliza zip_code dentro do addr antes de virar shipping_address no order
-    addr = {**addr, "zip_code": f"{addr_zip_digits[:5]}-{addr_zip_digits[5:]}"}
+
+    if not is_pickup:
+        # CEP: valida o endereco selecionado (legacy: enderecos antigos podem ter zip vazio).
+        addr_zip_digits = re.sub(r"\D", "", str(addr.get("zip_code") or ""))
+        if len(addr_zip_digits) != 8:
+            raise HTTPException(
+                status_code=400,
+                detail="CEP obrigatorio no endereco de entrega. Edite seu endereco e informe o CEP completo (8 digitos).",
+            )
+        # Normaliza zip_code dentro do addr antes de virar shipping_address no order
+        addr = {**addr, "zip_code": f"{addr_zip_digits[:5]}-{addr_zip_digits[5:]}"}
     # Build order items
     items = []
     subtotal = 0
@@ -1122,11 +1159,18 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     if not items:
         raise HTTPException(status_code=400, detail="Nenhum produto valido")
     # ============ Frete ============
-    # Preferir o valor cotado pelo frontend (cliente escolheu uma opção).
-    # Se nao vier, recotar server-side para nao cobrar zero indevidamente.
+    # Iter 47: pickup zera o frete e ignora qualquer cotacao recebida do front.
     shipping = None
     shipping_meta = {}
-    if data.shipping_price is not None and data.shipping_price >= 0:
+    if is_pickup:
+        shipping = 0.0
+        shipping_meta = {
+            "shipping_service_name": "Retirada no Local",
+            "shipping_carrier": "Local",
+            "shipping_service_id": "pickup",
+            "shipping_delivery_days": 0,
+        }
+    elif data.shipping_price is not None and data.shipping_price >= 0:
         shipping = float(data.shipping_price)
         shipping_meta = {
             "shipping_service_name": data.shipping_service_name,
@@ -1253,6 +1297,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "total": final_total,
         "total_before_voucher": grand_total,
         "shipping_address": addr, "payment_method": data.payment_method,
+        # Iter 47: marca pedidos de retirada no local com snapshot do endereco da loja
+        "is_pickup": is_pickup,
+        "pickup_snapshot": pickup_snapshot if is_pickup else None,
         "payment_status": "pending", "order_status": "pending",
         "payment_provider": "mock",  # Sera "mercadopago" quando integrado
         "payment_id": None, "payment_url": None,
@@ -1330,11 +1377,13 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
 # ==================== ADMIN ORDERS ====================
 
 @app.get("/api/admin/orders")
-async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, pickup: Optional[bool] = False, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
     q = {}
     if status:
         q["order_status"] = status
+    if pickup:
+        q["is_pickup"] = True
     # Iter 43: filtro por tenant (param ou header X-Tenant)
     selected_tenant = (tenant or request.headers.get("x-tenant") or "").strip().lower() or None
     if selected_tenant in {"oxxpharma", "pharmakon"}:
@@ -1696,13 +1745,38 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
         zip_fmt = f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else (addr.get('zip_code') or '— CEP nao informado —')
         cpf_snapshot = order.get("customer_cpf") or order_user.get("cpf") or ""
         cpf_line = f"CPF: {cpf_snapshot}<br>" if cpf_snapshot else ""
-        address_html = (
-            f"{addr.get('name') or order_user.get('name') or ''}<br>"
-            f"{cpf_line}"
-            f"{addr.get('street') or ''}, {addr.get('number') or ''} {addr.get('complement') or ''}<br>"
-            f"{addr.get('neighborhood') or ''} - {addr.get('city') or ''}/{addr.get('state') or ''}<br>"
-            f"CEP {zip_fmt}"
-        )
+        # Iter 47: bloco especial para Retirada no Local
+        if order.get("is_pickup"):
+            pk = order.get("pickup_snapshot") or {}
+            extra_lines = []
+            if pk.get("hours"):
+                extra_lines.append(f"<div style='font-size:13px;'><strong>Horario:</strong> {pk['hours']}</div>")
+            if pk.get("phone"):
+                extra_lines.append(f"<div style='font-size:13px;'><strong>Telefone:</strong> {pk['phone']}</div>")
+            if pk.get("instructions"):
+                extra_lines.append(f"<div style='font-size:12px;color:#666;font-style:italic;'>{pk['instructions']}</div>")
+            address_html = (
+                "<div style='background:#FFF4E6;border:2px solid #F59E0B;border-radius:8px;padding:14px;'>"
+                "<div style='color:#B45309;font-weight:900;font-size:14px;margin-bottom:8px;'>"
+                "&#127978; RETIRADA NO LOCAL"
+                "</div>"
+                f"<div><strong>Cliente:</strong> {addr.get('name') or order_user.get('name') or ''}</div>"
+                f"<div>{cpf_line.replace('<br>', '')}</div>"
+                f"<div style='margin-top:6px;font-weight:bold;'>{pk.get('address') or addr.get('street') or ''}</div>"
+                + "".join(extra_lines) +
+                "<div style='margin-top:10px;padding-top:10px;border-top:1px solid #FCD34D;font-size:12px;color:#92400E;'>"
+                "<strong>Importante:</strong> apresente esta fatura no ato da retirada."
+                "</div>"
+                "</div>"
+            )
+        else:
+            address_html = (
+                f"{addr.get('name') or order_user.get('name') or ''}<br>"
+                f"{cpf_line}"
+                f"{addr.get('street') or ''}, {addr.get('number') or ''} {addr.get('complement') or ''}<br>"
+                f"{addr.get('neighborhood') or ''} - {addr.get('city') or ''}/{addr.get('state') or ''}<br>"
+                f"CEP {zip_fmt}"
+            )
         ctx["invoice"] = {
             "items_table_html": items_table,
             "address_html": address_html,
@@ -5804,22 +5878,6 @@ async def public_calculate_shipping(request: Request):
     if not result.get("options"):
         result["options"] = []
 
-    # Adiciona opção de retirada no local se habilitada
-    # IMPORTANTE: Esta opção funciona INDEPENDENTEMENTE do provider de frete (Melhor Envio, Correios, etc.)
-    # Verifica pickup_local_enabled (novo) ou correios_pickup_enabled (backward compat)
-    pickup_enabled = settings.get("pickup_local_enabled") or settings.get("correios_pickup_enabled")
-    if pickup_enabled:
-        pickup_option = {
-            "service_id": "pickup_local",
-            "service_name": settings.get("correios_pickup_label") or "Retirada no Local",
-            "price": float(settings.get("correios_pickup_price") or 0),
-            "company_name": "Local",
-            "carrier": "Local",
-            "delivery_days": 0,
-            "provider": "pickup",
-        }
-        result["options"].append(pickup_option)
-
     return result
 
 
@@ -6272,7 +6330,17 @@ async def _get_site_settings(db, tenant_id: Optional[str] = None) -> dict:
 @app.get("/api/site-settings")
 async def public_site_settings(request: Request):
     tid = tenant_service.get_tenant(request)
-    return await _get_site_settings(request.app.db, tid)
+    out = await _get_site_settings(request.app.db, tid)
+    # Iter 47: expor configuracao da Retirada no Local pro frontend (carrinho/checkout)
+    cfg = await correios_service.get_config(request.app.db)
+    out["pickup"] = {
+        "enabled": bool(cfg.get("pickup_enabled")),
+        "address": cfg.get("pickup_address") or "",
+        "phone": cfg.get("pickup_phone") or "",
+        "hours": cfg.get("pickup_hours") or "",
+        "instructions": cfg.get("pickup_instructions") or "",
+    }
+    return out
 
 
 @app.get("/api/admin/site-settings")

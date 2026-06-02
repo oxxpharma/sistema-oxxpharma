@@ -7,7 +7,7 @@ import { useReferral } from '../../contexts/RefContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import AddressForm from '../../components/store/AddressForm';
-import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet } from 'lucide-react';
+import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
@@ -15,6 +15,7 @@ import FreeShippingProgress from '../../components/store/FreeShippingProgress';
 import { evaluateFreeShipping } from '../../lib/freeShipping';
 
 const emptyAddr = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true };
+const PICKUP_KEY = 'oxx_pickup_v1';
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
@@ -29,6 +30,13 @@ export default function CheckoutPage() {
   const [showNewAddr, setShowNewAddr] = useState(false);
   const [newAddr, setNewAddr] = useState(emptyAddr);
   const [selectedShipping, setSelectedShipping] = useState(() => loadSelectedShipping());
+  const settings = useSiteSettings();
+  const pickupCfg = settings?.pickup;
+  const [pickup, setPickup] = useState(() => localStorage.getItem(PICKUP_KEY) === '1');
+  useEffect(() => { localStorage.setItem(PICKUP_KEY, pickup ? '1' : '0'); }, [pickup]);
+  useEffect(() => {
+    if (pickupCfg && !pickupCfg.enabled && pickup) setPickup(false);
+  }, [pickupCfg?.enabled]); // eslint-disable-line
   // Iter 38: Voucher pre-pago vindo da Maxx
   const [voucherBalance, setVoucherBalance] = useState(0);
   const [useVoucher, setUseVoucher] = useState(false);
@@ -79,7 +87,7 @@ export default function CheckoutPage() {
   };
 
   const submit = async () => {
-    if (!selectedAddr) { toast.error('Selecione um endereço'); return; }
+    if (!pickup && !selectedAddr) { toast.error('Selecione um endereço'); return; }
     setSubmitting(true);
     try {
       let couponCode;
@@ -88,16 +96,17 @@ export default function CheckoutPage() {
         if (c?.code) couponCode = c.code;
       } catch { /* noop */ }
       const order = await api.post('/api/checkout', {
-        address_id: selectedAddr,
+        address_id: pickup ? 'pickup' : selectedAddr,
         payment_method: paymentMethod,
         ref_code: refCode || undefined,
         coupon_code: couponCode,
         voucher_amount: voucherToUse > 0 ? Number(voucherToUse.toFixed(2)) : undefined,
-        shipping_price: selectedShipping?.free_shipping ? 0 : (selectedShipping ? Number(selectedShipping.price) : undefined),
-        shipping_service_name: selectedShipping?.name,
-        shipping_carrier: selectedShipping?.carrier,
-        shipping_service_id: selectedShipping?.id,
-        shipping_delivery_days: selectedShipping?.delivery_days,
+        pickup: pickup || undefined,
+        shipping_price: pickup ? 0 : (selectedShipping?.free_shipping ? 0 : (selectedShipping ? Number(selectedShipping.price) : undefined)),
+        shipping_service_name: pickup ? 'Retirada no Local' : selectedShipping?.name,
+        shipping_carrier: pickup ? 'Local' : selectedShipping?.carrier,
+        shipping_service_id: pickup ? 'pickup' : selectedShipping?.id,
+        shipping_delivery_days: pickup ? 0 : selectedShipping?.delivery_days,
       });
       // Cria preferencia de pagamento (ou marca pago direto se voucher cobriu tudo)
       const pay = await api.post(`/api/payments/create/${order.order_id}`);
@@ -126,16 +135,17 @@ export default function CheckoutPage() {
     }
   };
 
-  const settings = useSiteSettings();
   const subtotal = cart.subtotal || 0;
   // Iter 42h: helper unificado (suporta multiplas regras OR + legacy)
   const fsEval = evaluateFreeShipping(settings, user, subtotal);
   const isFreeShippingByRule = subtotal > 0 && fsEval.applies;
   const fsThreshold = fsEval.threshold || 0;
   const remainingForFree = fsEval.remaining || 0;
-  const shipping = isFreeShippingByRule
+  const shipping = pickup
     ? 0
-    : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
+    : isFreeShippingByRule
+      ? 0
+      : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
   const couponDiscount = (() => {
     try {
       const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
@@ -157,7 +167,8 @@ export default function CheckoutPage() {
   const hasCpf = userCpfDigits.length >= 11;
   const selectedAddrZipDigits = (selectedAddrObj?.zip_code || '').replace(/\D/g, '');
   const hasValidCep = selectedAddrZipDigits.length === 8;
-  const canCheckout = hasCpf && hasValidCep && selectedAddr;
+  // Iter 47: pickup nao exige endereco selecionado (usa endereco da loja)
+  const canCheckout = hasCpf && (pickup || (hasValidCep && selectedAddr));
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
 
@@ -193,7 +204,46 @@ export default function CheckoutPage() {
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Endereço */}
+          {/* Iter 47: Toggle Retirada no Local */}
+          {pickupCfg?.enabled && (
+            <section className="bg-white rounded-xl border-2 border-orange-200 p-5" data-testid="checkout-pickup-section">
+              <button
+                type="button"
+                onClick={() => setPickup(!pickup)}
+                className={`w-full text-left p-3 rounded-lg border-2 transition flex items-start gap-3 ${pickup ? 'border-orange-500 bg-orange-50' : 'border-border hover:border-orange-400/60'}`}
+                data-testid="toggle-pickup-checkout"
+              >
+                <Store className={`w-6 h-6 shrink-0 mt-0.5 ${pickup ? 'text-orange-600' : 'text-txt-secondary'}`} />
+                <div className="flex-1">
+                  <div className="font-bold text-sm flex items-center gap-2">
+                    🏬 Quero retirar no local
+                    {pickup && <span className="text-[10px] uppercase font-black bg-orange-600 text-white px-1.5 py-0.5 rounded">selecionado · frete grátis</span>}
+                  </div>
+                  <div className="text-xs text-txt-secondary mt-0.5">Sem custo de envio. Você retira o pedido na loja.</div>
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 shrink-0 mt-0.5 ${pickup ? 'border-orange-600 bg-orange-600' : 'border-gray-300'}`}>
+                  {pickup && <div className="w-full h-full rounded-full border-2 border-white" />}
+                </div>
+              </button>
+
+              {pickup && (
+                <div className="mt-4 bg-orange-50/50 border border-orange-200 rounded-lg p-4 text-sm space-y-2" data-testid="pickup-info-checkout">
+                  <div className="font-bold text-orange-700 flex items-center gap-2"><MapPin className="w-4 h-4" /> Local de retirada</div>
+                  <div className="text-txt-primary font-medium">{pickupCfg.address}</div>
+                  {pickupCfg.hours && <div className="text-txt-secondary"><span className="font-semibold">⏰ Horário:</span> {pickupCfg.hours}</div>}
+                  {pickupCfg.phone && <div className="text-txt-secondary"><span className="font-semibold">📞 Telefone:</span> {pickupCfg.phone}</div>}
+                  {pickupCfg.instructions && <div className="text-txt-secondary italic">{pickupCfg.instructions}</div>}
+                  <div className="mt-3 pt-3 border-t border-orange-200 flex items-start gap-2 text-xs text-amber-900 bg-amber-50 -mx-4 -mb-4 px-4 py-3 rounded-b-lg">
+                    <FileText className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span><strong>Importante:</strong> apresente a fatura recebida por e-mail (após a confirmação do pagamento) no ato da retirada.</span>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Endereço (oculto quando pickup) */}
+          {!pickup && (
           <section className="bg-white rounded-xl border border-border p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-heading font-black text-lg flex items-center gap-2"><MapPin className="w-5 h-5 text-brand-main" /> Endereço de entrega</h2>
@@ -240,6 +290,7 @@ export default function CheckoutPage() {
               </form>
             )}
           </section>
+          )}
 
           {/* Pagamento */}
           <section className="bg-white rounded-xl border border-border p-6">
@@ -350,7 +401,7 @@ export default function CheckoutPage() {
               <div className="flex justify-between"><span className="text-txt-secondary">Subtotal</span><span>{formatCurrency(cart.subtotal)}</span></div>
 
               {/* Calculadora de frete (auto-calcula pelo CEP do endereço selecionado) */}
-              {!isFreeShippingByRule && selectedAddr && (
+              {!pickup && !isFreeShippingByRule && selectedAddr && (
                 <div className="pt-2 pb-2">
                   <ShippingCalculator
                     items={cart.items}
@@ -365,7 +416,9 @@ export default function CheckoutPage() {
 
               <div className="flex justify-between">
                 <span className="text-txt-secondary">Frete</span>
-                {isFreeShippingByRule ? (
+                {pickup ? (
+                  <span className="font-semibold text-orange-600">Retirada no local</span>
+                ) : isFreeShippingByRule ? (
                   <span className="font-semibold text-emerald-600">{settings?.free_shipping_label || 'Frete grátis'}</span>
                 ) : selectedShipping ? (
                   <span>
@@ -379,12 +432,6 @@ export default function CheckoutPage() {
                 )}
               </div>
 
-              {selectedShipping?.id === 'pickup_local' && settings?.correios_pickup_address && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-                  <div className="font-semibold text-blue-900 mb-1">📍 Local de retirada:</div>
-                  <div className="text-blue-800">{settings.correios_pickup_address}</div>
-                </div>
-              )}
               {(remainingForFree > 0 || isFreeShippingByRule) && subtotal > 0 && fsThreshold > 0 && (
                 <FreeShippingProgress
                   subtotal={subtotal}
@@ -409,7 +456,7 @@ export default function CheckoutPage() {
               <span className="font-bold">Total</span>
               <span className="font-heading font-black text-2xl text-brand-main">{formatCurrency(total)}</span>
             </div>
-            <Button onClick={submit} loading={submitting} className="w-full mt-5" size="lg" data-testid="confirm-order-btn" disabled={!canCheckout || (!isFreeShippingByRule && !selectedShipping)}>
+            <Button onClick={submit} loading={submitting} className="w-full mt-5" size="lg" data-testid="confirm-order-btn" disabled={!canCheckout || (!pickup && !isFreeShippingByRule && !selectedShipping)}>
               Confirmar pedido
             </Button>
             {!canCheckout && (

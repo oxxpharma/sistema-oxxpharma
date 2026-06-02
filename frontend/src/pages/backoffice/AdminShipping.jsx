@@ -203,19 +203,20 @@ export default function AdminShipping() {
           <Card>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="font-heading font-bold">Retirada no Local</h3>
-                <p className="text-xs text-txt-secondary">Opção alternativa de entrega (cliente busca presencialmente).</p>
+                <h3 className="font-heading font-bold">🏬 Retirada no Local</h3>
+                <p className="text-xs text-txt-secondary">Cliente busca o pedido presencialmente. Frete zerado automaticamente.</p>
               </div>
               <label className="inline-flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={!!cfg.correios_pickup_enabled} onChange={(e) => set('correios_pickup_enabled', e.target.checked)} className="w-5 h-5 accent-brand-main" data-testid="toggle-pickup" />
-                <span className="text-sm font-semibold">{cfg.correios_pickup_enabled ? 'Ativado' : 'Desativado'}</span>
+                <input type="checkbox" checked={!!cfg.pickup_enabled} onChange={(e) => set('pickup_enabled', e.target.checked)} className="w-5 h-5 accent-brand-main" data-testid="toggle-pickup" />
+                <span className="text-sm font-semibold">{cfg.pickup_enabled ? 'Ativado' : 'Desativado'}</span>
               </label>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Nome exibido" value={cfg.correios_pickup_label} onChange={(v) => set('correios_pickup_label', v)} placeholder="Retirada no Local" />
-              <Field label="Preço (R$)" value={cfg.correios_pickup_price} onChange={(v) => set('correios_pickup_price', parseFloat(v || 0))} type="number" />
+            <Field label="Endereço completo do local" value={cfg.pickup_address} onChange={(v) => set('pickup_address', v)} placeholder="Av. Paulista, 1000 - Bela Vista, São Paulo/SP - CEP 01310-100" />
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Telefone / WhatsApp" value={cfg.pickup_phone} onChange={(v) => set('pickup_phone', v)} placeholder="(11) 91234-5678" />
+              <Field label="Horário de funcionamento" value={cfg.pickup_hours} onChange={(v) => set('pickup_hours', v)} placeholder="Seg-Sex 9h-18h · Sáb 9h-13h" />
             </div>
-            <Field label="Endereço de retirada" value={cfg.correios_pickup_address} onChange={(v) => set('correios_pickup_address', v)} placeholder="Av Paulista, 1000 - São Paulo/SP" />
+            <Field label="Instruções extras (opcional)" value={cfg.pickup_instructions} onChange={(v) => set('pickup_instructions', v)} placeholder="Ex: estacionamento gratuito ao lado · entrar pela rua de trás" />
           </Card>
 
           <Card>

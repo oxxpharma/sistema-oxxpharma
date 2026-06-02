@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { api } from '../../lib/api';
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2, Award } from 'lucide-react';
+import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2, Award, Store, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
@@ -14,6 +14,7 @@ import { evaluateFreeShipping } from '../../lib/freeShipping';
 import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 
 const COUPON_KEY = 'oxx_coupon_v1';
+const PICKUP_KEY = 'oxx_pickup_v1';
 
 export default function CartPage() {
   const { cart, updateItem, removeItem, loading } = useCart();
@@ -22,6 +23,17 @@ export default function CartPage() {
   const [updating, setUpdating] = useState(null);
   const settings = useSiteSettings();
   const [selectedShipping, setSelectedShipping] = useState(() => loadSelectedShipping());
+
+  // Iter 47: opcao "Retirar no local" (estado compartilhado com Checkout via localStorage)
+  const pickupCfg = settings?.pickup;
+  const [pickup, setPickup] = useState(() => localStorage.getItem(PICKUP_KEY) === '1');
+  useEffect(() => {
+    localStorage.setItem(PICKUP_KEY, pickup ? '1' : '0');
+  }, [pickup]);
+  // Se o admin desligou pickup enquanto o usuario tinha marcado, limpa
+  useEffect(() => {
+    if (pickupCfg && !pickupCfg.enabled && pickup) setPickup(false);
+  }, [pickupCfg?.enabled]);  // eslint-disable-line
 
   // Cupom
   const [couponInput, setCouponInput] = useState('');
@@ -37,9 +49,11 @@ export default function CartPage() {
   const isFreeShippingByRule = subtotal > 0 && fsEval.applies;
   // Quando NÃO tem regra de frete grátis, usamos o valor da opção escolhida
   // pelo usuário. Se nada selecionado ainda, o frete fica "a calcular" (0 no resumo)
-  const shipping = (subtotal === 0 || isFreeShippingByRule)
+  const shipping = pickup
     ? 0
-    : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
+    : (subtotal === 0 || isFreeShippingByRule)
+      ? 0
+      : (selectedShipping?.free_shipping ? 0 : Number(selectedShipping?.price || 0));
   const remainingForFree = fsEval.remaining || 0;
   const fsThreshold = fsEval.threshold || 0;
   const discount = coupon?.discount || 0;
@@ -231,8 +245,45 @@ export default function CartPage() {
                 );
               })()}
 
+              {/* Iter 47: Toggle Retirada no local */}
+              {pickupCfg?.enabled && (
+                <div className={`pt-3 pb-3 border-t border-border ${pickup ? '' : ''}`}>
+                  <button
+                    type="button"
+                    onClick={() => setPickup(!pickup)}
+                    className={`w-full text-left p-3 rounded-lg border-2 transition flex items-start gap-3 ${pickup ? 'border-orange-500 bg-orange-50' : 'border-border hover:border-orange-400/60'}`}
+                    data-testid="toggle-pickup-cart"
+                  >
+                    <Store className={`w-6 h-6 shrink-0 mt-0.5 ${pickup ? 'text-orange-600' : 'text-txt-secondary'}`} />
+                    <div className="flex-1">
+                      <div className="font-bold text-sm flex items-center gap-2">
+                        🏬 Quero retirar no local
+                        {pickup && <span className="text-[10px] uppercase font-black bg-orange-600 text-white px-1.5 py-0.5 rounded">selecionado · frete grátis</span>}
+                      </div>
+                      <div className="text-xs text-txt-secondary mt-0.5">Sem custo de envio. Você retira na loja.</div>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 shrink-0 mt-0.5 ${pickup ? 'border-orange-600 bg-orange-600' : 'border-gray-300'}`}>
+                      {pickup && <div className="w-full h-full rounded-full border-2 border-white" />}
+                    </div>
+                  </button>
+                  {pickup && (
+                    <div className="mt-3 bg-white border border-orange-200 rounded-lg p-3 text-xs space-y-1.5" data-testid="pickup-info-cart">
+                      <div className="font-bold text-orange-700 text-sm">📍 Local de retirada</div>
+                      <div className="text-txt-primary">{pickupCfg.address}</div>
+                      {pickupCfg.hours && <div className="text-txt-secondary"><span className="font-semibold">Horário:</span> {pickupCfg.hours}</div>}
+                      {pickupCfg.phone && <div className="text-txt-secondary"><span className="font-semibold">Telefone:</span> {pickupCfg.phone}</div>}
+                      {pickupCfg.instructions && <div className="text-txt-secondary italic">{pickupCfg.instructions}</div>}
+                      <div className="mt-2 pt-2 border-t border-orange-200 flex items-start gap-1.5 text-[11px] text-amber-900 bg-amber-50 -mx-3 -mb-3 px-3 py-2 rounded-b">
+                        <FileText className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        <span><strong>Importante:</strong> apresente a fatura recebida por e-mail no ato da retirada.</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Calculadora de frete */}
-              {!isFreeShippingByRule && subtotal > 0 && (
+              {!pickup && !isFreeShippingByRule && subtotal > 0 && (
                 <div className="pt-3 pb-3 border-t border-border">
                   <ShippingCalculator
                     items={cart.items}
@@ -245,7 +296,9 @@ export default function CartPage() {
 
               <div className="flex justify-between">
                 <span className="text-txt-secondary">Frete</span>
-                {isFreeShippingByRule ? (
+                {pickup ? (
+                  <span className="font-semibold text-orange-600">Retirada no local</span>
+                ) : isFreeShippingByRule ? (
                   <span className="font-semibold text-emerald-600">{settings?.free_shipping_label || 'Frete grátis'}</span>
                 ) : selectedShipping ? (
                   <span className="font-semibold">

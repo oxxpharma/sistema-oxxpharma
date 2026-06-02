@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
@@ -47,6 +47,7 @@ export default function AdminOrders() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [missingOnly, setMissingOnly] = useState(false);
+  const [pickupOnly, setPickupOnly] = useState(false);
   const [selected, setSelected] = useState(null);
   const [fixing, setFixing] = useState(null);
   const [page, setPage] = useState(1);
@@ -76,6 +77,7 @@ export default function AdminOrders() {
       if (status) q.set('status', status);
       if (search) q.set('search', search);
       if (missingOnly) q.set('missing_data', 'true');
+      if (pickupOnly) q.set('pickup', 'true');
       q.set('page', String(targetPage));
       q.set('limit', String(PAGE_LIMIT));
       const d = await api.get(`/api/admin/orders?${q}`);
@@ -85,7 +87,7 @@ export default function AdminOrders() {
       setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly, pickupOnly]);
 
   const updateStatus = async (orderId, newStatus) => {
     // Se o novo status é "shipped", abre modal para adicionar tracking code
@@ -201,6 +203,11 @@ export default function AdminOrders() {
           <AlertTriangle className="w-4 h-4" />
           Dados incompletos
         </label>
+        <label className={`h-10 px-3 inline-flex items-center gap-2 rounded-lg text-sm cursor-pointer border ${pickupOnly ? 'bg-orange-50 border-orange-300 text-orange-700' : 'bg-bg-secondary border-border'}`} data-testid="pickup-filter">
+          <input type="checkbox" checked={pickupOnly} onChange={(e) => setPickupOnly(e.target.checked)} />
+          <Store className="w-4 h-4" />
+          Retirada no local
+        </label>
         <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
 
@@ -222,10 +229,17 @@ export default function AdminOrders() {
                 {orders.map(o => {
                   const s = STATUS_LABELS[o.order_status] || STATUS_LABELS.pending;
                   const gaps = orderHasGaps(o);
+                  const isPickup = !!o.is_pickup;
                   return (
-                    <tr key={o.order_id} className={`border-t border-border hover:bg-bg-secondary/50 ${gaps ? 'bg-rose-50/40' : ''}`} data-testid={`order-row-${o.order_id}`}>
+                    <tr key={o.order_id} className={`border-t border-border hover:bg-bg-secondary/50 ${isPickup ? 'bg-orange-50/50' : ''} ${gaps ? 'bg-rose-50/40' : ''}`} data-testid={`order-row-${o.order_id}`}>
                       <td className="p-3 font-mono text-xs">
                         #{o.order_id.slice(-8).toUpperCase()}
+                        {isPickup && (
+                          <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-black uppercase text-white bg-orange-600 px-1.5 py-0.5 rounded" title="Pedido para retirada no local">
+                            <Store className="w-3 h-3" />
+                            RETIRADA
+                          </span>
+                        )}
                         {gaps && (
                           <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded" title={[isMissingCpf(o) && 'CPF', isMissingCep(o) && 'CEP'].filter(Boolean).join(' + ')}>
                             <AlertTriangle className="w-3 h-3" />
@@ -276,13 +290,30 @@ export default function AdminOrders() {
                 <div><div className="text-txt-secondary text-xs">Pagamento</div><div className="font-bold">{selected.payment_method}</div><div className="text-xs">{selected.payment_status}</div></div>
               </div>
 
-              <div>
-                <div className="text-txt-secondary text-xs mb-1">Endereço</div>
-                <div className="text-sm">
-                  {selected.shipping_address?.street}, {selected.shipping_address?.number} - {selected.shipping_address?.neighborhood}<br />
-                  {selected.shipping_address?.city}/{selected.shipping_address?.state} · CEP {selected.shipping_address?.zip_code}
+              {selected.is_pickup ? (
+                <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-4" data-testid="order-pickup-card">
+                  <div className="text-orange-700 font-black flex items-center gap-2 mb-2">
+                    <Store className="w-5 h-5" /> RETIRADA NO LOCAL — Não enviar
+                  </div>
+                  <div className="text-sm space-y-1 text-txt-primary">
+                    <div><span className="font-semibold">Endereço:</span> {selected.pickup_snapshot?.address || selected.shipping_address?.street}</div>
+                    {selected.pickup_snapshot?.hours && <div><span className="font-semibold">Horário:</span> {selected.pickup_snapshot.hours}</div>}
+                    {selected.pickup_snapshot?.phone && <div><span className="font-semibold">Telefone:</span> {selected.pickup_snapshot.phone}</div>}
+                    {selected.pickup_snapshot?.instructions && <div className="italic text-txt-secondary">{selected.pickup_snapshot.instructions}</div>}
+                  </div>
+                  <div className="text-[11px] text-amber-900 mt-3 pt-3 border-t border-orange-200">
+                    Cliente apresentará a fatura recebida por e-mail no ato da retirada.
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <div className="text-txt-secondary text-xs mb-1">Endereço</div>
+                  <div className="text-sm">
+                    {selected.shipping_address?.street}, {selected.shipping_address?.number} - {selected.shipping_address?.neighborhood}<br />
+                    {selected.shipping_address?.city}/{selected.shipping_address?.state} · CEP {selected.shipping_address?.zip_code}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <div className="text-txt-secondary text-xs mb-2">Itens</div>

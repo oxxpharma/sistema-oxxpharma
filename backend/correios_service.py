@@ -58,6 +58,12 @@ DEFAULT_CONFIG = {
     "correios_pickup_label": "Retirada no Local",
     "correios_pickup_address": "",
     "correios_pickup_price": 0.0,
+    # Iter 47: campos do toggle dedicado de Retirada no Local (independente do provider de frete)
+    "pickup_enabled": False,
+    "pickup_address": "",
+    "pickup_phone": "",
+    "pickup_hours": "",
+    "pickup_instructions": "",
     "correios_default_length_cm": 16,
     "correios_default_width_cm": 11,
     "correios_default_height_cm": 6,
@@ -360,16 +366,9 @@ async def calculate_freight(db, cep_destination: str, items: List[Dict],
     options: List[Dict] = []
     cache_used = False
 
-    # Pickup local primeiro
-    if cfg.get("correios_pickup_enabled"):
-        options.append({
-            "code": "PICKUP",
-            "label": cfg.get("correios_pickup_label") or "Retirada no Local",
-            "price": float(cfg.get("correios_pickup_price") or 0),
-            "deadline_days": 0,
-            "address": cfg.get("correios_pickup_address") or "",
-            "pickup": True,
-        })
+    # Iter 47: pickup nao aparece mais nas opcoes de frete (vira toggle dedicado
+    # no carrinho/checkout). Mantido o setting `correios_pickup_enabled` apenas
+    # como flag legacy; o uso atual eh `pickup_enabled` em get_config.
 
     if not cfg.get("correios_enabled"):
         return {"options": options, "package": pkg, "cache": False}

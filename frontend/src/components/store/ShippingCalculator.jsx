@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
-import { MapPin, Loader2, Truck, CheckCircle2, Store } from 'lucide-react';
+import { MapPin, Loader2, Truck, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STORAGE_KEY = 'oxx_selected_shipping_v1';
@@ -142,19 +142,17 @@ export default function ShippingCalculator({
                 className={`w-full text-left p-3 rounded-lg border-2 transition flex items-center gap-3 ${isSel ? 'border-brand-main bg-brand-light' : 'border-border hover:border-brand-main/40'}`}
                 data-testid={`shipping-opt-${opt.id}`}
               >
-                {opt.provider === 'pickup' ? (
-                  <Store className="w-6 h-6 text-orange-600" />
-                ) : opt.logo ? (
+                {opt.logo ? (
                   <img src={opt.logo} alt={opt.carrier} className="w-8 h-8 object-contain" />
                 ) : (
                   <Truck className="w-6 h-6 text-brand-main" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-sm text-txt-primary">
-                    {opt.provider !== 'pickup' && opt.carrier && <span className="text-txt-secondary">{opt.carrier} · </span>}
+                    {opt.carrier && <span className="text-txt-secondary">{opt.carrier} · </span>}
                     {opt.name}
                   </div>
-                  {opt.provider !== 'pickup' && opt.delivery_days != null && (
+                  {opt.delivery_days != null && (
                     <div className="text-[11px] text-txt-secondary">Entrega em até {opt.delivery_days} dia{opt.delivery_days === 1 ? '' : 's'} úteis</div>
                   )}
                 </div>
