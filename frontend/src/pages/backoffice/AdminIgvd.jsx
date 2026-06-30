@@ -63,6 +63,7 @@ export default function AdminIgvd() {
   const filtered = filter ? items.filter(v => v.status === filter) : items;
 
   const webhookUrl = `${window.location.origin}/api/integrations/igvd/voucher`;
+  const sandboxUrl = `${window.location.origin}/api/integrations/igvd/voucher/sandbox`;
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
 
@@ -99,12 +100,19 @@ export default function AdminIgvd() {
         <h2 className="font-heading font-bold mb-3 flex items-center gap-2"><Webhook className="w-5 h-5 text-brand-main" /> Configuração do Webhook</h2>
         <div className="grid md:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs font-bold text-txt-secondary block mb-1">URL para configurar na IGVD</label>
+            <label className="text-xs font-bold text-txt-secondary block mb-1">URL de PRODUÇÃO (recebe vouchers reais)</label>
             <div className="flex gap-2">
               <input readOnly value={webhookUrl} className="flex-1 px-3 py-2 border border-border rounded-lg font-mono text-xs bg-bg-secondary" data-testid="webhook-url" />
               <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(webhookUrl); toast.success('Copiado'); }}><Copy className="w-3.5 h-3.5" /></Button>
             </div>
-            <p className="text-[11px] text-txt-secondary mt-1">Cole esta URL no painel da IGVD em <span className="font-mono">/admin/system → OxxPharma → URL do endpoint</span>.</p>
+            <p className="text-[11px] text-txt-secondary mt-1">Cole no painel da IGVD em <span className="font-mono">/admin/system → OxxPharma → URL do endpoint</span>.</p>
+
+            <label className="text-xs font-bold text-amber-700 block mb-1 mt-3">URL de SANDBOX (somente teste de conexão · não grava nada)</label>
+            <div className="flex gap-2">
+              <input readOnly value={sandboxUrl} className="flex-1 px-3 py-2 border border-amber-300 rounded-lg font-mono text-xs bg-amber-50" data-testid="sandbox-url" />
+              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(sandboxUrl); toast.success('Copiado'); }}><Copy className="w-3.5 h-3.5" /></Button>
+            </div>
+            <p className="text-[11px] text-txt-secondary mt-1">Use no botão <span className="font-mono">"Testar conexão"</span> da IGVD. Mesma <code>x-Api-Key</code>; valida o payload e devolve <code>status: simulated</code>.</p>
           </div>
           <div>
             <label className="text-xs font-bold text-txt-secondary block mb-1">x-Api-Key (token compartilhado)</label>

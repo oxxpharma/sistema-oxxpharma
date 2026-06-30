@@ -3756,6 +3756,47 @@ async def register_points_from_order(db, order_id: str):
         except Exception as e:
             logger.warning(f"trigger_realtime maxx falhou: {e}")
 
+@app.post("/api/integrations/igvd/voucher/sandbox")
+async def igvd_voucher_sandbox(request: Request):
+    """Iter 48: endpoint de SANDBOX para a IGVD validar conexao sem aplicar
+    nada de verdade. Valida a mesma `x-Api-Key`, faz parsing do payload e
+    devolve um JSON simulado seguindo o contrato. NAO grava em `igvd_vouchers`
+    nem altera saldo de usuario."""
+    db = request.app.db
+    cfg = await igvd_service.get_config(db)
+    expected = (cfg.get("igvd_voucher_secret") or "").strip()
+    received = (request.headers.get("x-api-key") or request.headers.get("x-Api-Key") or "").strip()
+    if not expected or not received or received != expected:
+        raise HTTPException(status_code=401, detail="x-Api-Key invalida ou ausente")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON invalido")
+    voucher = payload.get("voucher") or {}
+    lic = payload.get("licenciado") or {}
+    code = (voucher.get("code") or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="voucher.code obrigatorio")
+    amount_cents = int(voucher.get("amount_cents") or 0)
+    if amount_cents <= 0 and not voucher.get("amount_brl"):
+        raise HTTPException(status_code=400, detail="voucher.amount_cents ou voucher.amount_brl obrigatorio")
+    return {
+        "success": True,
+        "sandbox": True,
+        "user_id": None,
+        "voucher_code": code,
+        "credited_amount_cents": amount_cents,
+        "status": "simulated",
+        "message": "Conexao OK. Payload aceito (sandbox: nada foi gravado).",
+        "echo": {
+            "adesao_id": payload.get("adesao_id"),
+            "licenciado_email": (lic.get("email") or "").lower(),
+            "licenciado_cpf_digits": re.sub(r"\D", "", lic.get("cpf") or ""),
+            "idempotency_key": request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key"),
+        },
+    }
+
+
 @app.post("/api/integrations/igvd/voucher")
 async def igvd_voucher_webhook(request: Request):
     """Iter 48: webhook publico chamado pela IGVD apos pagamento do kit de adesao.
