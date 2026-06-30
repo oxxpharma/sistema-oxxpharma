@@ -75,6 +75,11 @@ SYSTEM_PROFILES = {
         "description": "Acesso a pedidos e usuários",
         "pages": ["orders", "users", "products", "marketing"],
     },
+   "cliente": {
+        "name": "Cliente",
+        "description": "Acesso apenas à loja.",
+        "pages": [],
+    },
 }
 
 

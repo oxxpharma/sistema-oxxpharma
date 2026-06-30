@@ -222,6 +222,7 @@ export default function AdminOrders() {
                   <th className="text-left p-3">Data</th>
                   <th className="text-right p-3">Total</th>
                   <th className="text-center p-3">Status</th>
+                  <th className="text-left p-3">Rastreio</th>
                   <th className="text-right p-3">Ações</th>
                 </tr>
               </thead>
@@ -254,6 +255,13 @@ export default function AdminOrders() {
                       <td className="p-3 text-xs">{formatDateTime(o.created_at)}</td>
                       <td className="p-3 text-right font-bold">{formatCurrency(o.total)}</td>
                       <td className="p-3 text-center"><Badge variant={s.variant}>{s.label}</Badge></td>
+                      <td className="p-3">
+                        {o.tracking_code ? (
+                          <CopyTrackingCode code={o.tracking_code} />
+                        ) : (
+                          <span className="text-txt-secondary text-xs">—</span>
+                        )}
+                      </td>
                       <td className="p-3 text-right">
                         {gaps && (
                           <button onClick={() => setFixing(o)} className="p-2 hover:bg-rose-100 rounded ml-1" data-testid={`fix-order-${o.order_id}`} title="Completar CPF/CEP">
@@ -402,6 +410,7 @@ export default function AdminOrders() {
           </div>
         </div>
       )}
+      
       {fixing && (
         <FixOrderModal
           order={fixing}
@@ -435,6 +444,43 @@ export default function AdminOrders() {
     </div>
   );
 }
+
+
+      function CopyTrackingCode({ code }) {
+        const [copied, setCopied] = useState(false);
+      
+        const handleCopy = async () => {
+          try {
+            await navigator.clipboard.writeText(code);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          } catch {
+            // fallback para browsers mais antigos
+            const el = document.createElement('textarea');
+            el.value = code;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }
+        };
+      
+        return (
+          <button
+            onClick={handleCopy}
+            title="Clique para copiar"
+            className={`font-mono text-xs px-2 py-1 rounded border transition-all ${
+              copied
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                : 'bg-bg-secondary border-border text-txt-primary hover:bg-brand-light hover:border-brand-main'
+            }`}
+          >
+            {copied ? '✓ Copiado!' : code}
+          </button>
+        );
+      }
 
 function FixOrderModal({ order, onClose, onSaved }) {
   const initialCpfDigits = (order.customer_cpf_digits || (order.customer_cpf || '').replace(/\D/g, ''));
