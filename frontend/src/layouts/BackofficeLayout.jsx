@@ -53,6 +53,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/cartao', icon: CreditCard, label: 'Cartão Benefícios', testId: 'nav-card', perm: 'financial' },
       { to: '/backoffice/maxx', icon: Repeat, label: 'Maxx Equipe', testId: 'nav-maxx', perm: 'integrations' },
       { to: '/backoffice/maxx-pendentes', icon: Send, label: 'Pontos pendentes', testId: 'nav-maxx-pending', perm: 'integrations' },
+      { to: '/backoffice/igvd', icon: Ticket, label: 'IGVD · Vouchers', testId: 'nav-igvd', perm: 'integrations' },
       { to: '/backoffice/melhor-envio', icon: Truck, label: 'Melhor Envio', testId: 'nav-melhor-envio', perm: 'integrations' },
     ],
   },

@@ -30,6 +30,7 @@ import payments_service
 import correios_service
 import maxx_service
 import tenant_service
+import igvd_service
 import melhorenvio_service
 import store_extras
 
@@ -439,6 +440,7 @@ async def lifespan(app: FastAPI):
     await app.db.users.create_index("external_id", sparse=True)
     await app.db.users.create_index("leader_external_id", sparse=True)
     await app.db.users.create_index("cpf_digits", sparse=True)
+    await igvd_service.ensure_indexes(app.db)
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
@@ -763,6 +765,11 @@ async def register(request: Request, response: Response, data: AuthRegister):
         "created_at": now_iso(),
     }
     await db.users.insert_one(user)
+    # Iter 48: aplica automaticamente vouchers IGVD pendentes para este e-mail/CPF
+    try:
+        await igvd_service.apply_pending_for_user(db, user["user_id"], user["email"], user.get("cpf_digits"))
+    except Exception as e:
+        logger.warning(f"Falha aplicando voucher IGVD pendente no register: {e}")
     token = create_token(user["user_id"], user["email"], "customer")
     set_cookie(response, token)
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
@@ -3749,6 +3756,60 @@ async def register_points_from_order(db, order_id: str):
         except Exception as e:
             logger.warning(f"trigger_realtime maxx falhou: {e}")
 
+@app.post("/api/integrations/igvd/voucher")
+async def igvd_voucher_webhook(request: Request):
+    """Iter 48: webhook publico chamado pela IGVD apos pagamento do kit de adesao.
+    Recebe codigo voucher + valor + dados do licenciado. Aplica saldo voucher
+    no user identificado por CPF/email; se ainda nao existe, fica pendente.
+    Autenticacao: header x-Api-Key deve casar com settings.igvd_voucher_secret.
+    Idempotencia: header Idempotency-Key (recomendado: `adesao-{adesao_id}-oxx`)
+    OU voucher.code unico."""
+    db = request.app.db
+    cfg = await igvd_service.get_config(db)
+    if not cfg.get("igvd_voucher_enabled"):
+        raise HTTPException(status_code=503, detail="Webhook IGVD desativado")
+    expected = (cfg.get("igvd_voucher_secret") or "").strip()
+    received = (request.headers.get("x-api-key") or request.headers.get("x-Api-Key") or "").strip()
+    if not expected or not received or received != expected:
+        raise HTTPException(status_code=401, detail="x-Api-Key invalida ou ausente")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON invalido")
+    idem = request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
+    try:
+        out = await igvd_service.ingest_voucher(db, payload, idem)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return out
+
+
+@app.get("/api/admin/igvd/vouchers")
+async def admin_list_igvd_vouchers(request: Request, status: Optional[str] = None, page: int = 1, limit: int = 30, user: dict = Depends(require_admin())):
+    db = request.app.db
+    q = {}
+    if status:
+        q["status"] = status
+    total = await db.igvd_vouchers.count_documents(q)
+    items = await db.igvd_vouchers.find(q, {"_id": 0, "raw_payload": 0}).sort("received_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"items": items, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+
+@app.post("/api/admin/igvd/vouchers/retry-pending")
+async def admin_retry_igvd_pending(request: Request, user: dict = Depends(require_admin())):
+    """Iter 48: reprocessa todos vouchers IGVD pendentes — util se admin acabou
+    de cadastrar manualmente o user e quer aplicar agora."""
+    db = request.app.db
+    pending = await db.igvd_vouchers.find({"status": "pending"}, {"_id": 0}).to_list(500)
+    applied = 0
+    for v in pending:
+        u = await igvd_service._find_user(db, v.get("licenciado_email") or "", v.get("licenciado_cpf_digits") or "")
+        if u:
+            await igvd_service._apply_voucher_to_user(db, v, u["user_id"])
+            applied += 1
+    return {"scanned": len(pending), "applied": applied, "still_pending": len(pending) - applied}
+
+
 @app.post("/api/payments/webhook/mercadopago")
 async def mp_webhook(request: Request):
     """Webhook MercadoPago: valida assinatura, busca payment, marca pedido como pago."""
@@ -3822,6 +3883,8 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
         "email_trigger_order_shipped", "email_trigger_order_delivered",
         "email_trigger_commission_earned", "email_trigger_admin_new_candidate",
         "email_trigger_admin_new_order", "email_trigger_welcome",
+        # Iter 48: integracao IGVD (voucher de adesao)
+        "igvd_voucher_enabled", "igvd_voucher_secret",
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
@@ -6565,6 +6628,11 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         "created_by_admin": user["user_id"],
     }
     await db.users.insert_one(user_doc)
+    # Iter 48: aplica vouchers IGVD pendentes
+    try:
+        await igvd_service.apply_pending_for_user(db, user_doc["user_id"], user_doc.get("email"), user_doc.get("cpf_digits") or user_doc.get("cpf"))
+    except Exception as e:
+        logger.warning(f"Falha aplicando voucher IGVD pendente no admin_create: {e}")
 
     # Dispara fluxo de primeiro acesso (token + email)
     token = uuid.uuid4().hex + uuid.uuid4().hex
