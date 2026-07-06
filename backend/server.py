@@ -3926,6 +3926,7 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
         "email_trigger_admin_new_order", "email_trigger_welcome",
         # Iter 48: integracao IGVD (voucher de adesao)
         "igvd_voucher_enabled", "igvd_voucher_secret",
+        "igvd_kit_items",  # Iter 48b: [{product_id, quantity}] — Kit de Adesao gerado no cadastro
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
@@ -3938,6 +3939,18 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
             while len(arr) < 6:
                 arr.append(0.0)
             update[key] = arr
+    # Iter 48b: sanitiza igvd_kit_items -> [{product_id: str, quantity: int}]
+    if "igvd_kit_items" in update:
+        raw = update["igvd_kit_items"]
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=400, detail="igvd_kit_items deve ser lista")
+        clean = []
+        for it in raw[:50]:
+            pid = str((it or {}).get("product_id") or "").strip()
+            qty = int((it or {}).get("quantity") or 0)
+            if pid and qty > 0:
+                clean.append({"product_id": pid, "quantity": qty})
+        update["igvd_kit_items"] = clean
     update["updated_at"] = now_iso()
     await db.settings.update_one({"_id": "global"}, {"$set": update}, upsert=True)
     return await get_settings(db)

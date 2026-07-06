@@ -2,14 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Loader2, Save, Webhook, RefreshCw, Ticket, Copy } from 'lucide-react';
+import { Loader2, Save, Webhook, RefreshCw, Ticket, Copy, Plus, Trash2, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime, formatCurrency } from '../../lib/utils';
 
 const STATUS_VARIANTS = { pending: 'warning', applied: 'success', failed: 'danger', cancelled: 'secondary' };
 
 export default function AdminIgvd() {
-  const [cfg, setCfg] = useState({ igvd_voucher_enabled: false, igvd_voucher_secret: '' });
+  const [cfg, setCfg] = useState({ igvd_voucher_enabled: false, igvd_voucher_secret: '', igvd_kit_items: [] });
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [items, setItems] = useState([]);
@@ -20,18 +21,21 @@ export default function AdminIgvd() {
   const load = async () => {
     setLoading(true);
     try {
-      const [c, all, pend, appl] = await Promise.all([
+      const [c, all, pend, appl, prods] = await Promise.all([
         api.get('/api/admin/settings').catch(() => ({})),
         api.get('/api/admin/igvd/vouchers?limit=50'),
         api.get('/api/admin/igvd/vouchers?status=pending&limit=1'),
         api.get('/api/admin/igvd/vouchers?status=applied&limit=1'),
+        api.get('/api/admin/products?limit=500').catch(() => ({ products: [] })),
       ]);
       setCfg({
         igvd_voucher_enabled: !!c.igvd_voucher_enabled,
         igvd_voucher_secret: c.igvd_voucher_secret || '',
+        igvd_kit_items: Array.isArray(c.igvd_kit_items) ? c.igvd_kit_items : [],
       });
       setItems(all.items || []);
       setStats({ total: all.total || 0, pending: pend.total || 0, applied: appl.total || 0 });
+      setProducts(prods.products || prods.items || []);
     } finally { setLoading(false); }
   };
 
@@ -43,6 +47,7 @@ export default function AdminIgvd() {
       await api.put('/api/admin/settings', {
         igvd_voucher_enabled: cfg.igvd_voucher_enabled,
         igvd_voucher_secret: cfg.igvd_voucher_secret,
+        igvd_kit_items: cfg.igvd_kit_items,
       });
       toast.success('Configurações salvas');
       await load();
@@ -61,6 +66,16 @@ export default function AdminIgvd() {
   };
 
   const filtered = filter ? items.filter(v => v.status === filter) : items;
+
+  const productMap = React.useMemo(() => Object.fromEntries((products || []).map(p => [p.product_id, p])), [products]);
+
+  const kitAddItem = () => setCfg((c) => ({ ...c, igvd_kit_items: [...(c.igvd_kit_items || []), { product_id: '', quantity: 1 }] }));
+  const kitUpdate = (idx, patch) => setCfg((c) => ({ ...c, igvd_kit_items: (c.igvd_kit_items || []).map((it, i) => i === idx ? { ...it, ...patch } : it) }));
+  const kitRemove = (idx) => setCfg((c) => ({ ...c, igvd_kit_items: (c.igvd_kit_items || []).filter((_, i) => i !== idx) }));
+  const kitTotal = (cfg.igvd_kit_items || []).reduce((acc, it) => {
+    const p = productMap[it.product_id];
+    return acc + (p ? Number(p.price || 0) * Number(it.quantity || 0) : 0);
+  }, 0);
 
   const webhookUrl = `${window.location.origin}/api/integrations/igvd/voucher`;
   const sandboxUrl = `${window.location.origin}/api/integrations/igvd/voucher/sandbox`;
@@ -112,7 +127,7 @@ export default function AdminIgvd() {
               <input readOnly value={sandboxUrl} className="flex-1 px-3 py-2 border border-amber-300 rounded-lg font-mono text-xs bg-amber-50" data-testid="sandbox-url" />
               <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(sandboxUrl); toast.success('Copiado'); }}><Copy className="w-3.5 h-3.5" /></Button>
             </div>
-            <p className="text-[11px] text-txt-secondary mt-1">Use no botão <span className="font-mono">"Testar conexão"</span> da IGVD. Mesma <code>x-Api-Key</code>; valida o payload e devolve <code>status: simulated</code>.</p>
+            <p className="text-[11px] text-txt-secondary mt-1">Use no botão <span className="font-mono">Testar conexão</span> da IGVD. Mesma <code>x-Api-Key</code>; valida o payload e devolve <code>status: simulated</code>.</p>
           </div>
           <div>
             <label className="text-xs font-bold text-txt-secondary block mb-1">x-Api-Key (token compartilhado)</label>
@@ -126,6 +141,60 @@ export default function AdminIgvd() {
             <span className="text-sm font-semibold">{cfg.igvd_voucher_enabled ? 'Webhook ATIVADO' : 'Webhook desativado'}</span>
           </label>
           <Button onClick={save} loading={saving} data-testid="save-igvd-btn"><Save className="w-4 h-4" /> Salvar</Button>
+        </div>
+      </div>
+
+      <div className="bg-white border border-border rounded-xl p-5 mb-6" data-testid="igvd-kit-card">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h2 className="font-heading font-bold flex items-center gap-2"><Package className="w-5 h-5 text-brand-main" /> Kit de Adesão IGVD</h2>
+            <p className="text-xs text-txt-secondary mt-0.5">Produtos que serão adicionados ao pedido gerado automaticamente. O pedido é criado 1 vez por conta (idempotente).</p>
+          </div>
+          <div className="text-right">
+            <div className="text-[11px] text-txt-secondary">Valor do kit (soma dos preços)</div>
+            <div className="font-black text-lg text-brand-main">{formatCurrency(kitTotal)}</div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {(cfg.igvd_kit_items || []).length === 0 && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Nenhum produto configurado. Adicione ao menos 1 produto para o webhook começar a gerar pedidos.
+            </div>
+          )}
+          {(cfg.igvd_kit_items || []).map((it, idx) => {
+            const p = productMap[it.product_id];
+            const line = p ? Number(p.price || 0) * Number(it.quantity || 0) : 0;
+            return (
+              <div key={idx} className="flex items-center gap-2" data-testid={`kit-row-${idx}`}>
+                <select
+                  value={it.product_id}
+                  onChange={(e) => kitUpdate(idx, { product_id: e.target.value })}
+                  className="flex-1 px-3 py-2 border border-border rounded-lg text-sm"
+                  data-testid={`kit-product-${idx}`}
+                >
+                  <option value="">— selecione o produto —</option>
+                  {products.map(pr => (
+                    <option key={pr.product_id} value={pr.product_id}>{pr.name} · {formatCurrency(pr.price)} {pr.sku ? `· ${pr.sku}` : ''}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min="1"
+                  value={it.quantity}
+                  onChange={(e) => kitUpdate(idx, { quantity: Math.max(1, parseInt(e.target.value || '1', 10)) })}
+                  className="w-20 px-2 py-2 border border-border rounded-lg text-sm text-center font-bold"
+                  data-testid={`kit-qty-${idx}`}
+                />
+                <div className="w-24 text-right text-sm font-bold text-txt-primary">{formatCurrency(line)}</div>
+                <button onClick={() => kitRemove(idx)} className="p-2 hover:bg-rose-50 rounded" title="Remover" data-testid={`kit-remove-${idx}`}>
+                  <Trash2 className="w-4 h-4 text-rose-500" />
+                </button>
+              </div>
+            );
+          })}
+          <Button variant="outline" size="sm" onClick={kitAddItem} data-testid="kit-add-btn">
+            <Plus className="w-4 h-4" /> Adicionar produto
+          </Button>
         </div>
       </div>
 
@@ -149,7 +218,7 @@ export default function AdminIgvd() {
                 <th className="p-3 text-right">Valor</th>
                 <th className="p-3">Recebido</th>
                 <th className="p-3">Status</th>
-                <th className="p-3">Aplicado em</th>
+                <th className="p-3">Pedido gerado</th>
               </tr>
             </thead>
             <tbody>
@@ -166,7 +235,13 @@ export default function AdminIgvd() {
                   <td className="p-3 text-right font-bold">{formatCurrency(v.amount_brl)}</td>
                   <td className="p-3 text-xs">{formatDateTime(v.received_at)}</td>
                   <td className="p-3"><Badge variant={STATUS_VARIANTS[v.status] || 'secondary'}>{v.status}</Badge></td>
-                  <td className="p-3 text-xs">{v.applied_at ? formatDateTime(v.applied_at) : '—'}</td>
+                  <td className="p-3 text-xs">
+                    {v.generated_order_id ? (
+                      <a href={`/backoffice/pedidos`} className="font-mono text-brand-main hover:underline">#{String(v.generated_order_id).slice(-8).toUpperCase()}</a>
+                    ) : v.note ? (
+                      <span className="text-[11px] text-amber-700">{v.note}</span>
+                    ) : '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>

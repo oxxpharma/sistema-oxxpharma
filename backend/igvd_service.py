@@ -33,6 +33,8 @@ async def ensure_indexes(db) -> None:
     await db.igvd_vouchers.create_index("licenciado_cpf_digits")
     await db.igvd_vouchers.create_index("licenciado_email")
     await db.igvd_vouchers.create_index("status")
+    # Iter 48b: pedidos gerados pela integracao IGVD (idempotencia por voucher + user)
+    await db.orders.create_index("igvd_voucher_code", sparse=True)
 
 
 async def get_config(db) -> Dict:
@@ -56,36 +58,179 @@ async def _find_user(db, email: str, cpf_digits: str) -> Optional[Dict]:
     return None
 
 
-async def _apply_voucher_to_user(db, voucher_doc: Dict, user_id: str) -> Dict:
-    """Credita amount_brl no voucher_balance do user, marca voucher como aplicado,
-    grava entrada no voucher_log para auditoria."""
+async def _load_kit_config(db) -> Dict:
+    """Le a configuracao do Kit de Adesao IGVD (produtos + retirada)."""
+    s = await db.settings.find_one({"_id": "global"}) or {}
+    return {
+        "kit_items": list(s.get("igvd_kit_items") or []),  # [{product_id, quantity}]
+        "pickup_enabled": bool(s.get("pickup_enabled")),
+        "pickup_address": s.get("pickup_address") or "",
+        "pickup_phone": s.get("pickup_phone") or "",
+        "pickup_hours": s.get("pickup_hours") or "",
+        "pickup_instructions": s.get("pickup_instructions") or "",
+    }
+
+
+def _gen_order_id() -> str:
+    import secrets
+    return "ord_" + secrets.token_hex(6)
+
+
+async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optional[str]:
+    """Cria um pedido JA PAGO no cadastro do user com os produtos do Kit
+    configurados no admin. Idempotente: 1 pedido por voucher_code E no maximo
+    1 pedido IGVD por user. Retorna order_id ou None em caso de erro nao
+    fatal (voucher fica pending pra reprocessamento manual)."""
+    user_id = user_doc["user_id"]
+
+    # Idempotencia 1: ja existe pedido gerado por este voucher?
+    existing_by_voucher = await db.orders.find_one({"igvd_voucher_code": voucher_doc["voucher_code"]}, {"_id": 0, "order_id": 1})
+    if existing_by_voucher:
+        return existing_by_voucher["order_id"]
+
+    # Idempotencia 2: usuario ja recebeu um pedido IGVD? (regra: 1 vez por conta)
+    existing_by_user = await db.orders.find_one({"user_id": user_id, "igvd_voucher_code": {"$ne": None}}, {"_id": 0, "order_id": 1, "igvd_voucher_code": 1})
+    if existing_by_user:
+        # Marca o voucher como duplicado no user (nao aplica de novo).
+        return None
+
+    cfg = await _load_kit_config(db)
+    kit_items = cfg["kit_items"]
+    if not kit_items:
+        # Kit nao configurado — mantem voucher em pending para o admin resolver
+        return None
+
+    # Enriquece os itens com dados atuais dos produtos
+    pids = [str(k.get("product_id")) for k in kit_items if k.get("product_id")]
+    prod_map = {}
+    async for p in db.products.find({"product_id": {"$in": pids}}, {"_id": 0}):
+        prod_map[p["product_id"]] = p
+    order_items = []
+    subtotal = 0.0
+    for k in kit_items:
+        pid = str(k.get("product_id"))
+        qty = int(k.get("quantity") or 1)
+        p = prod_map.get(pid)
+        if not p:
+            continue  # produto foi apagado; ignora
+        unit_price = float(p.get("price") or 0)
+        item_total = round(unit_price * qty, 2)
+        subtotal += item_total
+        order_items.append({
+            "product_id": pid,
+            "name": p.get("name"),
+            "price": unit_price,
+            "quantity": qty,
+            "total": item_total,
+            "sku": p.get("sku") or "",
+            "ean": p.get("ean") or "",
+            "points_value": 0,  # nao gera pontos Maxx
+        })
+    if not order_items:
+        return None
+
+    # Endereco: reaproveita o endereco default do user; se nao houver, cria snapshot minimo
+    addrs = user_doc.get("addresses") or []
+    default_addr = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
+
+    # Pickup snapshot (kit vai pra retirada por padrao — trocar depois se admin quiser envio)
+    pickup_snapshot = {
+        "address": cfg["pickup_address"],
+        "phone": cfg["pickup_phone"],
+        "hours": cfg["pickup_hours"],
+        "instructions": cfg["pickup_instructions"],
+    }
+    is_pickup = bool(cfg["pickup_enabled"] and cfg["pickup_address"])
+
+    ship_addr = default_addr or {
+        "address_id": "pickup" if is_pickup else "igvd",
+        "label": "Retirada IGVD" if is_pickup else "Endereço não informado",
+        "name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
+        "street": pickup_snapshot["address"] if is_pickup else (voucher_doc.get("licenciado_address") or {}).get("street") or "",
+        "number": "—",
+        "complement": "",
+        "neighborhood": (voucher_doc.get("licenciado_address") or {}).get("neighborhood") or "",
+        "city": (voucher_doc.get("licenciado_address") or {}).get("city") or "",
+        "state": (voucher_doc.get("licenciado_address") or {}).get("state") or "",
+        "zip_code": ((voucher_doc.get("licenciado_address") or {}).get("zip_code") or "00000-000"),
+        "is_pickup": is_pickup,
+    }
+
+    now = _now_iso()
     amount_brl = float(voucher_doc.get("amount_brl") or 0)
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$inc": {"voucher_balance": amount_brl}},
-    )
-    await db.voucher_log.insert_one({
-        "log_id": "vlog_igvd_" + voucher_doc["voucher_code"],
+    order = {
+        "order_id": _gen_order_id(),
         "user_id": user_id,
-        "delta": amount_brl,
-        "reason": f"Adesão IGVD · voucher {voucher_doc['voucher_code']}",
-        "source": "igvd_voucher",
-        "voucher_code": voucher_doc["voucher_code"],
-        "created_at": _now_iso(),
-    })
+        "customer_name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
+        "customer_email": user_doc.get("email") or voucher_doc.get("licenciado_email") or "",
+        "customer_cpf": user_doc.get("cpf") or "",
+        "customer_cpf_digits": user_doc.get("cpf_digits") or voucher_doc.get("licenciado_cpf_digits") or "",
+        "customer_phone": user_doc.get("phone") or voucher_doc.get("licenciado_phone") or "",
+        "items": order_items,
+        "subtotal": round(subtotal, 2),
+        "shipping_cost": 0.0,
+        "shipping_service_name": "Retirada IGVD" if is_pickup else "—",
+        "shipping_carrier": "IGVD",
+        "shipping_service_id": "igvd_kit",
+        "shipping_delivery_days": 0,
+        "discount_amount": 0.0,
+        "coupon_code": None,
+        "voucher_used": 0.0,
+        # O valor cobrado eh o valor informado pela IGVD (batido com o kit de fato)
+        "total": amount_brl if amount_brl > 0 else round(subtotal, 2),
+        "total_before_voucher": amount_brl if amount_brl > 0 else round(subtotal, 2),
+        "shipping_address": ship_addr,
+        "is_pickup": is_pickup,
+        "pickup_snapshot": pickup_snapshot if is_pickup else None,
+        "payment_method": "igvd_voucher",
+        "payment_status": "paid",  # ja pago pela IGVD
+        "order_status": "paid",
+        "paid_at": now,
+        "igvd_voucher_code": voucher_doc["voucher_code"],
+        "igvd_adesao_id": voucher_doc.get("adesao_id"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    # Tenant default (kit sempre no tenant principal)
+    order["tenant"] = "oxxpharma"
+    await db.orders.insert_one(order)
+    return order["order_id"]
+
+
+async def _apply_voucher_to_user(db, voucher_doc: Dict, user_id: str) -> Dict:
+    """Aplica o voucher IGVD: gera o pedido pago com o Kit de Adesao configurado."""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        return {"success": False, "voucher_code": voucher_doc["voucher_code"], "status": "pending", "message": "User nao encontrado"}
+    order_id = await _create_paid_kit_order(db, voucher_doc, user)
+    if not order_id:
+        # Voucher fica pending — problema de config (kit vazio) ou duplicidade por user
+        await db.igvd_vouchers.update_one(
+            {"voucher_code": voucher_doc["voucher_code"]},
+            {"$set": {"status": "pending", "note": "Kit nao configurado ou user ja tem pedido IGVD"}},
+        )
+        return {
+            "success": True,
+            "user_id": user_id,
+            "voucher_code": voucher_doc["voucher_code"],
+            "status": "pending",
+            "message": "Nao foi possivel gerar pedido: configure o Kit de Adesao ou verifique se o user ja recebeu um pedido IGVD.",
+        }
     await db.igvd_vouchers.update_one(
         {"voucher_code": voucher_doc["voucher_code"]},
         {"$set": {
             "status": "applied",
             "applied_user_id": user_id,
             "applied_at": _now_iso(),
+            "generated_order_id": order_id,
         }},
     )
     return {
         "success": True,
         "user_id": user_id,
         "voucher_code": voucher_doc["voucher_code"],
-        "credited_amount_cents": int(round(amount_brl * 100)),
+        "order_id": order_id,
+        "credited_amount_cents": int(round(float(voucher_doc.get("amount_brl") or 0) * 100)),
         "status": "applied",
     }
 
