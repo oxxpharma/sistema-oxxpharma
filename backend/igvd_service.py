@@ -46,13 +46,24 @@ async def get_config(db) -> Dict:
 
 
 async def _find_user(db, email: str, cpf_digits: str) -> Optional[Dict]:
-    """Busca user por CPF (mais robusto) e em seguida por email."""
+    """Busca user por CPF (varios formatos) e por e-mail (case-insensitive).
+    Iter 48d: pega users antigos que so tem `cpf` formatado (sem `cpf_digits`)
+    e emails salvos com case diferente."""
     if cpf_digits and len(cpf_digits) == 11:
-        u = await db.users.find_one({"cpf_digits": cpf_digits}, {"_id": 0, "user_id": 1, "email": 1})
+        cpf_fmt = f"{cpf_digits[:3]}.{cpf_digits[3:6]}.{cpf_digits[6:9]}-{cpf_digits[9:]}"
+        u = await db.users.find_one(
+            {"$or": [
+                {"cpf_digits": cpf_digits},
+                {"cpf": cpf_digits},
+                {"cpf": cpf_fmt},
+            ]},
+            {"_id": 0, "user_id": 1, "email": 1},
+        )
         if u:
             return u
     if email:
-        u = await db.users.find_one({"email": email.lower()}, {"_id": 0, "user_id": 1, "email": 1})
+        pattern = f"^{re.escape(email.strip())}$"
+        u = await db.users.find_one({"email": {"$regex": pattern, "$options": "i"}}, {"_id": 0, "user_id": 1, "email": 1})
         if u:
             return u
     return None
@@ -71,29 +82,26 @@ def _gen_order_id() -> str:
     return "ord_" + secrets.token_hex(6)
 
 
-async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optional[str]:
+async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
     """Cria um pedido JA PAGO no cadastro do user com os produtos do Kit
     configurados no admin. Idempotente: 1 pedido por voucher_code E no maximo
-    1 pedido IGVD por user. Retorna order_id ou None em caso de erro nao
-    fatal (voucher fica pending pra reprocessamento manual)."""
+    1 pedido IGVD por user. Retorna dict com order_id ou reason quando nao criou."""
     user_id = user_doc["user_id"]
 
     # Idempotencia 1: ja existe pedido gerado por este voucher?
     existing_by_voucher = await db.orders.find_one({"igvd_voucher_code": voucher_doc["voucher_code"]}, {"_id": 0, "order_id": 1})
     if existing_by_voucher:
-        return existing_by_voucher["order_id"]
+        return {"order_id": existing_by_voucher["order_id"], "reason": None}
 
     # Idempotencia 2: usuario ja recebeu um pedido IGVD? (regra: 1 vez por conta)
     existing_by_user = await db.orders.find_one({"user_id": user_id, "igvd_voucher_code": {"$ne": None}}, {"_id": 0, "order_id": 1, "igvd_voucher_code": 1})
     if existing_by_user:
-        # Marca o voucher como duplicado no user (nao aplica de novo).
-        return None
+        return {"order_id": None, "reason": f"user_ja_tem_pedido_igvd:{existing_by_user['order_id']}"}
 
     cfg = await _load_kit_config(db)
     kit_items = cfg["kit_items"]
     if not kit_items:
-        # Kit nao configurado — mantem voucher em pending para o admin resolver
-        return None
+        return {"order_id": None, "reason": "kit_nao_configurado"}
 
     # Enriquece os itens com dados atuais dos produtos
     pids = [str(k.get("product_id")) for k in kit_items if k.get("product_id")]
@@ -122,7 +130,7 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optio
             "points_value": 0,  # nao gera pontos Maxx
         })
     if not order_items:
-        return None
+        return {"order_id": None, "reason": "produtos_do_kit_nao_existem_mais"}
 
     # Endereco de entrega: prioriza endereco default do user; se nao tiver,
     # constroi a partir dos dados do licenciado enviados pela IGVD.
@@ -188,7 +196,7 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optio
     # Tenant default (kit sempre no tenant principal)
     order["tenant"] = "oxxpharma"
     await db.orders.insert_one(order)
-    return order["order_id"]
+    return {"order_id": order["order_id"], "reason": None}
 
 
 async def _apply_voucher_to_user(db, voucher_doc: Dict, user_id: str) -> Dict:
@@ -196,19 +204,27 @@ async def _apply_voucher_to_user(db, voucher_doc: Dict, user_id: str) -> Dict:
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not user:
         return {"success": False, "voucher_code": voucher_doc["voucher_code"], "status": "pending", "message": "User nao encontrado"}
-    order_id = await _create_paid_kit_order(db, voucher_doc, user)
+    r = await _create_paid_kit_order(db, voucher_doc, user)
+    order_id = r.get("order_id")
+    reason = r.get("reason")
     if not order_id:
-        # Voucher fica pending — problema de config (kit vazio) ou duplicidade por user
+        # Nao criou o pedido — grava motivo detalhado e mantem pending
+        friendly = {
+            "kit_nao_configurado": "Kit de Adesao nao configurado no admin",
+            "produtos_do_kit_nao_existem_mais": "Produtos do Kit foram removidos do catalogo",
+        }.get(reason, reason or "Erro desconhecido")
+        if reason and reason.startswith("user_ja_tem_pedido_igvd"):
+            friendly = f"User ja recebeu pedido IGVD anterior ({reason.split(':')[1]})"
         await db.igvd_vouchers.update_one(
             {"voucher_code": voucher_doc["voucher_code"]},
-            {"$set": {"status": "pending", "note": "Kit nao configurado ou user ja tem pedido IGVD"}},
+            {"$set": {"status": "pending", "note": friendly}},
         )
         return {
             "success": True,
             "user_id": user_id,
             "voucher_code": voucher_doc["voucher_code"],
             "status": "pending",
-            "message": "Nao foi possivel gerar pedido: configure o Kit de Adesao ou verifique se o user ja recebeu um pedido IGVD.",
+            "message": friendly,
         }
     await db.igvd_vouchers.update_one(
         {"voucher_code": voucher_doc["voucher_code"]},
@@ -217,6 +233,7 @@ async def _apply_voucher_to_user(db, voucher_doc: Dict, user_id: str) -> Dict:
             "applied_user_id": user_id,
             "applied_at": _now_iso(),
             "generated_order_id": order_id,
+            "note": None,
         }},
     )
     return {
@@ -298,13 +315,14 @@ async def ingest_voucher(db, payload: Dict, idempotency_key: Optional[str]) -> D
 
 async def apply_pending_for_user(db, user_id: str, email: Optional[str], cpf: Optional[str]) -> int:
     """Hook chamado no register/admin-create: aplica todos vouchers pending que
-    casem com o CPF ou e-mail recebidos. Retorna a quantidade aplicada."""
+    casem com o CPF ou e-mail recebidos. Retorna a quantidade aplicada.
+    Iter 48d: match tolerante — CPF por digits/formatado e e-mail case-insensitive."""
     cpf_digits = _clean_cpf(cpf or "")
     or_conditions = []
     if cpf_digits and len(cpf_digits) == 11:
         or_conditions.append({"licenciado_cpf_digits": cpf_digits})
     if email:
-        or_conditions.append({"licenciado_email": email.lower()})
+        or_conditions.append({"licenciado_email": {"$regex": f"^{re.escape(email.strip())}$", "$options": "i"}})
     if not or_conditions:
         return 0
     pending = await db.igvd_vouchers.find(
@@ -313,6 +331,7 @@ async def apply_pending_for_user(db, user_id: str, email: Optional[str], cpf: Op
     ).to_list(50)
     applied = 0
     for v in pending:
-        await _apply_voucher_to_user(db, v, user_id)
-        applied += 1
+        r = await _apply_voucher_to_user(db, v, user_id)
+        if r.get("status") == "applied":
+            applied += 1
     return applied
