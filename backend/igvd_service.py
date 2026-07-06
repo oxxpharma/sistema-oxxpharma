@@ -59,15 +59,10 @@ async def _find_user(db, email: str, cpf_digits: str) -> Optional[Dict]:
 
 
 async def _load_kit_config(db) -> Dict:
-    """Le a configuracao do Kit de Adesao IGVD (produtos + retirada)."""
+    """Le a configuracao do Kit de Adesao IGVD (produtos)."""
     s = await db.settings.find_one({"_id": "global"}) or {}
     return {
         "kit_items": list(s.get("igvd_kit_items") or []),  # [{product_id, quantity}]
-        "pickup_enabled": bool(s.get("pickup_enabled")),
-        "pickup_address": s.get("pickup_address") or "",
-        "pickup_phone": s.get("pickup_phone") or "",
-        "pickup_hours": s.get("pickup_hours") or "",
-        "pickup_instructions": s.get("pickup_instructions") or "",
     }
 
 
@@ -129,32 +124,29 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optio
     if not order_items:
         return None
 
-    # Endereco: reaproveita o endereco default do user; se nao houver, cria snapshot minimo
+    # Endereco de entrega: prioriza endereco default do user; se nao tiver,
+    # constroi a partir dos dados do licenciado enviados pela IGVD.
     addrs = user_doc.get("addresses") or []
     default_addr = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
+    lic_addr = voucher_doc.get("licenciado_address") or {}
 
-    # Pickup snapshot (kit vai pra retirada por padrao — trocar depois se admin quiser envio)
-    pickup_snapshot = {
-        "address": cfg["pickup_address"],
-        "phone": cfg["pickup_phone"],
-        "hours": cfg["pickup_hours"],
-        "instructions": cfg["pickup_instructions"],
-    }
-    is_pickup = bool(cfg["pickup_enabled"] and cfg["pickup_address"])
-
-    ship_addr = default_addr or {
-        "address_id": "pickup" if is_pickup else "igvd",
-        "label": "Retirada IGVD" if is_pickup else "Endereço não informado",
-        "name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
-        "street": pickup_snapshot["address"] if is_pickup else (voucher_doc.get("licenciado_address") or {}).get("street") or "",
-        "number": "—",
-        "complement": "",
-        "neighborhood": (voucher_doc.get("licenciado_address") or {}).get("neighborhood") or "",
-        "city": (voucher_doc.get("licenciado_address") or {}).get("city") or "",
-        "state": (voucher_doc.get("licenciado_address") or {}).get("state") or "",
-        "zip_code": ((voucher_doc.get("licenciado_address") or {}).get("zip_code") or "00000-000"),
-        "is_pickup": is_pickup,
-    }
+    if default_addr:
+        ship_addr = default_addr
+    else:
+        # Snapshot minimo a partir do payload IGVD
+        zip_raw = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
+        ship_addr = {
+            "address_id": "igvd_snapshot",
+            "label": "Endereço IGVD",
+            "name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
+            "street": lic_addr.get("street") or "",
+            "number": lic_addr.get("number") or "",
+            "complement": lic_addr.get("complement") or "",
+            "neighborhood": lic_addr.get("neighborhood") or "",
+            "city": lic_addr.get("city") or "",
+            "state": lic_addr.get("state") or "",
+            "zip_code": f"{zip_raw[:5]}-{zip_raw[5:]}" if len(zip_raw) == 8 else (lic_addr.get("zip_code") or ""),
+        }
 
     now = _now_iso()
     amount_brl = float(voucher_doc.get("amount_brl") or 0)
@@ -168,11 +160,13 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optio
         "customer_phone": user_doc.get("phone") or voucher_doc.get("licenciado_phone") or "",
         "items": order_items,
         "subtotal": round(subtotal, 2),
+        # Iter 48c: pedido IGVD eh de ENVIO (nao retirada). Frete zerado pois esta
+        # coberto pelo valor pago na adesao.
         "shipping_cost": 0.0,
-        "shipping_service_name": "Retirada IGVD" if is_pickup else "—",
+        "shipping_service_name": "Envio Kit IGVD",
         "shipping_carrier": "IGVD",
-        "shipping_service_id": "igvd_kit",
-        "shipping_delivery_days": 0,
+        "shipping_service_id": "igvd_kit_shipping",
+        "shipping_delivery_days": None,
         "discount_amount": 0.0,
         "coupon_code": None,
         "voucher_used": 0.0,
@@ -180,8 +174,8 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Optio
         "total": amount_brl if amount_brl > 0 else round(subtotal, 2),
         "total_before_voucher": amount_brl if amount_brl > 0 else round(subtotal, 2),
         "shipping_address": ship_addr,
-        "is_pickup": is_pickup,
-        "pickup_snapshot": pickup_snapshot if is_pickup else None,
+        "is_pickup": False,
+        "pickup_snapshot": None,
         "payment_method": "igvd_voucher",
         "payment_status": "paid",  # ja pago pela IGVD
         "order_status": "paid",
