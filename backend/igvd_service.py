@@ -82,6 +82,53 @@ def _gen_order_id() -> str:
     return "ord_" + secrets.token_hex(6)
 
 
+async def _enrich_user_from_igvd(db, user_doc: Dict, voucher_doc: Dict) -> Dict:
+    """Iter 48e: completa CPF e endereco do user com dados vindos da IGVD, caso
+    o user esteja com esses campos vazios. Retorna a versao atualizada do user."""
+    updates: Dict = {}
+
+    # CPF: preencher se user nao tem
+    user_cpf_digits = _clean_cpf(user_doc.get("cpf_digits") or user_doc.get("cpf") or "")
+    if len(user_cpf_digits) < 11:
+        lic_cpf = voucher_doc.get("licenciado_cpf_digits") or ""
+        if len(lic_cpf) == 11:
+            updates["cpf"] = f"{lic_cpf[:3]}.{lic_cpf[3:6]}.{lic_cpf[6:9]}-{lic_cpf[9:]}"
+            updates["cpf_digits"] = lic_cpf
+
+    # Telefone: preencher se user nao tem
+    if not (user_doc.get("phone") or "").strip():
+        lic_phone = voucher_doc.get("licenciado_phone") or ""
+        if lic_phone:
+            updates["phone"] = lic_phone
+
+    # Endereco: se user nao tem nenhum endereco cadastrado, gerar 1 default
+    # a partir do licenciado_address (se veio na integracao com CEP valido)
+    lic_addr = voucher_doc.get("licenciado_address") or {}
+    if not (user_doc.get("addresses") or []):
+        zip_raw = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
+        if len(zip_raw) == 8 and (lic_addr.get("street") or "").strip():
+            import secrets
+            new_addr = {
+                "address_id": "addr_" + secrets.token_hex(6),
+                "label": "Adesão IGVD",
+                "name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
+                "street": lic_addr.get("street") or "",
+                "number": lic_addr.get("number") or "S/N",
+                "complement": lic_addr.get("complement") or "",
+                "neighborhood": lic_addr.get("neighborhood") or "",
+                "city": lic_addr.get("city") or "",
+                "state": (lic_addr.get("state") or "").upper()[:2],
+                "zip_code": f"{zip_raw[:5]}-{zip_raw[5:]}",
+                "is_default": True,
+            }
+            updates["addresses"] = [new_addr]
+
+    if updates:
+        await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": updates})
+        user_doc = {**user_doc, **updates}
+    return user_doc
+
+
 async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
     """Cria um pedido JA PAGO no cadastro do user com os produtos do Kit
     configurados no admin. Idempotente: 1 pedido por voucher_code E no maximo
@@ -204,6 +251,8 @@ async def _apply_voucher_to_user(db, voucher_doc: Dict, user_id: str) -> Dict:
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not user:
         return {"success": False, "voucher_code": voucher_doc["voucher_code"], "status": "pending", "message": "User nao encontrado"}
+    # Iter 48e: enriquece o user com CPF/endereco/telefone vindos da IGVD (se faltarem)
+    user = await _enrich_user_from_igvd(db, user, voucher_doc)
     r = await _create_paid_kit_order(db, voucher_doc, user)
     order_id = r.get("order_id")
     reason = r.get("reason")
@@ -313,10 +362,10 @@ async def ingest_voucher(db, payload: Dict, idempotency_key: Optional[str]) -> D
     }
 
 
-async def apply_pending_for_user(db, user_id: str, email: Optional[str], cpf: Optional[str]) -> int:
+async def apply_pending_for_user(db, user_id: str, email: Optional[str], cpf: Optional[str]) -> list:
     """Hook chamado no register/admin-create: aplica todos vouchers pending que
-    casem com o CPF ou e-mail recebidos. Retorna a quantidade aplicada.
-    Iter 48d: match tolerante — CPF por digits/formatado e e-mail case-insensitive."""
+    casem com o CPF ou e-mail recebidos. Retorna a lista de order_ids gerados
+    (para que o caller dispare faturas)."""
     cpf_digits = _clean_cpf(cpf or "")
     or_conditions = []
     if cpf_digits and len(cpf_digits) == 11:
@@ -324,14 +373,14 @@ async def apply_pending_for_user(db, user_id: str, email: Optional[str], cpf: Op
     if email:
         or_conditions.append({"licenciado_email": {"$regex": f"^{re.escape(email.strip())}$", "$options": "i"}})
     if not or_conditions:
-        return 0
+        return []
     pending = await db.igvd_vouchers.find(
         {"status": "pending", "$or": or_conditions},
         {"_id": 0},
     ).to_list(50)
-    applied = 0
+    generated: list = []
     for v in pending:
         r = await _apply_voucher_to_user(db, v, user_id)
-        if r.get("status") == "applied":
-            applied += 1
-    return applied
+        if r.get("status") == "applied" and r.get("order_id"):
+            generated.append(r["order_id"])
+    return generated

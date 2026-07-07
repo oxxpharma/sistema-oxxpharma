@@ -125,7 +125,7 @@ function AppRoutes() {
 
       {/* BACKOFFICE (ADMIN) */}
       <Route path="/backoffice" element={<Guard requireAuth requireAdmin><BackofficeLayout /></Guard>}>
-        <Route index element={<AdminDashboard />} />
+        <Route index element={<DashboardOrPedidos />} />
         <Route path="produtos" element={<AdminProducts />} />
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
@@ -185,4 +185,11 @@ export default function App() {
       </TenantProvider>
     </BrowserRouter>
   );
+}
+
+// Iter 48: Estoque nao ve dashboard — cai direto em Pedidos
+function DashboardOrPedidos() {
+  const { can } = useAuth();
+  if (can?.viewDashboard === false) return <Navigate to="/backoffice/pedidos" replace />;
+  return <AdminDashboard />;
 }

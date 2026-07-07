@@ -14,6 +14,7 @@ const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
   { value: 'comercial', label: 'Comercial (backoffice sem financeiro/integrações)' },
   { value: 'financeiro', label: 'Financeiro (cashbacks, saques, cartão)' },
+  { value: 'estoque', label: 'Estoque (Produtos, Categorias, Pedidos e Cupons)' },
 ];
 const ROLE_OPTIONS_SUPER = [
   { value: 'admin', label: 'Admin (tudo exceto integrações críticas)' },
@@ -89,7 +90,7 @@ export default function UserCreateModal({ onClose, onCreated }) {
 
   const handleRoleChange = (v) => {
     // Verifica se é um system profile (role) ou customizado (profile_id)
-    const systemRoles = ['customer', 'comercial', 'financeiro', 'admin', 'super_admin'];
+    const systemRoles = ['customer', 'comercial', 'financeiro', 'estoque', 'admin', 'super_admin'];
     if (systemRoles.includes(v)) {
       // É um role de sistema
       set('role', v);

@@ -103,6 +103,7 @@ export default function AdminUsers() {
           <option value="customer">Clientes</option>
           <option value="comercial">Comercial</option>
           <option value="financeiro">Financeiro</option>
+          <option value="estoque">Estoque</option>
           <option value="admin">Admin</option>
           <option value="super_admin">Super Admin</option>
         </select>

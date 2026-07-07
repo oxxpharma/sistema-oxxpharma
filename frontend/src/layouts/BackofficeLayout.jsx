@@ -22,7 +22,7 @@ const NAV_GROUPS = [
     key: 'principal',
     label: 'Principal',
     items: [
-      { to: '/backoffice', icon: LayoutDashboard, label: 'Dashboard', end: true, testId: 'nav-dashboard' },
+      { to: '/backoffice', icon: LayoutDashboard, label: 'Dashboard', end: true, testId: 'nav-dashboard', perm: 'viewDashboard' },
       { to: '/backoffice/produtos', icon: Package, label: 'Produtos', testId: 'nav-products', perm: 'editProducts' },
       { to: '/backoffice/categorias', icon: FolderTree, label: 'Categorias', testId: 'nav-categories', perm: 'editProducts' },
     ],
@@ -31,8 +31,8 @@ const NAV_GROUPS = [
     key: 'vendas',
     label: 'Vendas',
     items: [
-      { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders' },
-      { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'commercial' },
+      { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders', perm: 'editOrders' },
+      { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'editCoupons' },
       { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices', perm: 'financial' },
       { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments', perm: 'integrations' },
       { to: '/backoffice/frete', icon: Truck, label: 'Frete', testId: 'nav-shipping', perm: 'integrations' },

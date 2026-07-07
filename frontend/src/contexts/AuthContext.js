@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 
 const AuthContext = createContext(null);
 
-const ADMIN_ROLES = new Set(['admin', 'super_admin', 'financeiro', 'comercial']);
+const ADMIN_ROLES = new Set(['admin', 'super_admin', 'financeiro', 'comercial', 'estoque']);
 const IMPERSONATE_KEY = 'impersonation_return_token';
 
 export function AuthProvider({ children }) {
@@ -109,8 +109,14 @@ export function AuthProvider({ children }) {
     integrations: isSuperAdmin,               // Maxx, Melhor Envio, Webhooks, settings avancadas
     financial: ['super_admin', 'admin', 'financeiro'].includes(role),
     commercial: ['super_admin', 'admin', 'comercial'].includes(role),
+    // Iter 48: perfil Estoque tem acesso a Produtos/Categorias/Pedidos/Cupons
+    stock: ['super_admin', 'admin', 'estoque'].includes(role),
+    // Iter 48: Estoque nao ve dashboard (metricas agregadas / faturamento total)
+    viewDashboard: !['estoque'].includes(role),
     impersonate: canImpersonate,
-    editProducts: ['super_admin', 'admin'].includes(role),
+    editProducts: ['super_admin', 'admin', 'estoque'].includes(role),
+    editOrders: ['super_admin', 'admin', 'comercial', 'estoque'].includes(role),
+    editCoupons: ['super_admin', 'admin', 'comercial', 'estoque'].includes(role),
     manageRoles: isSuperAdmin,
   };
 

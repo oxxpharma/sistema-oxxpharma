@@ -188,7 +188,7 @@ def require_admin():
     return dep
 
 
-ADMIN_ROLES = {"admin", "super_admin", "financeiro", "comercial"}
+ADMIN_ROLES = {"admin", "super_admin", "financeiro", "comercial", "estoque"}
 
 
 def _is_admin_level(user: dict) -> bool:
@@ -767,7 +767,15 @@ async def register(request: Request, response: Response, data: AuthRegister):
     await db.users.insert_one(user)
     # Iter 48: aplica automaticamente vouchers IGVD pendentes para este e-mail/CPF
     try:
-        await igvd_service.apply_pending_for_user(db, user["user_id"], user["email"], user.get("cpf_digits"))
+        order_ids = await igvd_service.apply_pending_for_user(db, user["user_id"], user["email"], user.get("cpf_digits"))
+        for oid in order_ids:
+            try:
+                o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
+                ou = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+                if o and ou:
+                    await _send_admin_invoice_if_configured(db, o, ou)
+            except Exception as e:
+                logger.warning(f"Falha fatura IGVD register {oid}: {e}")
     except Exception as e:
         logger.warning(f"Falha aplicando voucher IGVD pendente no register: {e}")
     token = create_token(user["user_id"], user["email"], "customer")
@@ -3822,6 +3830,16 @@ async def igvd_voucher_webhook(request: Request):
         out = await igvd_service.ingest_voucher(db, payload, idem)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Iter 48e: se um pedido acabou de ser criado, dispara fatura administrativa
+    order_id = out.get("order_id") if isinstance(out, dict) else None
+    if order_id and not out.get("duplicate"):
+        try:
+            order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+            order_user = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) if order else None
+            if order and order_user:
+                await _send_admin_invoice_if_configured(db, order, order_user)
+        except Exception as e:
+            logger.warning(f"Falha enviando fatura de pedido IGVD {order_id}: {e}")
     return out
 
 
@@ -3846,8 +3864,17 @@ async def admin_retry_igvd_pending(request: Request, user: dict = Depends(requir
     for v in pending:
         u = await igvd_service._find_user(db, v.get("licenciado_email") or "", v.get("licenciado_cpf_digits") or "")
         if u:
-            await igvd_service._apply_voucher_to_user(db, v, u["user_id"])
-            applied += 1
+            res = await igvd_service._apply_voucher_to_user(db, v, u["user_id"])
+            if res.get("status") == "applied" and res.get("order_id"):
+                applied += 1
+                # Iter 48e: dispara fatura para o pedido recem-criado
+                try:
+                    o = await db.orders.find_one({"order_id": res["order_id"]}, {"_id": 0})
+                    ou = await db.users.find_one({"user_id": u["user_id"]}, {"_id": 0, "password_hash": 0})
+                    if o and ou:
+                        await _send_admin_invoice_if_configured(db, o, ou)
+                except Exception as e:
+                    logger.warning(f"Falha enviando fatura IGVD retry {res['order_id']}: {e}")
     return {"scanned": len(pending), "applied": applied, "still_pending": len(pending) - applied}
 
 
@@ -6635,7 +6662,7 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
     custom_profile_doc = None
     if profile_id:
         custom_profile_doc = await db.role_profiles.find_one({"profile_id": profile_id}, {"_id": 0})
-    if role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
+    if role not in ("customer", "comercial", "financeiro", "estoque", "admin", "super_admin"):
         raise HTTPException(status_code=400, detail="Papel invalido")
     network_type = body.get("network_type") or NETWORK_CUSTOMER
 
@@ -6664,7 +6691,7 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         "external_id": (body.get("external_id") or "").strip() or None,
         "role": role,
         "profile_id": profile_id,
-        "access_level": 0 if role in ("super_admin", "admin") else (1 if role in ("comercial", "financeiro") else (1 if (custom_profile_doc and custom_profile_doc.get("admin_access")) else int(body.get("access_level") or 99))),
+        "access_level": 0 if role in ("super_admin", "admin") else (1 if role in ("comercial", "financeiro", "estoque") else (1 if (custom_profile_doc and custom_profile_doc.get("admin_access")) else int(body.get("access_level") or 99))),
         "status": body.get("status") or "active",
         "addresses": body.get("addresses") or [],
         "pix_key": body.get("pix_key") or None,
@@ -6684,7 +6711,15 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
     await db.users.insert_one(user_doc)
     # Iter 48: aplica vouchers IGVD pendentes
     try:
-        await igvd_service.apply_pending_for_user(db, user_doc["user_id"], user_doc.get("email"), user_doc.get("cpf_digits") or user_doc.get("cpf"))
+        order_ids = await igvd_service.apply_pending_for_user(db, user_doc["user_id"], user_doc.get("email"), user_doc.get("cpf_digits") or user_doc.get("cpf"))
+        for oid in order_ids:
+            try:
+                o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
+                ou = await db.users.find_one({"user_id": user_doc["user_id"]}, {"_id": 0, "password_hash": 0})
+                if o and ou:
+                    await _send_admin_invoice_if_configured(db, o, ou)
+            except Exception as e:
+                logger.warning(f"Falha fatura IGVD admin_create {oid}: {e}")
     except Exception as e:
         logger.warning(f"Falha aplicando voucher IGVD pendente no admin_create: {e}")
 
@@ -6771,7 +6806,7 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
         # Sincroniza access_level com o papel (backoffice=0/1, cliente=99)
         if new_role in ("super_admin", "admin"):
             update["access_level"] = 0
-        elif new_role in ("comercial", "financeiro"):
+        elif new_role in ("comercial", "financeiro", "estoque"):
             update["access_level"] = 1
         else:
             update["access_level"] = 99
