@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
+import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilter';
 import {
-  Network, Users, DollarSign, Clock, Loader2, Award, TrendingUp, Share2,
+  Network, Users, DollarSign, ShoppingBag, Loader2, Award, TrendingUp, Share2,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 
@@ -21,26 +22,36 @@ export default function MyNetwork() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
+  const initial = getCurrentMonthRange();
+  const [period, setPeriod] = useState(initial);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const d = await api.get('/api/users/me/network');
-        setData(d);
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const load = useCallback(async (p) => {
+    setLoading(true);
+    try {
+      const q = new URLSearchParams();
+      if (p?.start) q.set('start', p.start);
+      if (p?.end) q.set('end', p.end);
+      const url = q.toString() ? `/api/users/me/network?${q}` : '/api/users/me/network';
+      const d = await api.get(url);
+      setData(d);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
+  useEffect(() => { load(initial); /* eslint-disable-next-line */ }, []);
+
+  if (loading && !data) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
   if (!data) return null;
 
   const isCustomer = data.network_type === 'customer';
   const label = NETWORK_LABELS[data.network_type] || NETWORK_LABELS.customer;
 
-  // Total de membros em toda a rede
+  // Total de membros em toda a rede (independe do periodo)
   const totalMembers = data.generations.reduce((acc, g) => acc + (g.members_count || 0), 0);
+  // Iter 49: totais agregados do periodo
+  const totalReceived = data.generations.reduce((acc, g) => acc + (g.received_total || 0), 0);
+  const totalPurchases = data.generations.reduce((acc, g) => acc + (g.purchases_total || 0), 0);
 
   if (isCustomer) {
     return (
@@ -77,22 +88,33 @@ export default function MyNetwork() {
         </Link>
       </div>
 
+      {/* Iter 49: filtro de periodo — default mes atual */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <PeriodFilter
+          value={period}
+          onChange={(p) => { setPeriod(p); load(p); }}
+        />
+        <div className="text-xs text-txt-secondary">
+          Exibindo dados de <b>{period.start}</b> até <b>{period.end}</b>
+        </div>
+      </div>
+
       {/* Totais */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
         <div className="bg-gradient-to-br from-brand-main to-brand-hover text-white rounded-xl p-5">
           <TrendingUp className="w-6 h-6 mb-2 opacity-80" />
-          <div className="text-2xl font-heading font-black">{formatCurrency(data.totals.paid + data.totals.pending)}</div>
-          <div className="text-xs opacity-80 mt-0.5">Ganhos totais (rede + afiliado)</div>
+          <div className="text-2xl font-heading font-black" data-testid="kpi-total-received">{formatCurrency(totalReceived)}</div>
+          <div className="text-xs opacity-80 mt-0.5">Valor recebido no período</div>
+        </div>
+        <div className="bg-white rounded-xl border border-border p-5">
+          <ShoppingBag className="w-6 h-6 text-emerald-500 mb-2" />
+          <div className="text-2xl font-heading font-black" data-testid="kpi-total-purchases">{formatCurrency(totalPurchases)}</div>
+          <div className="text-xs text-txt-secondary mt-0.5">Total de compras da rede</div>
         </div>
         <div className="bg-white rounded-xl border border-border p-5">
           <DollarSign className="w-6 h-6 text-emerald-500 mb-2" />
           <div className="text-2xl font-heading font-black">{formatCurrency(data.totals.paid)}</div>
-          <div className="text-xs text-txt-secondary mt-0.5">Recebido</div>
-        </div>
-        <div className="bg-white rounded-xl border border-border p-5">
-          <Clock className="w-6 h-6 text-amber-500 mb-2" />
-          <div className="text-2xl font-heading font-black">{formatCurrency(data.totals.pending)}</div>
-          <div className="text-xs text-txt-secondary mt-0.5">Pendente</div>
+          <div className="text-xs text-txt-secondary mt-0.5">Já pago (do total recebido)</div>
         </div>
         <div className="bg-white rounded-xl border border-border p-5">
           <Users className="w-6 h-6 text-brand-main mb-2" />
@@ -162,8 +184,12 @@ export default function MyNetwork() {
                     </div>
                   </div>
                   <div className="hidden sm:block text-right text-xs">
-                    <div className="text-amber-600 font-semibold">Pendente: {formatCurrency(g.pending)}</div>
-                    <div className="text-emerald-600 font-semibold">Recebido: {formatCurrency(g.paid)}</div>
+                    <div className="text-emerald-600 font-semibold" data-testid={`gen-${g.generation}-received`}>
+                      Valor recebido: {formatCurrency(g.received_total || 0)}
+                    </div>
+                    <div className="text-brand-main font-semibold" data-testid={`gen-${g.generation}-purchases`}>
+                      Total das compras: {formatCurrency(g.purchases_total || 0)}
+                    </div>
                   </div>
                   {!isEmpty && (
                     isExp

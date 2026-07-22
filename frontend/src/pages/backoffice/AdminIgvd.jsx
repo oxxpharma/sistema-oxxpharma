@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Loader2, Save, Webhook, RefreshCw, Ticket, Copy, Plus, Trash2, Package } from 'lucide-react';
+import { Loader2, Save, Webhook, RefreshCw, Ticket, Copy, Plus, Trash2, Package, PlayCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDateTime, formatCurrency } from '../../lib/utils';
 
@@ -17,6 +17,9 @@ export default function AdminIgvd() {
   const [filter, setFilter] = useState('');
   const [retrying, setRetrying] = useState(false);
   const [stats, setStats] = useState({ total: 0, pending: 0, applied: 0 });
+  const [reprocessOrderId, setReprocessOrderId] = useState('');
+  const [reprocessing, setReprocessing] = useState(false);
+  const [lastReprocess, setLastReprocess] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -65,6 +68,21 @@ export default function AdminIgvd() {
     finally { setRetrying(false); }
   };
 
+  const reprocessOrder = async () => {
+    const id = (reprocessOrderId || '').trim();
+    if (!id) { toast.error('Informe o ID do pedido (ex: 10E6A477 ou ord_...)'); return; }
+    if (!window.confirm(`Reprocessar hooks do pedido ${id}? Isso vai gerar comissões/cashback, pontos e reenviar a fatura por e-mail (idempotente).`)) return;
+    setReprocessing(true);
+    setLastReprocess(null);
+    try {
+      const r = await api.post('/api/admin/igvd/reprocess-order', { order_id: id });
+      setLastReprocess(r);
+      toast.success(`Pedido #${r.short_id} reprocessado — ${r.commissions_created} cashback(s), ${r.points_created} log(s) de pontos.`);
+      await load();
+    } catch (err) { toast.error(err.message); }
+    finally { setReprocessing(false); }
+  };
+
   const filtered = filter ? items.filter(v => v.status === filter) : items;
 
   const productMap = React.useMemo(() => Object.fromEntries((products || []).map(p => [p.product_id, p])), [products]);
@@ -109,6 +127,41 @@ export default function AdminIgvd() {
           <div className="text-xs text-amber-700">Pendentes (aguardando cadastro)</div>
           <div className="text-2xl font-black text-amber-700">{stats.pending}</div>
         </div>
+      </div>
+
+      <div className="bg-white border border-border rounded-xl p-5 mb-6" data-testid="igvd-reprocess-card">
+        <div className="flex items-center gap-2 mb-2">
+          <PlayCircle className="w-5 h-5 text-brand-main" />
+          <h2 className="font-heading font-bold">Reprocessar hooks de pedido IGVD</h2>
+        </div>
+        <p className="text-xs text-txt-secondary mb-3">
+          Dispara novamente as ações pós-pagamento (cashback para o sponsor, pontos Maxx e envio da fatura por e-mail)
+          para um pedido IGVD antigo. Idempotente: cashbacks já criados não duplicam. Aceita o ID curto (ex.: <code className="font-mono">10E6A477</code>) ou completo (<code className="font-mono">ord_...</code>).
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={reprocessOrderId}
+            onChange={(e) => setReprocessOrderId(e.target.value)}
+            placeholder="ID do pedido (ex: #10E6A477)"
+            className="flex-1 min-w-[220px] px-3 py-2 border border-border rounded-lg font-mono text-sm"
+            data-testid="reprocess-order-input"
+            onKeyDown={(e) => { if (e.key === 'Enter') reprocessOrder(); }}
+          />
+          <Button onClick={reprocessOrder} loading={reprocessing} data-testid="reprocess-order-btn">
+            <PlayCircle className="w-4 h-4" /> Reprocessar
+          </Button>
+        </div>
+        {lastReprocess && (
+          <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs" data-testid="reprocess-result">
+            <div className="font-bold text-emerald-800 mb-1">✓ Pedido #{lastReprocess.short_id} reprocessado</div>
+            <div className="text-emerald-700 grid grid-cols-2 md:grid-cols-4 gap-2">
+              <span>Cashbacks criadas agora: <b>{lastReprocess.commissions_created}</b></span>
+              <span>Total de cashbacks no pedido: <b>{lastReprocess.commissions_total}</b></span>
+              <span>Logs de pontos criados: <b>{lastReprocess.points_created}</b></span>
+              <span>Voucher IGVD: <code className="font-mono">{lastReprocess.voucher_code}</code></span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white border border-border rounded-xl p-5 mb-6" data-testid="igvd-config-card">

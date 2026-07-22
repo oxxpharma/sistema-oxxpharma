@@ -3458,13 +3458,22 @@ async def my_referrals_list(request: Request, page: int = 1, limit: int = 20, us
 
 
 @app.get("/api/users/me/referral")
-async def my_referral(request: Request, user: dict = Depends(get_current_user)):
+async def my_referral(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(get_current_user)):
     db = request.app.db
     # referral_code agora so eh gerado quando usuario adere ao programa (via /referral-enrollment)
     has_program = bool(user.get("referral_program_active") and user.get("referral_code"))
+    # Iter 49: filtro de periodo aplicavel a commissions.created_at
+    date_range: Dict = {}
+    if start:
+        date_range["$gte"] = start + "T00:00:00"
+    if end:
+        date_range["$lte"] = end + "T23:59:59"
     # Estatisticas
+    stats_match: Dict = {"user_id": user["user_id"]}
+    if date_range:
+        stats_match["created_at"] = date_range
     total_comm = await db.commissions.aggregate([
-        {"$match": {"user_id": user["user_id"]}},
+        {"$match": stats_match},
         {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
     ]).to_list(10)
     stats = {"pending": 0, "paid": 0, "cancelled": 0, "total_count": 0, "total_earned": 0}
@@ -3528,11 +3537,15 @@ async def my_referral(request: Request, user: dict = Depends(get_current_user)):
     }
 
 @app.get("/api/users/me/commissions")
-async def my_commissions(request: Request, page: int = 1, limit: int = 20, user: dict = Depends(get_current_user)):
+async def my_commissions(request: Request, page: int = 1, limit: int = 20, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(get_current_user)):
     db = request.app.db
     # Iter 40: usuario nao ve comissoes em status pending_enrollment (geradas antes
     # dele se inscrever no programa). Quando ele ativa, sao promovidas para 'pending'.
-    q = {"user_id": user["user_id"], "status": {"$ne": "pending_enrollment"}}
+    q: Dict = {"user_id": user["user_id"], "status": {"$ne": "pending_enrollment"}}
+    if start:
+        q.setdefault("created_at", {})["$gte"] = start + "T00:00:00"
+    if end:
+        q.setdefault("created_at", {})["$lte"] = end + "T23:59:59"
     total = await db.commissions.count_documents(q)
     comms = await db.commissions.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"commissions": comms, "total": total, "page": page}
@@ -3884,6 +3897,56 @@ async def admin_retry_igvd_pending(request: Request, user: dict = Depends(requir
     return {"scanned": len(pending), "applied": applied, "still_pending": len(pending) - applied}
 
 
+class IgvdReprocessOrderBody(BaseModel):
+    order_id: str
+
+
+@app.post("/api/admin/igvd/reprocess-order")
+async def admin_igvd_reprocess_order(request: Request, body: IgvdReprocessOrderBody, user: dict = Depends(require_admin())):
+    """Iter 49: dispara os hooks pos-pagamento (comissoes/cashback, pontos Maxx, fatura)
+    para um pedido IGVD antigo, identificado pelo `order_id` completo (ex: ord_10e6a477abcd)
+    ou pelos ultimos 8 caracteres (ex: 10E6A477). Idempotente: comissoes ja existentes
+    nao sao duplicadas; pontos usam log proprio; fatura sempre reenvia se configurada.
+    """
+    db = request.app.db
+    raw = (body.order_id or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="order_id obrigatorio")
+    # Remove '#' prefix e converte para lowercase
+    q = raw.lstrip("#").strip()
+    # Tenta match exato primeiro (case-insensitive)
+    order = await db.orders.find_one({"order_id": q}, {"_id": 0})
+    if not order:
+        # Tenta suffix (o ID renderizado no UI e' last-8 uppercase)
+        order = await db.orders.find_one(
+            {"order_id": {"$regex": f"{re.escape(q)}$", "$options": "i"}},
+            {"_id": 0},
+        )
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Pedido nao encontrado (busca: {raw})")
+    order_id = order["order_id"]
+    if not order.get("igvd_voucher_code"):
+        raise HTTPException(status_code=400, detail=f"Pedido {order_id} nao e' um pedido IGVD (sem igvd_voucher_code)")
+    if order.get("payment_status") != "paid":
+        raise HTTPException(status_code=400, detail=f"Pedido {order_id} nao esta pago (status={order.get('payment_status')})")
+    # Estado antes do reprocess (para o UI mostrar o que foi feito)
+    commissions_before = await db.commissions.count_documents({"order_id": order_id})
+    points_before = await db.points_log.count_documents({"order_id": order_id})
+    await _post_igvd_order_created(db, order_id)
+    commissions_after = await db.commissions.count_documents({"order_id": order_id})
+    points_after = await db.points_log.count_documents({"order_id": order_id})
+    return {
+        "success": True,
+        "order_id": order_id,
+        "short_id": order_id[-8:].upper(),
+        "commissions_created": commissions_after - commissions_before,
+        "commissions_total": commissions_after,
+        "points_created": points_after - points_before,
+        "points_total": points_after,
+        "voucher_code": order.get("igvd_voucher_code"),
+    }
+
+
 @app.post("/api/payments/webhook/mercadopago")
 async def mp_webhook(request: Request):
     """Webhook MercadoPago: valida assinatura, busca payment, marca pedido como pago."""
@@ -3991,12 +4054,22 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
 # ==================== MY NETWORK (USER) ====================
 
 @app.get("/api/users/me/network")
-async def my_network(request: Request, user: dict = Depends(get_current_user)):
-    """Retorna a rede MMN do usuario (ate 6 geracoes abaixo) com stats."""
+async def my_network(request: Request, start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Retorna a rede MMN do usuario (ate 6 geracoes abaixo) com stats.
+    Iter 49: aceita filtro de periodo `start`/`end` (YYYY-MM-DD) — filtra
+    comissoes recebidas (por `created_at`) e pedidos dos downlines (por `created_at`).
+    A lista de membros nao e' filtrada (mostra sempre toda a arvore)."""
     db = request.app.db
     settings = await get_settings(db)
     network_type = user.get("network_type", NETWORK_CUSTOMER)
     gens_pct = settings.get(f"{'network1' if network_type == NETWORK_1 else 'network2'}_generations", []) if network_type in (NETWORK_1, NETWORK_2) else []
+
+    # Iter 49: filtro de periodo aplicavel a commissions.created_at e orders.created_at
+    date_range: Dict = {}
+    if start:
+        date_range["$gte"] = start + "T00:00:00"
+    if end:
+        date_range["$lte"] = end + "T23:59:59"
 
     generations = []
     if network_type in (NETWORK_1, NETWORK_2):
@@ -4012,16 +4085,33 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                 ], "user_id": {"$nin": list(seen)}},
                 {"_id": 0, "password_hash": 0}
             ).to_list(2000)
-            # Stats de comissao da geracao
+            # Stats de comissao da geracao (com filtro de periodo)
             level_user_ids = [u["user_id"] for u in level_users]
+            comm_match: Dict = {"user_id": user["user_id"], "generation": gen, "network_type": network_type}
+            if date_range:
+                comm_match["created_at"] = date_range
             comm_agg = await db.commissions.aggregate([
-                {"$match": {"user_id": user["user_id"], "generation": gen, "network_type": network_type}},
+                {"$match": comm_match},
                 {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
             ]).to_list(10)
             stats = {"pending": 0, "paid": 0, "count": 0}
             for s in comm_agg:
                 stats[s["_id"] or "pending"] = round(s["total"], 2)
                 stats["count"] += s["count"]
+            # Iter 49: valor total das compras (soma orders pagos) desta geracao no periodo
+            purchases_total = 0.0
+            purchases_count = 0
+            if level_user_ids:
+                orders_match: Dict = {"user_id": {"$in": level_user_ids}, "payment_status": "paid"}
+                if date_range:
+                    orders_match["created_at"] = date_range
+                pur_agg = await db.orders.aggregate([
+                    {"$match": orders_match},
+                    {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
+                ]).to_list(1)
+                if pur_agg:
+                    purchases_total = round(pur_agg[0].get("total") or 0, 2)
+                    purchases_count = pur_agg[0].get("count") or 0
             # Lista resumida dos membros para exibir nominalmente
             members_list = [
                 {
@@ -4035,6 +4125,8 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                 }
                 for m in level_users
             ]
+            # Iter 49: valor recebido = paid + pending (conforme requisicao do cliente)
+            received_total = round(stats.get("paid", 0) + stats.get("pending", 0), 2)
             generations.append({
                 "generation": gen,
                 "rate_pct": gens_pct[gen - 1] if gen - 1 < len(gens_pct) else 0,
@@ -4042,6 +4134,9 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                 "members": members_list,
                 "pending": stats.get("pending", 0),
                 "paid": stats.get("paid", 0),
+                "received_total": received_total,
+                "purchases_total": purchases_total,
+                "purchases_count": purchases_count,
                 "total_commissions": stats.get("count", 0),
             })
             current_ids = level_user_ids
@@ -4051,22 +4146,30 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
                 for g in range(gen + 1, 7):
                     generations.append({
                         "generation": g, "rate_pct": gens_pct[g - 1] if g - 1 < len(gens_pct) else 0,
-                        "members_count": 0, "members": [], "pending": 0, "paid": 0, "total_commissions": 0,
+                        "members_count": 0, "members": [], "pending": 0, "paid": 0,
+                        "received_total": 0, "purchases_total": 0, "purchases_count": 0,
+                        "total_commissions": 0,
                     })
                 break
 
-    # Totais gerais do usuario (afiliado + MMN)
+    # Totais gerais do usuario (afiliado + MMN) - com filtro de periodo
+    totals_match: Dict = {"user_id": user["user_id"]}
+    if date_range:
+        totals_match["created_at"] = date_range
     totals_agg = await db.commissions.aggregate([
-        {"$match": {"user_id": user["user_id"]}},
+        {"$match": totals_match},
         {"$group": {"_id": "$status", "total": {"$sum": "$amount"}}}
     ]).to_list(10)
     totals = {"pending": 0, "paid": 0, "cancelled": 0}
     for s in totals_agg:
         totals[s["_id"] or "pending"] = round(s["total"], 2)
 
-    # Iter 35: separar por origem (afiliado / Equipe 1 / Equipe 2)
+    # Iter 35: separar por origem (afiliado / Equipe 1 / Equipe 2) - com filtro de periodo
+    src_match: Dict = {"user_id": user["user_id"]}
+    if date_range:
+        src_match["created_at"] = date_range
     by_source_agg = await db.commissions.aggregate([
-        {"$match": {"user_id": user["user_id"]}},
+        {"$match": src_match},
         {"$group": {
             "_id": {"type": "$type", "network_type": "$network_type", "status": "$status"},
             "total": {"$sum": "$amount"},
@@ -4091,7 +4194,11 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
     # de indicacao DO USER (orders.sponsor_id == user_id), independente do type
     # da comissao. Substitui o card "affiliate" do front (que so funcionava quando
     # affiliate_commission_rate > 0). Tambem expoe o agg separado para outros usos.
-    ref_order_ids = await db.orders.distinct("order_id", {"sponsor_id": user["user_id"]})
+    # Iter 49: filtro de periodo tambem se aplica aqui (orders.created_at).
+    ref_orders_match: Dict = {"sponsor_id": user["user_id"]}
+    if date_range:
+        ref_orders_match["created_at"] = date_range
+    ref_order_ids = await db.orders.distinct("order_id", ref_orders_match)
     ref_sales = {"pending": 0, "paid": 0, "count": 0, "orders_count": len(ref_order_ids)}
     if ref_order_ids:
         rs_agg = await db.commissions.aggregate([
@@ -4120,6 +4227,7 @@ async def my_network(request: Request, user: dict = Depends(get_current_user)):
         "totals": totals,
         "by_source": by_source,
         "commission_rate_affiliate": settings["affiliate_commission_rate"],
+        "period": {"start": start, "end": end},
     }
 
 # ==================== ADMIN: USERS BY NETWORK ====================

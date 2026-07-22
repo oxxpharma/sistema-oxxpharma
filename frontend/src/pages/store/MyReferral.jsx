@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
+import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilter';
 import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet, CreditCard, Send, Gift, MousePointerClick, UserPlus, ShoppingBag, Award } from 'lucide-react';
 import { toast } from 'sonner';
 import ReferralEnrollmentForm from '../../components/ReferralEnrollmentForm';
@@ -16,22 +17,29 @@ export default function MyReferral() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const settings = useSiteSettings();
+  const initial = getCurrentMonthRange();
+  const [period, setPeriod] = useState(initial);
 
-  const load = async () => {
+  const load = useCallback(async (p) => {
+    const q = new URLSearchParams();
+    if (p?.start) q.set('start', p.start);
+    if (p?.end) q.set('end', p.end);
+    const qs = q.toString();
     const [ref, comms, refs] = await Promise.all([
-      api.get('/api/users/me/referral'),
-      api.get('/api/users/me/commissions'),
+      api.get(qs ? `/api/users/me/referral?${qs}` : '/api/users/me/referral'),
+      api.get(qs ? `/api/users/me/commissions?${qs}` : '/api/users/me/commissions'),
       api.get('/api/users/me/referrals?limit=50').catch(() => null),
     ]);
     setData(ref);
     setCommissions(comms.commissions || []);
     setReferrals(refs);
-  };
+  }, []);
 
   useEffect(() => {
     (async () => {
-      try { await load(); } finally { setLoading(false); }
+      try { await load(initial); } finally { setLoading(false); }
     })();
+    /* eslint-disable-next-line */
   }, []);
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div>;
@@ -72,7 +80,7 @@ export default function MyReferral() {
     } else {
       toast.success('Você agora está no programa! Seu link foi gerado.');
     }
-    await load();
+    await load(period);
   };
 
   // ========== ADESÃO PENDENTE DE APROVAÇÃO ==========
@@ -217,9 +225,20 @@ export default function MyReferral() {
       <h1 className="font-heading font-black text-3xl text-txt-primary mb-2 flex items-center gap-3">
         <Share2 className="w-7 h-7 text-brand-main" /> Indique e ganhe benefícios
       </h1>
-      <p className="text-sm text-txt-secondary mb-6">
+      <p className="text-sm text-txt-secondary mb-4">
         Compartilhe seu link personalizado. A cada compra feita através dele, sua cashback entra no seu saldo na conta.
       </p>
+
+      {/* Iter 49: filtro de periodo — default mes atual */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <PeriodFilter
+          value={period}
+          onChange={(p) => { setPeriod(p); load(p); }}
+        />
+        <div className="text-xs text-txt-secondary">
+          Ganhos e cashbacks do período <b>{period.start}</b> a <b>{period.end}</b>
+        </div>
+      </div>
 
       {/* Cartão principal */}
       <div className="bg-gradient-to-br from-brand-main via-brand-hover to-orange-700 text-white rounded-2xl p-6 md:p-8 mb-6 relative overflow-hidden">

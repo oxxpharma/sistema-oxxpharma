@@ -7,6 +7,7 @@ import {
 import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
+import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilter';
 import {
   Users, ShoppingBag, DollarSign, TrendingUp, TrendingDown,
   Loader2, ArrowRight, Trophy, Award, Receipt, CircleDollarSign,
@@ -30,8 +31,9 @@ const NETWORK_BADGE = {
 export default function AdminDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  const initial = getCurrentMonthRange();
+  const [start, setStart] = useState(initial.start);
+  const [end, setEnd] = useState(initial.end);
 
   const load = async (s = start, e = end) => {
     setLoading(true);
@@ -47,7 +49,7 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => { load('', ''); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(initial.start, initial.end); /* eslint-disable-next-line */ }, []);
 
   if (loading && !data) {
     return (
@@ -78,45 +80,23 @@ export default function AdminDashboard() {
           <p className="text-sm text-txt-secondary">
             {hasFilter
               ? `Período: ${start || '...'} até ${end || '...'}`
-              : 'Visão geral da operação · últimos 7 dias vs. semana anterior'}
+              : 'Visão geral da operação'}
           </p>
         </div>
-        {/* Iter 41: filtro de range de data */}
-        <div className="bg-white border border-border rounded-lg p-3 flex flex-wrap items-end gap-2" data-testid="dashboard-period-filter">
-          <div>
-            <label className="text-[10px] uppercase font-bold text-txt-secondary block mb-1">De</label>
-            <input
-              type="date"
-              value={start}
-              onChange={e => setStart(e.target.value)}
-              className="h-9 px-2 text-sm bg-bg-secondary border border-border rounded-md"
-              data-testid="filter-start"
-            />
+        {/* Iter 41: filtro de range de data · Iter 49: default = mes atual + presets mes/intervalo */}
+        <div className="flex flex-wrap items-end gap-2" data-testid="dashboard-period-filter">
+          <PeriodFilter
+            value={{ start, end }}
+            onChange={({ start: s, end: e }) => { setStart(s); setEnd(e); load(s, e); }}
+          />
+          <div className="flex gap-1 bg-white border border-border rounded-lg p-1">
+            <button type="button" onClick={() => setQuickRange(7)} className="h-7 px-2 text-[11px] font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-7d">7d</button>
+            <button type="button" onClick={() => setQuickRange(30)} className="h-7 px-2 text-[11px] font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-30d">30d</button>
+            <button type="button" onClick={() => setQuickRange(90)} className="h-7 px-2 text-[11px] font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-90d">90d</button>
+            {hasFilter && (
+              <button type="button" onClick={clearFilter} className="h-7 px-2 text-[11px] font-semibold text-txt-secondary hover:text-brand-main" data-testid="filter-clear">Limpar</button>
+            )}
           </div>
-          <div>
-            <label className="text-[10px] uppercase font-bold text-txt-secondary block mb-1">Até</label>
-            <input
-              type="date"
-              value={end}
-              onChange={e => setEnd(e.target.value)}
-              className="h-9 px-2 text-sm bg-bg-secondary border border-border rounded-md"
-              data-testid="filter-end"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => load(start, end)}
-            className="h-9 px-3 bg-brand-main text-white rounded-md text-xs font-bold hover:opacity-90"
-            data-testid="filter-apply"
-          >Aplicar</button>
-          <div className="flex gap-1 ml-2">
-            <button type="button" onClick={() => setQuickRange(7)} className="h-9 px-2 text-xs font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-7d">7d</button>
-            <button type="button" onClick={() => setQuickRange(30)} className="h-9 px-2 text-xs font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-30d">30d</button>
-            <button type="button" onClick={() => setQuickRange(90)} className="h-9 px-2 text-xs font-semibold bg-bg-secondary rounded-md hover:bg-border" data-testid="filter-90d">90d</button>
-          </div>
-          {hasFilter && (
-            <button type="button" onClick={clearFilter} className="h-9 px-2 text-xs font-semibold text-txt-secondary hover:text-brand-main" data-testid="filter-clear">Limpar</button>
-          )}
         </div>
       </div>
 
