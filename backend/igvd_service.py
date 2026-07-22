@@ -102,23 +102,27 @@ async def _enrich_user_from_igvd(db, user_doc: Dict, voucher_doc: Dict) -> Dict:
             updates["phone"] = lic_phone
 
     # Endereco: se user nao tem nenhum endereco cadastrado, gerar 1 default
-    # a partir do licenciado_address (se veio na integracao com CEP valido)
+    # a partir do licenciado_address recebido pela IGVD (mesmo se o CEP nao vier
+    # em formato perfeito - salvamos o que veio para o admin poder editar).
     lic_addr = voucher_doc.get("licenciado_address") or {}
     if not (user_doc.get("addresses") or []):
         zip_raw = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
-        if len(zip_raw) == 8 and (lic_addr.get("street") or "").strip():
+        street = (lic_addr.get("street") or "").strip()
+        city = (lic_addr.get("city") or "").strip()
+        # Cria endereco se veio ao menos rua OU cidade OU CEP no payload
+        if street or city or zip_raw:
             import secrets
             new_addr = {
                 "address_id": "addr_" + secrets.token_hex(6),
                 "label": "Adesão IGVD",
                 "name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
-                "street": lic_addr.get("street") or "",
-                "number": lic_addr.get("number") or "S/N",
+                "street": street or "",
+                "number": (lic_addr.get("number") or "S/N"),
                 "complement": lic_addr.get("complement") or "",
-                "neighborhood": lic_addr.get("neighborhood") or "",
-                "city": lic_addr.get("city") or "",
-                "state": (lic_addr.get("state") or "").upper()[:2],
-                "zip_code": f"{zip_raw[:5]}-{zip_raw[5:]}",
+                "neighborhood": (lic_addr.get("neighborhood") or "").strip(),
+                "city": city,
+                "state": ((lic_addr.get("state") or "").upper()[:2]),
+                "zip_code": (f"{zip_raw[:5]}-{zip_raw[5:]}" if len(zip_raw) == 8 else (str(lic_addr.get("zip_code") or "").strip())),
                 "is_default": True,
             }
             updates["addresses"] = [new_addr]
@@ -174,7 +178,9 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
             "total": item_total,
             "sku": p.get("sku") or "",
             "ean": p.get("ean") or "",
-            "points_value": 0,  # nao gera pontos Maxx
+            # Iter 48f: preserva points_value do produto para gerar cashback
+            # do sponsor via register_points_from_order.
+            "points_value": float(p.get("points_value") or 0),
         })
     if not order_items:
         return {"order_id": None, "reason": "produtos_do_kit_nao_existem_mais"}
@@ -186,7 +192,17 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
     lic_addr = voucher_doc.get("licenciado_address") or {}
 
     if default_addr:
-        ship_addr = default_addr
+        # Iter 48f: preenche lacunas do endereco default com dados do payload
+        # (comum: user cadastrou sem CEP, IGVD envia CEP completo).
+        merged = dict(default_addr)
+        lic_zip_digits = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
+        cur_zip_digits = re.sub(r"\D", "", str(merged.get("zip_code") or ""))
+        if len(cur_zip_digits) != 8 and len(lic_zip_digits) == 8:
+            merged["zip_code"] = f"{lic_zip_digits[:5]}-{lic_zip_digits[5:]}"
+        for k in ("street", "number", "neighborhood", "city", "state"):
+            if not (merged.get(k) or "").strip() and (lic_addr.get(k) or "").strip():
+                merged[k] = lic_addr[k].strip() if k != "state" else lic_addr[k].strip().upper()[:2]
+        ship_addr = merged
     else:
         # Snapshot minimo a partir do payload IGVD
         zip_raw = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))

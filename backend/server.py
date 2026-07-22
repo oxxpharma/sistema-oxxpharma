@@ -769,13 +769,7 @@ async def register(request: Request, response: Response, data: AuthRegister):
     try:
         order_ids = await igvd_service.apply_pending_for_user(db, user["user_id"], user["email"], user.get("cpf_digits"))
         for oid in order_ids:
-            try:
-                o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
-                ou = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
-                if o and ou:
-                    await _send_admin_invoice_if_configured(db, o, ou)
-            except Exception as e:
-                logger.warning(f"Falha fatura IGVD register {oid}: {e}")
+            await _post_igvd_order_created(db, oid)
     except Exception as e:
         logger.warning(f"Falha aplicando voucher IGVD pendente no register: {e}")
     token = create_token(user["user_id"], user["email"], "customer")
@@ -3805,6 +3799,30 @@ async def igvd_voucher_sandbox(request: Request):
     }
 
 
+async def _post_igvd_order_created(db, order_id: str):
+    """Iter 48f: replica os efeitos colaterais que um pedido pago normal tem
+    (comissoes / cashback pro sponsor, pontos Maxx pro leader, fatura por email).
+    Chamado apos criacao de pedido gerado pela integracao IGVD."""
+    try:
+        # 1. Comissoes para o sponsor (cashback pra Sheila quando Raquel compra)
+        await _create_commissions_for_paid_order(db, order_id)
+    except Exception as e:
+        logger.warning(f"[IGVD] falha criando comissoes p/ {order_id}: {e}")
+    try:
+        # 2. Pontos (Maxx: sponsor Equipe 1 recebe pontos espelhados)
+        await register_points_from_order(db, order_id)
+    except Exception as e:
+        logger.warning(f"[IGVD] falha registrando pontos p/ {order_id}: {e}")
+    try:
+        # 3. Fatura detalhada por email pro time de logistica
+        order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+        order_user = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) if order else None
+        if order and order_user:
+            await _send_admin_invoice_if_configured(db, order, order_user)
+    except Exception as e:
+        logger.warning(f"[IGVD] falha enviando fatura p/ {order_id}: {e}")
+
+
 @app.post("/api/integrations/igvd/voucher")
 async def igvd_voucher_webhook(request: Request):
     """Iter 48: webhook publico chamado pela IGVD apos pagamento do kit de adesao.
@@ -3830,16 +3848,11 @@ async def igvd_voucher_webhook(request: Request):
         out = await igvd_service.ingest_voucher(db, payload, idem)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # Iter 48e: se um pedido acabou de ser criado, dispara fatura administrativa
+    # Iter 48f: se um pedido acabou de ser criado, dispara efeitos colaterais
+    # (comissoes/cashback pro sponsor, pontos Maxx, fatura detalhada por email)
     order_id = out.get("order_id") if isinstance(out, dict) else None
     if order_id and not out.get("duplicate"):
-        try:
-            order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
-            order_user = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) if order else None
-            if order and order_user:
-                await _send_admin_invoice_if_configured(db, order, order_user)
-        except Exception as e:
-            logger.warning(f"Falha enviando fatura de pedido IGVD {order_id}: {e}")
+        await _post_igvd_order_created(db, order_id)
     return out
 
 
@@ -3867,14 +3880,7 @@ async def admin_retry_igvd_pending(request: Request, user: dict = Depends(requir
             res = await igvd_service._apply_voucher_to_user(db, v, u["user_id"])
             if res.get("status") == "applied" and res.get("order_id"):
                 applied += 1
-                # Iter 48e: dispara fatura para o pedido recem-criado
-                try:
-                    o = await db.orders.find_one({"order_id": res["order_id"]}, {"_id": 0})
-                    ou = await db.users.find_one({"user_id": u["user_id"]}, {"_id": 0, "password_hash": 0})
-                    if o and ou:
-                        await _send_admin_invoice_if_configured(db, o, ou)
-                except Exception as e:
-                    logger.warning(f"Falha enviando fatura IGVD retry {res['order_id']}: {e}")
+                await _post_igvd_order_created(db, res["order_id"])
     return {"scanned": len(pending), "applied": applied, "still_pending": len(pending) - applied}
 
 
@@ -6713,13 +6719,7 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
     try:
         order_ids = await igvd_service.apply_pending_for_user(db, user_doc["user_id"], user_doc.get("email"), user_doc.get("cpf_digits") or user_doc.get("cpf"))
         for oid in order_ids:
-            try:
-                o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
-                ou = await db.users.find_one({"user_id": user_doc["user_id"]}, {"_id": 0, "password_hash": 0})
-                if o and ou:
-                    await _send_admin_invoice_if_configured(db, o, ou)
-            except Exception as e:
-                logger.warning(f"Falha fatura IGVD admin_create {oid}: {e}")
+            await _post_igvd_order_created(db, oid)
     except Exception as e:
         logger.warning(f"Falha aplicando voucher IGVD pendente no admin_create: {e}")
 
