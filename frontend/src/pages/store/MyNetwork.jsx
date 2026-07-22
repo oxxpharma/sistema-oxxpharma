@@ -151,6 +151,45 @@ export default function MyNetwork() {
         </div>
       )}
 
+      {/* Iter 50: Top 3 compradores do periodo */}
+      {(data.top_buyers || []).length > 0 && (
+        <div className="mb-6" data-testid="top-buyers">
+          <div className="flex items-center gap-2 mb-3">
+            <Award className="w-5 h-5 text-amber-500" />
+            <h2 className="font-heading font-black text-lg">Top 3 do período</h2>
+            <span className="text-xs text-txt-secondary">Maiores compradores da sua rede</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {data.top_buyers.map((m, idx) => {
+              const medal = ['from-amber-400 to-orange-500', 'from-slate-300 to-slate-500', 'from-orange-400 to-amber-600'][idx] || 'from-brand-main to-brand-hover';
+              return (
+                <div
+                  key={m.user_id}
+                  className="relative bg-white rounded-xl border border-border p-4 overflow-hidden"
+                  data-testid={`top-buyer-${idx + 1}`}
+                >
+                  <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${medal}`} />
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-heading font-black text-white shrink-0 bg-gradient-to-br ${medal}`}>
+                      {idx + 1}º
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm truncate">{m.name || '(sem nome)'}</div>
+                      <div className="text-[11px] text-txt-secondary">
+                        {m.generation}ª geração · {m.purchases_count} {m.purchases_count === 1 ? 'pedido' : 'pedidos'}
+                      </div>
+                      <div className="mt-2 font-heading font-black text-lg text-emerald-600">
+                        {formatCurrency(m.purchases_total || 0)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Gerações com lista nominal */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <div className="p-6 border-b border-border">
@@ -200,26 +239,47 @@ export default function MyNetwork() {
                 {isExp && !isEmpty && (
                   <div className="bg-bg-secondary/40 px-4 pb-4 pt-1">
                     <ul className="bg-white border border-border rounded-lg divide-y divide-border">
-                      {(g.members || []).map(m => {
+                      {(g.members || []).map((m, mi) => {
                         const netLabel = m.network_type === 'network_1' ? 'Equipe 1'
                           : m.network_type === 'network_2' ? 'Equipe 2' : null;
+                        const purchases = m.purchases_total || 0;
                         return (
                           <li key={m.user_id} className="flex items-center justify-between gap-3 p-3 text-sm" data-testid={`gen-${g.generation}-member-${m.user_id}`}>
                             <div className="flex items-center gap-3 min-w-0">
                               <div className="w-8 h-8 rounded-full bg-brand-light text-brand-main font-bold text-xs flex items-center justify-center shrink-0">
-                                {m.name?.[0]?.toUpperCase() || '?'}
+                                {mi < 3 && purchases > 0 ? (
+                                  <span className="text-amber-600">{mi + 1}º</span>
+                                ) : (
+                                  m.name?.[0]?.toUpperCase() || '?'
+                                )}
                               </div>
                               <div className="min-w-0">
-                                <div className="font-semibold truncate">{m.name || '(sem nome)'}</div>
+                                <div className="font-semibold truncate flex items-center gap-2">
+                                  {m.name || '(sem nome)'}
+                                  {mi === 0 && purchases > 0 && (
+                                    <Award className="w-3.5 h-3.5 text-amber-500" data-testid={`gen-${g.generation}-top`} />
+                                  )}
+                                </div>
                                 <div className="text-xs text-txt-secondary truncate">
                                   {m.email || '—'}
                                   {m.created_at && <> · entrou em {formatDateTime(m.created_at).split(' ')[0]}</>}
                                 </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {netLabel && <Badge variant="brand">{netLabel}</Badge>}
-                              {m.referral_program_active && <Badge variant="success">Programa ativo</Badge>}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="text-right hidden sm:block">
+                                <div className="text-[10px] uppercase font-bold text-txt-secondary/70">Compras no período</div>
+                                <div
+                                  className={`text-sm font-heading font-black ${purchases > 0 ? 'text-emerald-600' : 'text-txt-secondary/60'}`}
+                                  data-testid={`gen-${g.generation}-member-${m.user_id}-purchases`}
+                                >
+                                  {formatCurrency(purchases)}
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                {netLabel && <Badge variant="brand">{netLabel}</Badge>}
+                                {m.referral_program_active && <Badge variant="success">Programa ativo</Badge>}
+                              </div>
                             </div>
                           </li>
                         );

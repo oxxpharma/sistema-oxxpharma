@@ -4112,20 +4112,24 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                 stats[s["_id"] or "pending"] = round(s["total"], 2)
                 stats["count"] += s["count"]
             # Iter 49: valor total das compras (soma orders pagos) desta geracao no periodo
+            # Iter 50: agrega POR MEMBRO para permitir ordenacao e Top-3.
             purchases_total = 0.0
             purchases_count = 0
+            per_member_purchases: Dict[str, Dict] = {}
             if level_user_ids:
                 orders_match: Dict = {"user_id": {"$in": level_user_ids}, "payment_status": "paid"}
                 if date_range:
                     orders_match["created_at"] = date_range
                 pur_agg = await db.orders.aggregate([
                     {"$match": orders_match},
-                    {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
-                ]).to_list(1)
-                if pur_agg:
-                    purchases_total = round(pur_agg[0].get("total") or 0, 2)
-                    purchases_count = pur_agg[0].get("count") or 0
-            # Lista resumida dos membros para exibir nominalmente
+                    {"$group": {"_id": "$user_id", "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
+                ]).to_list(len(level_user_ids))
+                for r in pur_agg:
+                    per_member_purchases[r["_id"]] = {"total": round(r.get("total") or 0, 2), "count": r.get("count") or 0}
+                    purchases_total += r.get("total") or 0
+                    purchases_count += r.get("count") or 0
+                purchases_total = round(purchases_total, 2)
+            # Lista resumida dos membros para exibir nominalmente (ordenada por compras DESC)
             members_list = [
                 {
                     "user_id": m.get("user_id"),
@@ -4135,9 +4139,15 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                     "network_type": m.get("network_type") or NETWORK_CUSTOMER,
                     "created_at": m.get("created_at"),
                     "referral_program_active": bool(m.get("referral_program_active")),
+                    "purchases_total": per_member_purchases.get(m.get("user_id"), {}).get("total", 0.0),
+                    "purchases_count": per_member_purchases.get(m.get("user_id"), {}).get("count", 0),
+                    "generation": gen,
                 }
                 for m in level_users
             ]
+            # Iter 50: ordena membros por purchases_total DESC (maiores compradores no topo).
+            # Empates: quem tem count maior primeiro; depois nome A-Z.
+            members_list.sort(key=lambda m: (-(m["purchases_total"] or 0), -(m["purchases_count"] or 0), (m.get("name") or "").lower()))
             # Iter 49: valor recebido = paid + pending (conforme requisicao do cliente)
             received_total = round(stats.get("paid", 0) + stats.get("pending", 0), 2)
             generations.append({
@@ -4233,12 +4243,23 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
         "orders_count": ref_sales["orders_count"],
     }
 
+    # Iter 50: Top 3 compradores da rede no periodo (agregado global de todas as geracoes).
+    # Cada membro ja tem `purchases_total` calculado por geracao — coletamos e ordenamos.
+    all_buyers = []
+    for g in generations:
+        for m in (g.get("members") or []):
+            if (m.get("purchases_total") or 0) > 0:
+                all_buyers.append(m)
+    all_buyers.sort(key=lambda m: (-(m.get("purchases_total") or 0), -(m.get("purchases_count") or 0)))
+    top_buyers = all_buyers[:3]
+
     return {
         "network_type": network_type,
         "referral_code": user.get("referral_code"),
         "generations": generations,
         "totals": totals,
         "by_source": by_source,
+        "top_buyers": top_buyers,
         "commission_rate_affiliate": settings["affiliate_commission_rate"],
         "period": {"start": start, "end": end},
     }
