@@ -3917,11 +3917,24 @@ async def admin_igvd_reprocess_order(request: Request, body: IgvdReprocessOrderB
     # Tenta match exato primeiro (case-insensitive)
     order = await db.orders.find_one({"order_id": q}, {"_id": 0})
     if not order:
-        # Tenta suffix (o ID renderizado no UI e' last-8 uppercase)
+        # Tenta suffix (o ID renderizado no UI e' last-8 uppercase).
+        # Prefere IGVD orders na busca por suffix + ordena por created_at DESC
+        # para determinismo em caso de colisao improvavel.
         order = await db.orders.find_one(
-            {"order_id": {"$regex": f"{re.escape(q)}$", "$options": "i"}},
+            {
+                "order_id": {"$regex": f"{re.escape(q)}$", "$options": "i"},
+                "igvd_voucher_code": {"$ne": None},
+            },
             {"_id": 0},
+            sort=[("created_at", -1)],
         )
+        if not order:
+            # fallback sem restringir a IGVD (para dar mensagem clara "nao e' IGVD")
+            order = await db.orders.find_one(
+                {"order_id": {"$regex": f"{re.escape(q)}$", "$options": "i"}},
+                {"_id": 0},
+                sort=[("created_at", -1)],
+            )
     if not order:
         raise HTTPException(status_code=404, detail=f"Pedido nao encontrado (busca: {raw})")
     order_id = order["order_id"]

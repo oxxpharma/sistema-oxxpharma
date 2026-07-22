@@ -395,7 +395,24 @@ Após a Iter 43 introduzir o backbone multi-tenant (OxxPharma + Pharmakon), a p�
   - **Fix**: enriquecimento agora inclui `"points_value": float(prod.get("points_value") or 0)`.
 - Testes: `test_iter42l_sponsor_id_preserved.py` (3 testes — sticky sponsor_id, points_value no cart, agg Top 10 com fallback) — todos PASS. Total suíte iter42*: **42/42 passing**.
 
+## Iter 49 (Fev/2026): Reprocess IGVD hooks + Filtro Mês Atual + Métricas de Rede
+- **Endpoint admin `POST /api/admin/igvd/reprocess-order`** — recebe `{order_id}` (aceita ID completo `ord_xxxxxxxxxxxx`, ID curto de 8 chars `#10E6A477` ou `10E6A477` — regex suffix case-insensitive, prefere pedidos IGVD ordenados por created_at DESC).
+  - Executa `_post_igvd_order_created` (comissões, pontos Maxx, fatura por e-mail).
+  - Idempotente: comissões existentes não duplicam (índice `uq_commission_per_beneficiary`); retorna `commissions_created`/`points_created` (delta) e totais.
+  - Validações escalonadas: 400 empty → 404 not found → 400 not IGVD → 400 not paid → 200 success.
+- **PeriodFilter reutilizável** (`/app/frontend/src/components/PeriodFilter.jsx`):
+  - Dois modos: `Mês/Ano` (dropdowns + botão "Aplicar" + "Mês atual") e `Intervalo` (from/to date pickers).
+  - Export helper `getCurrentMonthRange()` — primeiro/último dia do mês atual.
+  - Aplicado em `AdminDashboard.jsx`, `MyNetwork.jsx`, `MyReferral.jsx` (todas com default = mês atual).
+- **`/api/users/me/network`, `/api/users/me/referral`, `/api/users/me/commissions`**: aceitam `start`/`end` (YYYY-MM-DD) e filtram commissions.created_at + orders.created_at pelo range.
+- **MyNetwork — novas colunas por geração**:
+  - `received_total` = comissões (paid+pending) do user daquela geração no período.
+  - `purchases_total` / `purchases_count` = soma de `orders.total` (paid) dos downlines daquela geração no período.
+  - KPIs principais atualizados: "Valor recebido no período" (paid+pending) e "Total de compras da rede" (substituindo o antigo "Pendente/Recebido").
+- **UI AdminIgvd**: novo card "Reprocessar hooks de pedido IGVD" com input + botão + card de resultado (counters de cashback/pontos + voucher_code).
+- Tests: `/app/backend/tests/test_iter49_reprocess_and_period.py` (17/17 PASS): auth 401/403, validações 400/404, full/short ID, idempotência, novos campos de MyNetwork, filtro de período em referral/commissions.
+
 ## Project Health
 - **Broken**: nenhum
 - **Mocked**: API externa Cartão de Benefícios (adapter genérico — depende do fornecedor)
-- **Test coverage**: iter 16-20 todas PASS 100%
+- **Test coverage**: iter 16-20 e iter 49 todas PASS 100%
