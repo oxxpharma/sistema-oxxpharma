@@ -47,10 +47,19 @@ export default function AdminIgvd() {
   const save = async () => {
     setSaving(true);
     try {
+      // Iter 52: normaliza unit_price antes de enviar (converte "" para null)
+      const items = (cfg.igvd_kit_items || []).map((it) => {
+        const out = { product_id: it.product_id, quantity: Number(it.quantity || 1) };
+        if (it.unit_price !== undefined && it.unit_price !== null && String(it.unit_price).trim() !== '') {
+          const n = Number(it.unit_price);
+          if (!Number.isNaN(n) && n >= 0) out.unit_price = n;
+        }
+        return out;
+      });
       await api.put('/api/admin/settings', {
         igvd_voucher_enabled: cfg.igvd_voucher_enabled,
         igvd_voucher_secret: cfg.igvd_voucher_secret,
-        igvd_kit_items: cfg.igvd_kit_items,
+        igvd_kit_items: items,
       });
       toast.success('Configurações salvas');
       await load();
@@ -87,13 +96,19 @@ export default function AdminIgvd() {
 
   const productMap = React.useMemo(() => Object.fromEntries((products || []).map(p => [p.product_id, p])), [products]);
 
-  const kitAddItem = () => setCfg((c) => ({ ...c, igvd_kit_items: [...(c.igvd_kit_items || []), { product_id: '', quantity: 1 }] }));
+  const kitAddItem = () => setCfg((c) => ({ ...c, igvd_kit_items: [...(c.igvd_kit_items || []), { product_id: '', quantity: 1, unit_price: '' }] }));
   const kitUpdate = (idx, patch) => setCfg((c) => ({ ...c, igvd_kit_items: (c.igvd_kit_items || []).map((it, i) => i === idx ? { ...it, ...patch } : it) }));
   const kitRemove = (idx) => setCfg((c) => ({ ...c, igvd_kit_items: (c.igvd_kit_items || []).filter((_, i) => i !== idx) }));
-  const kitTotal = (cfg.igvd_kit_items || []).reduce((acc, it) => {
+  const kitLinePrice = (it) => {
+    const raw = it.unit_price;
+    if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+      const n = Number(raw);
+      if (!Number.isNaN(n) && n >= 0) return n;
+    }
     const p = productMap[it.product_id];
-    return acc + (p ? Number(p.price || 0) * Number(it.quantity || 0) : 0);
-  }, 0);
+    return p ? Number(p.price || 0) : 0;
+  };
+  const kitTotal = (cfg.igvd_kit_items || []).reduce((acc, it) => acc + kitLinePrice(it) * Number(it.quantity || 0), 0);
 
   const webhookUrl = `${window.location.origin}/api/integrations/igvd/voucher`;
   const sandboxUrl = `${window.location.origin}/api/integrations/igvd/voucher/sandbox`;
@@ -201,7 +216,11 @@ export default function AdminIgvd() {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 className="font-heading font-bold flex items-center gap-2"><Package className="w-5 h-5 text-brand-main" /> Kit de Adesão IGVD</h2>
-            <p className="text-xs text-txt-secondary mt-0.5">Produtos que serão adicionados ao pedido gerado automaticamente. O pedido é criado 1 vez por conta (idempotente).</p>
+            <p className="text-xs text-txt-secondary mt-0.5">
+              Produtos que serão adicionados ao pedido gerado automaticamente. O pedido é criado 1 vez por conta (idempotente).
+              O campo <b>Preço unitário</b> permite substituir o preço base do produto (útil quando o valor pago via IGVD difere
+              do preço da vitrine) — o cashback e a fatura serão calculados sobre esse preço.
+            </p>
           </div>
           <div className="text-right">
             <div className="text-[11px] text-txt-secondary">Valor do kit (soma dos preços)</div>
@@ -216,13 +235,17 @@ export default function AdminIgvd() {
           )}
           {(cfg.igvd_kit_items || []).map((it, idx) => {
             const p = productMap[it.product_id];
-            const line = p ? Number(p.price || 0) * Number(it.quantity || 0) : 0;
+            const unit = kitLinePrice(it);
+            const line = unit * Number(it.quantity || 0);
+            const hasOverride = it.unit_price !== undefined && it.unit_price !== null && String(it.unit_price).trim() !== '';
+            const basePrice = p ? Number(p.price || 0) : 0;
+            const overridden = hasOverride && Number(it.unit_price) !== basePrice;
             return (
-              <div key={idx} className="flex items-center gap-2" data-testid={`kit-row-${idx}`}>
+              <div key={idx} className="flex items-center gap-2 flex-wrap" data-testid={`kit-row-${idx}`}>
                 <select
                   value={it.product_id}
                   onChange={(e) => kitUpdate(idx, { product_id: e.target.value })}
-                  className="flex-1 px-3 py-2 border border-border rounded-lg text-sm"
+                  className="flex-1 min-w-[220px] px-3 py-2 border border-border rounded-lg text-sm"
                   data-testid={`kit-product-${idx}`}
                 >
                   <option value="">— selecione o produto —</option>
@@ -230,12 +253,28 @@ export default function AdminIgvd() {
                     <option key={pr.product_id} value={pr.product_id}>{pr.name} · {formatCurrency(pr.price)} {pr.sku ? `· ${pr.sku}` : ''}</option>
                   ))}
                 </select>
+                <div className="flex flex-col items-start">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder={p ? `Base: ${basePrice.toFixed(2)}` : 'Preço'}
+                    value={it.unit_price ?? ''}
+                    onChange={(e) => kitUpdate(idx, { unit_price: e.target.value })}
+                    className={`w-28 px-2 py-2 border rounded-lg text-sm text-right font-semibold ${overridden ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-border'}`}
+                    title="Preço unitário para este kit (opcional). Deixe vazio para usar o preço base do produto."
+                    data-testid={`kit-price-${idx}`}
+                  />
+                  {overridden && (
+                    <span className="text-[9px] text-amber-700 font-bold mt-0.5">override</span>
+                  )}
+                </div>
                 <input
                   type="number"
                   min="1"
                   value={it.quantity}
                   onChange={(e) => kitUpdate(idx, { quantity: Math.max(1, parseInt(e.target.value || '1', 10)) })}
-                  className="w-20 px-2 py-2 border border-border rounded-lg text-sm text-center font-bold"
+                  className="w-16 px-2 py-2 border border-border rounded-lg text-sm text-center font-bold"
                   data-testid={`kit-qty-${idx}`}
                 />
                 <div className="w-24 text-right text-sm font-bold text-txt-primary">{formatCurrency(line)}</div>

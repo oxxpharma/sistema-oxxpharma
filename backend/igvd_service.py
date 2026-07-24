@@ -16,11 +16,59 @@ pelo `voucher.code`. Indice unico em `igvd_vouchers.voucher_code`.
 
 import re
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 
-def _clean_cpf(v: str) -> str:
-    return re.sub(r"\D", "", v or "")
+def _clean_cpf(v: Any) -> str:
+    return re.sub(r"\D", "", str(v or ""))
+
+
+def _pick_first(d: Dict, *keys: str) -> Any:
+    """Retorna o primeiro valor nao-vazio entre as chaves informadas."""
+    for k in keys:
+        v = d.get(k) if isinstance(d, dict) else None
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        return v
+    return None
+
+
+def _normalize_lic_address(addr: Dict) -> Dict:
+    """Iter 52: aceita chaves em varios idiomas (pt-BR + en). Retorna dict
+    padronizado com street/number/complement/neighborhood/city/state/zip_code."""
+    if not isinstance(addr, dict):
+        return {}
+    state = str(_pick_first(addr, "state", "uf", "estado") or "").strip().upper()[:2]
+    zip_raw = _clean_cpf(_pick_first(addr, "zip_code", "zipcode", "cep", "postal_code", "postalCode"))
+    return {
+        "street": str(_pick_first(addr, "street", "logradouro", "rua", "endereco") or "").strip(),
+        "number": str(_pick_first(addr, "number", "numero") or "").strip(),
+        "complement": str(_pick_first(addr, "complement", "complemento") or "").strip(),
+        "neighborhood": str(_pick_first(addr, "neighborhood", "bairro") or "").strip(),
+        "city": str(_pick_first(addr, "city", "cidade", "municipio") or "").strip(),
+        "state": state,
+        "zip_code": (f"{zip_raw[:5]}-{zip_raw[5:]}" if len(zip_raw) == 8 else str(_pick_first(addr, "zip_code", "cep", "postal_code") or "").strip()),
+        "zip_digits": zip_raw if len(zip_raw) == 8 else "",
+    }
+
+
+def _normalize_lic(lic: Dict) -> Dict:
+    """Iter 52: aceita variacoes comuns de campos vindos da IGVD."""
+    if not isinstance(lic, dict):
+        return {}
+    cpf_raw = _pick_first(lic, "cpf", "cpf_digits", "document", "documento", "document_number", "cpfCnpj", "cpf_cnpj")
+    cpf_digits = _clean_cpf(cpf_raw)
+    return {
+        "cpf_raw": cpf_raw,
+        "cpf_digits": cpf_digits if len(cpf_digits) == 11 else "",
+        "email": str(_pick_first(lic, "email", "e_mail", "mail") or "").strip().lower(),
+        "full_name": str(_pick_first(lic, "full_name", "name", "nome", "nome_completo") or "").strip(),
+        "phone": str(_pick_first(lic, "phone", "telefone", "celular", "mobile") or "").strip(),
+        "birth_date": _pick_first(lic, "birth_date", "birthdate", "data_nascimento", "nascimento"),
+        "address": _normalize_lic_address(_pick_first(lic, "address", "endereco") or {}),
+    }
 
 
 def _now_iso() -> str:
@@ -84,7 +132,10 @@ def _gen_order_id() -> str:
 
 async def _enrich_user_from_igvd(db, user_doc: Dict, voucher_doc: Dict) -> Dict:
     """Iter 48e: completa CPF e endereco do user com dados vindos da IGVD, caso
-    o user esteja com esses campos vazios. Retorna a versao atualizada do user."""
+    o user esteja com esses campos vazios. Retorna a versao atualizada do user.
+    Iter 52: sempre pega dados via `_normalize_lic` (aceita chaves aliadas).
+    Persiste tambem CEP em endereco default existente quando o user ja tem
+    endereco mas sem CEP."""
     updates: Dict = {}
 
     # CPF: preencher se user nao tem
@@ -97,35 +148,51 @@ async def _enrich_user_from_igvd(db, user_doc: Dict, voucher_doc: Dict) -> Dict:
 
     # Telefone: preencher se user nao tem
     if not (user_doc.get("phone") or "").strip():
-        lic_phone = voucher_doc.get("licenciado_phone") or ""
+        lic_phone = (voucher_doc.get("licenciado_phone") or "").strip()
         if lic_phone:
             updates["phone"] = lic_phone
 
-    # Endereco: se user nao tem nenhum endereco cadastrado, gerar 1 default
-    # a partir do licenciado_address recebido pela IGVD (mesmo se o CEP nao vier
-    # em formato perfeito - salvamos o que veio para o admin poder editar).
+    # Iter 52: endereco IGVD ja normalizado no ingest (fields em ingles + zip_digits).
     lic_addr = voucher_doc.get("licenciado_address") or {}
-    if not (user_doc.get("addresses") or []):
-        zip_raw = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
-        street = (lic_addr.get("street") or "").strip()
-        city = (lic_addr.get("city") or "").strip()
-        # Cria endereco se veio ao menos rua OU cidade OU CEP no payload
-        if street or city or zip_raw:
+
+    addrs = list(user_doc.get("addresses") or [])
+    if not addrs:
+        # Cria endereco default a partir do payload IGVD
+        if lic_addr.get("street") or lic_addr.get("city") or lic_addr.get("zip_digits"):
             import secrets
+            zip_d = lic_addr.get("zip_digits") or ""
             new_addr = {
                 "address_id": "addr_" + secrets.token_hex(6),
                 "label": "Adesão IGVD",
                 "name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
-                "street": street or "",
-                "number": (lic_addr.get("number") or "S/N"),
+                "street": lic_addr.get("street") or "",
+                "number": lic_addr.get("number") or "S/N",
                 "complement": lic_addr.get("complement") or "",
-                "neighborhood": (lic_addr.get("neighborhood") or "").strip(),
-                "city": city,
-                "state": ((lic_addr.get("state") or "").upper()[:2]),
-                "zip_code": (f"{zip_raw[:5]}-{zip_raw[5:]}" if len(zip_raw) == 8 else (str(lic_addr.get("zip_code") or "").strip())),
+                "neighborhood": lic_addr.get("neighborhood") or "",
+                "city": lic_addr.get("city") or "",
+                "state": lic_addr.get("state") or "",
+                "zip_code": (f"{zip_d[:5]}-{zip_d[5:]}" if len(zip_d) == 8 else (lic_addr.get("zip_code") or "")),
                 "is_default": True,
             }
             updates["addresses"] = [new_addr]
+    else:
+        # Iter 52: se ja tem endereco default sem CEP/campos, preenche com o payload IGVD
+        # e persiste no perfil (nao so no pedido) para nao gerar novo pedido sem CEP.
+        default_idx = next((i for i, a in enumerate(addrs) if a.get("is_default")), 0)
+        cur = dict(addrs[default_idx])
+        changed = False
+        cur_zip_digits = re.sub(r"\D", "", str(cur.get("zip_code") or ""))
+        lic_zip = lic_addr.get("zip_digits") or ""
+        if len(cur_zip_digits) != 8 and len(lic_zip) == 8:
+            cur["zip_code"] = f"{lic_zip[:5]}-{lic_zip[5:]}"
+            changed = True
+        for k in ("street", "number", "neighborhood", "city", "state", "complement"):
+            if not (cur.get(k) or "").strip() and (lic_addr.get(k) or "").strip():
+                cur[k] = lic_addr[k]
+                changed = True
+        if changed:
+            addrs[default_idx] = cur
+            updates["addresses"] = addrs
 
     if updates:
         await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": updates})
@@ -167,7 +234,14 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
         p = prod_map.get(pid)
         if not p:
             continue  # produto foi apagado; ignora
-        unit_price = float(p.get("price") or 0)
+        # Iter 52: `unit_price` do kit override o preco base do produto. Isso e' critico
+        # para o calculo correto de cashback e para a fatura (evita cobrar/creditar
+        # em cima do preco cheio da vitrine quando a IGVD tem valor especial).
+        override = k.get("unit_price")
+        try:
+            unit_price = float(override) if override is not None and str(override).strip() != "" else float(p.get("price") or 0)
+        except (TypeError, ValueError):
+            unit_price = float(p.get("price") or 0)
         item_total = round(unit_price * qty, 2)
         subtotal += item_total
         order_items.append({
@@ -190,22 +264,21 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
     addrs = user_doc.get("addresses") or []
     default_addr = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
     lic_addr = voucher_doc.get("licenciado_address") or {}
+    lic_zip_digits = lic_addr.get("zip_digits") or re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
 
     if default_addr:
         # Iter 48f: preenche lacunas do endereco default com dados do payload
         # (comum: user cadastrou sem CEP, IGVD envia CEP completo).
         merged = dict(default_addr)
-        lic_zip_digits = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
         cur_zip_digits = re.sub(r"\D", "", str(merged.get("zip_code") or ""))
         if len(cur_zip_digits) != 8 and len(lic_zip_digits) == 8:
             merged["zip_code"] = f"{lic_zip_digits[:5]}-{lic_zip_digits[5:]}"
-        for k in ("street", "number", "neighborhood", "city", "state"):
+        for k in ("street", "number", "neighborhood", "city", "state", "complement"):
             if not (merged.get(k) or "").strip() and (lic_addr.get(k) or "").strip():
                 merged[k] = lic_addr[k].strip() if k != "state" else lic_addr[k].strip().upper()[:2]
         ship_addr = merged
     else:
         # Snapshot minimo a partir do payload IGVD
-        zip_raw = re.sub(r"\D", "", str(lic_addr.get("zip_code") or ""))
         ship_addr = {
             "address_id": "igvd_snapshot",
             "label": "Endereço IGVD",
@@ -216,18 +289,26 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
             "neighborhood": lic_addr.get("neighborhood") or "",
             "city": lic_addr.get("city") or "",
             "state": lic_addr.get("state") or "",
-            "zip_code": f"{zip_raw[:5]}-{zip_raw[5:]}" if len(zip_raw) == 8 else (lic_addr.get("zip_code") or ""),
+            "zip_code": (f"{lic_zip_digits[:5]}-{lic_zip_digits[5:]}" if len(lic_zip_digits) == 8 else (lic_addr.get("zip_code") or "")),
         }
 
     now = _now_iso()
     amount_brl = float(voucher_doc.get("amount_brl") or 0)
+    # Iter 52: CPF do pedido — SEMPRE cai no CPF do payload IGVD se o user nao
+    # tiver (garante que a fatura sai com CPF mesmo se o enrich falhou por race).
+    lic_cpf_digits = voucher_doc.get("licenciado_cpf_digits") or ""
+    order_cpf_digits = _clean_cpf(user_doc.get("cpf_digits") or user_doc.get("cpf") or "") or lic_cpf_digits
+    if len(order_cpf_digits) == 11 and not (user_doc.get("cpf") or "").strip():
+        order_cpf_fmt = f"{order_cpf_digits[:3]}.{order_cpf_digits[3:6]}.{order_cpf_digits[6:9]}-{order_cpf_digits[9:]}"
+    else:
+        order_cpf_fmt = user_doc.get("cpf") or (f"{lic_cpf_digits[:3]}.{lic_cpf_digits[3:6]}.{lic_cpf_digits[6:9]}-{lic_cpf_digits[9:]}" if len(lic_cpf_digits) == 11 else "")
     order = {
         "order_id": _gen_order_id(),
         "user_id": user_id,
         "customer_name": user_doc.get("name") or voucher_doc.get("licenciado_name") or "",
         "customer_email": user_doc.get("email") or voucher_doc.get("licenciado_email") or "",
-        "customer_cpf": user_doc.get("cpf") or "",
-        "customer_cpf_digits": user_doc.get("cpf_digits") or voucher_doc.get("licenciado_cpf_digits") or "",
+        "customer_cpf": order_cpf_fmt,
+        "customer_cpf_digits": order_cpf_digits if len(order_cpf_digits) == 11 else "",
         "customer_phone": user_doc.get("phone") or voucher_doc.get("licenciado_phone") or "",
         "items": order_items,
         "subtotal": round(subtotal, 2),
@@ -241,9 +322,14 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
         "discount_amount": 0.0,
         "coupon_code": None,
         "voucher_used": 0.0,
-        # O valor cobrado eh o valor informado pela IGVD (batido com o kit de fato)
-        "total": amount_brl if amount_brl > 0 else round(subtotal, 2),
-        "total_before_voucher": amount_brl if amount_brl > 0 else round(subtotal, 2),
+        # Iter 52: `total` = subtotal (source of truth = kit config no admin, com
+        # `unit_price` override respeitado). O `amount_brl` do payload IGVD fica
+        # apenas como referencia em `igvd_amount_brl`, mas nao dita o total do
+        # pedido para evitar cashback/fatura com valor cheio quando o admin ja
+        # configurou o preco contextual correto.
+        "total": round(subtotal, 2),
+        "total_before_voucher": round(subtotal, 2),
+        "igvd_amount_brl": amount_brl if amount_brl > 0 else None,
         "shipping_address": ship_addr,
         "is_pickup": False,
         "pickup_snapshot": None,
@@ -315,15 +401,16 @@ async def ingest_voucher(db, payload: Dict, idempotency_key: Optional[str]) -> D
     """Persiste o voucher recebido e aplica imediatamente se houver user.
     Retorna o body de resposta seguindo o contrato."""
     voucher = payload.get("voucher") or {}
-    lic = payload.get("licenciado") or {}
-    addr = (lic.get("address") or {})
+    # Iter 52: aceita `licenciado` OU `customer` OU `user` como container
+    lic_raw = payload.get("licenciado") or payload.get("customer") or payload.get("user") or {}
+    lic = _normalize_lic(lic_raw)
     code = (voucher.get("code") or "").strip()
     if not code:
         raise ValueError("voucher.code obrigatorio")
     amount_cents = int(voucher.get("amount_cents") or 0)
     amount_brl = float(voucher.get("amount_brl") or (amount_cents / 100.0))
-    cpf_digits = _clean_cpf(lic.get("cpf"))
-    email = (lic.get("email") or "").strip().lower()
+    cpf_digits = lic["cpf_digits"]
+    email = lic["email"]
 
     # Idempotencia: se ja existe voucher com mesmo code OU idempotency_key
     existing = None
@@ -351,12 +438,12 @@ async def ingest_voucher(db, payload: Dict, idempotency_key: Optional[str]) -> D
         "amount_brl": amount_brl,
         "amount_cents": amount_cents,
         "issued_at": voucher.get("issued_at"),
-        "licenciado_name": lic.get("full_name"),
+        "licenciado_name": lic["full_name"],
         "licenciado_email": email,
         "licenciado_cpf_digits": cpf_digits,
-        "licenciado_phone": lic.get("phone"),
-        "licenciado_birth_date": lic.get("birth_date"),
-        "licenciado_address": addr,
+        "licenciado_phone": lic["phone"],
+        "licenciado_birth_date": lic["birth_date"],
+        "licenciado_address": lic["address"],
         "raw_payload": payload,
         "received_at": _now_iso(),
         "status": "pending",

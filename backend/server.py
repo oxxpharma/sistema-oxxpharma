@@ -4048,7 +4048,10 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
             while len(arr) < 6:
                 arr.append(0.0)
             update[key] = arr
-    # Iter 48b: sanitiza igvd_kit_items -> [{product_id: str, quantity: int}]
+    # Iter 48b: sanitiza igvd_kit_items -> [{product_id: str, quantity: int, unit_price?: float}]
+    # Iter 52: `unit_price` opcional para override do preco base do produto (importante
+    # porque o preco cheio da vitrine nem sempre e' o pago pela IGVD, e o cashback
+    # calculado sobre o total deve refletir o valor real da adesao).
     if "igvd_kit_items" in update:
         raw = update["igvd_kit_items"]
         if not isinstance(raw, list):
@@ -4058,7 +4061,16 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
             pid = str((it or {}).get("product_id") or "").strip()
             qty = int((it or {}).get("quantity") or 0)
             if pid and qty > 0:
-                clean.append({"product_id": pid, "quantity": qty})
+                item: Dict = {"product_id": pid, "quantity": qty}
+                raw_price = (it or {}).get("unit_price")
+                if raw_price is not None and str(raw_price).strip() != "":
+                    try:
+                        up = float(raw_price)
+                        if up >= 0:
+                            item["unit_price"] = round(up, 2)
+                    except (TypeError, ValueError):
+                        pass
+                clean.append(item)
         update["igvd_kit_items"] = clean
     update["updated_at"] = now_iso()
     await db.settings.update_one({"_id": "global"}, {"$set": update}, upsert=True)
