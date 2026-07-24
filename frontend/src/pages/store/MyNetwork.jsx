@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge';
 import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilter';
 import {
   Network, Users, DollarSign, ShoppingBag, Loader2, Award, TrendingUp, Share2,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Wallet,
 } from 'lucide-react';
 
 const NETWORK_LABELS = {
@@ -96,6 +96,29 @@ export default function MyNetwork() {
         />
         <div className="text-xs text-txt-secondary">
           Exibindo dados de <b>{period.start}</b> até <b>{period.end}</b>
+        </div>
+      </div>
+
+      {/* Iter 51: Saldo Total Disponivel — INDEPENDENTE do filtro de periodo.
+          Aparece com destaque acima das KPIs para nao gerar duvida quando o
+          usuario muda o mes ("achei que meu saldo sumiu"). */}
+      <div
+        className="mb-4 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-500 to-teal-600 text-white p-5 flex items-center justify-between gap-4 shadow-sm"
+        data-testid="kpi-account-balance"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <Wallet className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs uppercase font-bold tracking-wider opacity-80">Saldo total disponível</div>
+            <div className="text-3xl md:text-4xl font-heading font-black leading-tight">
+              {formatCurrency(data.account_balance || 0)}
+            </div>
+            <div className="text-[11px] opacity-80 mt-0.5">
+              Valor acumulado na sua conta · ainda não enviado ao cartão · não depende do período
+            </div>
+          </div>
         </div>
       </div>
 

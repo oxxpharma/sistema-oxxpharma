@@ -4253,6 +4253,15 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
     all_buyers.sort(key=lambda m: (-(m.get("purchases_total") or 0), -(m.get("purchases_count") or 0)))
     top_buyers = all_buyers[:3]
 
+    # Iter 51: saldo total disponivel na conta (cashback pago, ainda nao enviado
+    # para o cartao). E' INDEPENDENTE do filtro de periodo — mostra o valor real
+    # que o usuario tem para receber, para nao gerar confusao quando ele muda o mes.
+    acc_agg = await db.commissions.aggregate([
+        {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    account_balance = round((acc_agg[0]["total"] if acc_agg else 0), 2)
+
     return {
         "network_type": network_type,
         "referral_code": user.get("referral_code"),
@@ -4260,6 +4269,7 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
         "totals": totals,
         "by_source": by_source,
         "top_buyers": top_buyers,
+        "account_balance": account_balance,
         "commission_rate_affiliate": settings["affiliate_commission_rate"],
         "period": {"start": start, "end": end},
     }
