@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
-  GitMerge, Calculator, LayoutGrid, Shield,
+  GitMerge, Calculator, LayoutGrid, Shield, ShoppingCart,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -32,6 +32,7 @@ const NAV_GROUPS = [
     label: 'Vendas',
     items: [
       { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders', perm: 'editOrders' },
+      { to: '/backoffice/pdv', icon: ShoppingCart, label: 'PDV (Balcão)', testId: 'nav-pdv', perm: 'editOrders' },
       { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'editCoupons' },
       { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices', perm: 'financial' },
       { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments', perm: 'integrations' },

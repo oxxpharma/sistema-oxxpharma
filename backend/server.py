@@ -1885,6 +1885,271 @@ async def admin_delete_order(
     return {"ok": True, "summary": summary}
 
 
+# ==================== ADMIN PDV / MANUAL ORDER (Iter 53) ====================
+
+class PDVAddressIn(BaseModel):
+    label: Optional[str] = "Balcão"
+    name: Optional[str] = ""
+    street: str = ""
+    number: str = ""
+    complement: str = ""
+    neighborhood: str = ""
+    city: str = ""
+    state: str = ""
+    zip_code: str = ""
+
+
+class PDVCustomerIn(BaseModel):
+    name: str = ""
+    email: str = ""
+    cpf: str = ""
+    phone: str = ""
+    address: Optional[PDVAddressIn] = None
+
+
+class PDVItemIn(BaseModel):
+    product_id: str
+    quantity: int
+    unit_price: Optional[float] = None
+    # `tier_key` opcional: identifica qual pricing_tier aplicar. Formato:
+    #   'base'                        -> preco base
+    #   'tier:<index>'                -> pricing_tiers[index]
+    #   'custom'                      -> respeita unit_price
+    tier_key: Optional[str] = None
+
+
+class PDVShippingIn(BaseModel):
+    mode: str = "value"  # 'value' | 'free' | 'pickup'
+    value: Optional[float] = 0.0
+    service_name: Optional[str] = None
+    carrier: Optional[str] = None
+
+
+class PDVPaymentIn(BaseModel):
+    method: str  # 'card' | 'card_installments' | 'pix'
+    installments: Optional[int] = None
+    notes: Optional[str] = ""
+
+
+class PDVOrderIn(BaseModel):
+    user_id: Optional[str] = None
+    customer: Optional[PDVCustomerIn] = None
+    items: List[PDVItemIn]
+    shipping: PDVShippingIn
+    payment: PDVPaymentIn
+    order_notes: Optional[str] = ""
+    skip_maxx_sync: bool = False
+    skip_points: bool = False
+    mark_paid: bool = True
+
+    @field_validator("items")
+    @classmethod
+    def _v_items(cls, v):
+        if not v:
+            raise ValueError("Pelo menos 1 item")
+        return v
+
+
+def _resolve_pdv_price(product: Dict, item: PDVItemIn, user_doc: Optional[Dict], tenant: Optional[str]) -> Dict:
+    """Resolve preco unitario do item do PDV.
+    Prioridade:
+      1) `unit_price` explicito (override manual, sempre respeita)
+      2) `tier_key` — pega da lista `pricing_tiers` do produto
+      3) `effective_price` (fallback: aplica melhor tier do user, senao base)
+    """
+    if item.unit_price is not None and float(item.unit_price) >= 0:
+        return {"price": round(float(item.unit_price), 2), "applied_tier": {"label": "Personalizado", "type": "custom"}}
+    tk = (item.tier_key or "").strip().lower()
+    if tk == "base":
+        base = float(product.get("price") or 0)
+        pbt = product.get("price_by_tenant") or {}
+        if tenant and isinstance(pbt, dict) and pbt.get(tenant):
+            base = float(pbt.get(tenant))
+        return {"price": round(base, 2), "applied_tier": {"label": "Preço base", "type": "base"}}
+    if tk.startswith("tier:"):
+        try:
+            idx = int(tk.split(":", 1)[1])
+            tiers = product.get("pricing_tiers") or []
+            if 0 <= idx < len(tiers):
+                t = tiers[idx]
+                p = float(t.get("price") or 0)
+                if p > 0:
+                    return {"price": round(p, 2), "applied_tier": {"type": t.get("type"), "label": t.get("label") or "", "user_category_id": t.get("user_category_id"), "network_type": t.get("network_type"), "price": p}}
+        except (ValueError, IndexError):
+            pass
+    info = store_extras.effective_price(product, user_doc, tenant=tenant)
+    return {"price": round(float(info["price"]), 2), "applied_tier": info.get("applied_tier")}
+
+
+@app.post("/api/admin/orders/manual")
+async def admin_create_manual_order(request: Request, body: PDVOrderIn, user: dict = Depends(require_admin())):
+    """Cria pedido manualmente pelo admin (PDV / frente de caixa).
+    - Sem checkout de gateway: `payment_method` e `payment_status` sao gravados
+      direto no pedido.
+    - Aceita user_id existente OU dados de guest (nome/email/cpf/endereco).
+    - Aceita override por item (unit_price) e/ou selecao explicita de tier
+      cadastrado no produto.
+    - Aceita frete manual, gratis ou pickup.
+    - `skip_maxx_sync` / `skip_points` cortam integracoes/gamificacao pontuais.
+    """
+    db = request.app.db
+    tenant = tenant_service.get_tenant(request)
+
+    # 1) Cliente: usuario cadastrado ou snapshot de guest
+    order_user: Optional[Dict] = None
+    if body.user_id:
+        order_user = await db.users.find_one({"user_id": body.user_id}, {"_id": 0, "password_hash": 0})
+        if not order_user:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    cust = body.customer or PDVCustomerIn()
+    # Merge: campos do form sobrescrevem se preenchidos, senao pega do user
+    name = (cust.name or (order_user or {}).get("name") or "").strip()
+    email = (cust.email or (order_user or {}).get("email") or "").strip().lower()
+    cpf_raw = (cust.cpf or (order_user or {}).get("cpf") or "").strip()
+    cpf_digits = re.sub(r"\D", "", cpf_raw)
+    phone = (cust.phone or (order_user or {}).get("phone") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome do cliente obrigatório")
+
+    # 2) Endereco de entrega (nao obrigatorio se pickup)
+    is_pickup = body.shipping.mode == "pickup"
+    ship_addr: Optional[Dict] = None
+    if not is_pickup:
+        # Prioriza address do form; senao usa default do user
+        addr_in = body.customer.address if (body.customer and body.customer.address) else None
+        if addr_in and (addr_in.street or addr_in.zip_code):
+            zd = re.sub(r"\D", "", addr_in.zip_code or "")
+            ship_addr = {
+                "address_id": "pdv_snapshot",
+                "label": addr_in.label or "Balcão",
+                "name": addr_in.name or name,
+                "street": addr_in.street or "",
+                "number": addr_in.number or "",
+                "complement": addr_in.complement or "",
+                "neighborhood": addr_in.neighborhood or "",
+                "city": addr_in.city or "",
+                "state": (addr_in.state or "").upper()[:2],
+                "zip_code": f"{zd[:5]}-{zd[5:]}" if len(zd) == 8 else (addr_in.zip_code or ""),
+            }
+        elif order_user:
+            addrs = order_user.get("addresses") or []
+            ship_addr = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
+
+    # 3) Produtos + precos
+    pids = [it.product_id for it in body.items]
+    products = {}
+    async for p in db.products.find({"product_id": {"$in": pids}, "active": True}, {"_id": 0}):
+        products[p["product_id"]] = p
+    order_items = []
+    subtotal = 0.0
+    for it in body.items:
+        p = products.get(it.product_id)
+        if not p:
+            raise HTTPException(status_code=400, detail=f"Produto {it.product_id} inexistente/inativo")
+        qty = int(it.quantity or 1)
+        if qty <= 0:
+            continue
+        if int(p.get("stock") or 0) < qty:
+            raise HTTPException(status_code=400, detail=f"Estoque insuficiente para {p.get('name')}")
+        resolved = _resolve_pdv_price(p, it, order_user, tenant)
+        unit_price = resolved["price"]
+        line_total = round(unit_price * qty, 2)
+        subtotal += line_total
+        order_items.append({
+            "product_id": p["product_id"],
+            "name": p.get("name"),
+            "price": unit_price,
+            "quantity": qty,
+            "total": line_total,
+            "image": (p.get("images") or [None])[0],
+            "points_value": float(p.get("points_value") or 0),
+            "tier_applied": resolved.get("applied_tier"),
+            "sku": p.get("sku"),
+            "ean": p.get("ean"),
+        })
+    if not order_items:
+        raise HTTPException(status_code=400, detail="Nenhum item válido")
+
+    # 4) Frete
+    if is_pickup:
+        shipping_cost = 0.0
+        shipping_meta = {"shipping_service_name": "Retirada no Local", "shipping_carrier": "Local", "shipping_service_id": "pickup", "shipping_delivery_days": 0}
+    elif body.shipping.mode == "free":
+        shipping_cost = 0.0
+        shipping_meta = {"shipping_service_name": body.shipping.service_name or "Frete Grátis", "shipping_carrier": body.shipping.carrier or "Cortesia", "shipping_service_id": "free", "shipping_delivery_days": None}
+    else:
+        shipping_cost = round(float(body.shipping.value or 0), 2)
+        shipping_meta = {"shipping_service_name": body.shipping.service_name or "Frete manual (PDV)", "shipping_carrier": body.shipping.carrier or "PDV", "shipping_service_id": "manual", "shipping_delivery_days": None}
+
+    total = round(subtotal + shipping_cost, 2)
+
+    # 5) Pagamento
+    method = (body.payment.method or "").lower().strip()
+    if method not in ("card", "card_installments", "pix"):
+        raise HTTPException(status_code=400, detail="payment.method invalido")
+    installments = 1
+    if method == "card_installments":
+        installments = max(2, min(12, int(body.payment.installments or 2)))
+
+    # 6) Monta o pedido
+    now = now_iso()
+    is_paid = bool(body.mark_paid)
+    cpf_fmt = f"{cpf_digits[:3]}.{cpf_digits[3:6]}.{cpf_digits[6:9]}-{cpf_digits[9:]}" if len(cpf_digits) == 11 else cpf_raw
+    order = {
+        "order_id": gen_id("ord_"),
+        "user_id": order_user.get("user_id") if order_user else None,
+        "customer_name": name,
+        "customer_email": email,
+        "customer_cpf": cpf_fmt,
+        "customer_cpf_digits": cpf_digits if len(cpf_digits) == 11 else "",
+        "customer_phone": phone,
+        "items": order_items,
+        "subtotal": round(subtotal, 2),
+        "shipping_cost": shipping_cost,
+        **shipping_meta,
+        "discount_amount": 0.0,
+        "coupon_code": None,
+        "voucher_used": 0.0,
+        "total": total,
+        "total_before_voucher": total,
+        "shipping_address": ship_addr,
+        "is_pickup": is_pickup,
+        "payment_method": method,
+        "payment_installments": installments,
+        "payment_notes": body.payment.notes or "",
+        "payment_status": "paid" if is_paid else "pending",
+        "order_status": "paid" if is_paid else "pending",
+        "paid_at": now if is_paid else None,
+        "sponsor_id": (order_user.get("sponsor_id") if order_user else None),
+        "tenant": tenant,
+        # PDV-specific flags
+        "source": "pdv",
+        "manual": True,
+        "created_by_admin": user.get("user_id"),
+        "created_by_admin_name": user.get("name"),
+        "admin_notes": body.order_notes or "",
+        "skip_maxx_sync": bool(body.skip_maxx_sync),
+        "skip_points": bool(body.skip_points),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.orders.insert_one(order)
+    for it in order_items:
+        await db.products.update_one({"product_id": it["product_id"]}, {"$inc": {"stock": -it["quantity"]}})
+
+    # 7) Hooks (se marcado como pago)
+    if is_paid:
+        await _create_commissions_for_paid_order(db, order["order_id"])
+        await register_points_from_order(db, order["order_id"])
+        try:
+            asyncio.create_task(_send_admin_invoice_if_configured(db, order, order_user))
+        except Exception:
+            pass
+
+    final = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
+    return final
+
+
 # ==================== ADMIN USERS ====================
 
 @app.get("/api/admin/users")
@@ -3689,9 +3954,14 @@ async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, s
 
 
 async def register_points_from_order(db, order_id: str):
-    """Registra logs de pontos para cada item com points_value > 0."""
+    """Registra logs de pontos para cada item com points_value > 0.
+    Iter 53: respeita flags `skip_points` (nao gera logs) e `skip_maxx_sync`
+    (gera logs mas nao dispara realtime para Maxx). Sao setadas no PDV admin
+    para permitir vendas de balcao/ajustes sem impactar rede/pontuacao."""
     o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not o:
+        return
+    if o.get("skip_points"):
         return
     # Idempotencia: se ja registrou, ignora
     existing = await db.points_log.find_one({"order_id": order_id})
@@ -3766,6 +4036,9 @@ async def register_points_from_order(db, order_id: str):
                     logs = logs + mirrored  # consolida para envio a Maxx
 
         # Realtime sync para Maxx (best-effort, nao bloqueia)
+        # Iter 53: respeita `skip_maxx_sync` no pedido (PDV admin).
+        if o.get("skip_maxx_sync"):
+            return
         try:
             await maxx_service.trigger_realtime(db, [l["log_id"] for l in logs])
         except Exception as e:

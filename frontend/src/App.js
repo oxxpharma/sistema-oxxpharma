@@ -58,6 +58,7 @@ import AdminShipping from './pages/backoffice/AdminShipping';
 import AdminMaxx from './pages/backoffice/AdminMaxx';
 import AdminMaxxPending from './pages/backoffice/AdminMaxxPending';
 import AdminIgvd from './pages/backoffice/AdminIgvd';
+import AdminPDV from './pages/backoffice/AdminPDV';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
@@ -129,6 +130,7 @@ function AppRoutes() {
         <Route path="produtos" element={<AdminProducts />} />
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
+        <Route path="pdv" element={<AdminPDV />} />
         <Route path="usuarios" element={<AdminUsers />} />
         <Route path="usuarios/duplicados" element={<AdminMergeUsers />} />
         <Route path="usuarios/:user_id" element={<AdminUserDetails />} />
