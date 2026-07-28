@@ -33,7 +33,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders', perm: 'editOrders' },
       { to: '/backoffice/pdv', icon: ShoppingCart, label: 'PDV (Balcão)', testId: 'nav-pdv', perm: 'editOrders' },
-      { to: '/backoffice/campanha', icon: Zap, label: 'Campanha Multi', testId: 'nav-campaign', perm: 'editSettings' },
+      { to: '/backoffice/campanha', icon: Zap, label: 'Campanha Multi', testId: 'nav-campaign', perm: 'integrations' },
       { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'editCoupons' },
       { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices', perm: 'financial' },
       { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments', perm: 'integrations' },
