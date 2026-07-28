@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge';
 import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilter';
 import {
   Network, Users, DollarSign, ShoppingBag, Loader2, Award, TrendingUp, Share2,
-  ChevronDown, ChevronRight, Wallet,
+  ChevronDown, ChevronRight, Wallet, Zap, Info, Target, X,
 } from 'lucide-react';
 
 const NETWORK_LABELS = {
@@ -20,6 +20,8 @@ const NETWORK_LABELS = {
 export default function MyNetwork() {
   const { user } = useAuth(); // eslint-disable-line no-unused-vars
   const [data, setData] = useState(null);
+  const [multiplier, setMultiplier] = useState(null); // Iter 54
+  const [showCampaignInfo, setShowCampaignInfo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
   const initial = getCurrentMonthRange();
@@ -32,8 +34,12 @@ export default function MyNetwork() {
       if (p?.start) q.set('start', p.start);
       if (p?.end) q.set('end', p.end);
       const url = q.toString() ? `/api/users/me/network?${q}` : '/api/users/me/network';
-      const d = await api.get(url);
+      const [d, m] = await Promise.all([
+        api.get(url),
+        api.get('/api/users/me/multiplier').catch(() => null),
+      ]);
       setData(d);
+      setMultiplier(m);
     } finally {
       setLoading(false);
     }
@@ -121,6 +127,15 @@ export default function MyNetwork() {
           </div>
         </div>
       </div>
+
+      {/* Iter 54: Multiplier campaign card */}
+      {multiplier && multiplier.campaign_enabled && (
+        <MultiplierCard m={multiplier} onInfo={() => setShowCampaignInfo(true)} />
+      )}
+
+      {showCampaignInfo && (
+        <CampaignInfoModal m={multiplier} onClose={() => setShowCampaignInfo(false)} />
+      )}
 
       {/* Totais */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
@@ -340,6 +355,145 @@ function SourceCard({ label, sub, data, color }) {
         </div>
       </div>
       <div className="text-[10px] opacity-60 mt-2">{data.count || 0} cashbacks</div>
+    </div>
+  );
+}
+
+
+// ==================== Iter 54: componentes da campanha multiplicador ====================
+
+function MultiplierCard({ m, onInfo }) {
+  const goal = Number(m.goal_current_month || 0);
+  const sales = Number(m.sales_gen1_current_month || 0);
+  const pct = Number(m.progress_pct || 0);
+  const remaining = Math.max(0, goal - sales);
+
+  if (m.active) {
+    return (
+      <div className="mb-4 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-400 via-orange-400 to-red-500 text-white p-5 shadow-lg overflow-hidden relative" data-testid="multiplier-active-card">
+        <div className="absolute -right-8 -top-8 opacity-20">
+          <Zap className="w-40 h-40" strokeWidth={1.5} />
+        </div>
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <Zap className="w-6 h-6 fill-white" />
+              <Badge variant="brand" className="bg-white text-amber-700 font-black">MULTIPLICADOR {m.multiplier_value}x ATIVO</Badge>
+              {m.streak_months > 0 && <span className="text-xs bg-white/20 rounded-full px-2 py-0.5 font-bold">{m.streak_months} {m.streak_months === 1 ? 'mês' : 'meses'} seguidos</span>}
+            </div>
+            <div className="text-xl md:text-2xl font-heading font-black leading-tight">
+              Suas gerações 3-6 estão pagando {m.multiplier_value}x mais este mês!
+            </div>
+            <div className="text-xs opacity-90 mt-1">
+              {m.hit_goal_last_month
+                ? `Você bateu a meta no mês passado (${formatCurrency(m.sales_gen1_last_month)} de ${formatCurrency(m.goal_last_month)}).`
+                : 'Bônus de boas-vindas — bata a meta este mês para continuar no próximo!'}
+            </div>
+          </div>
+          <button type="button" onClick={onInfo} className="shrink-0 rounded-full bg-white/20 hover:bg-white/30 p-2 transition" title="Como funciona a campanha" data-testid="multiplier-info-btn">
+            <Info className="w-4 h-4" />
+          </button>
+        </div>
+        {goal > 0 && <ProgressStrip pct={pct} sales={sales} goal={goal} remaining={remaining} tone="on-amber" />}
+      </div>
+    );
+  }
+  // Inactive card — informativo/motivacional
+  return (
+    <div className="mb-4 rounded-2xl border border-border bg-white p-5 shadow-sm" data-testid="multiplier-inactive-card">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <Target className="w-5 h-5 text-brand-main" />
+            <span className="font-heading font-bold">Campanha do multiplicador {m.multiplier_value}x</span>
+            {m.streak_months > 0 && <Badge variant="success">{m.streak_months} meses de sequência</Badge>}
+          </div>
+          <div className="text-sm text-txt-secondary">
+            {goal > 0
+              ? <>Bata a meta deste mês para ativar o multiplicador em {nextMonthLabel(m.month)}.</>
+              : <>A campanha está pausada para este mês (sem meta configurada).</>}
+          </div>
+        </div>
+        <button type="button" onClick={onInfo} className="shrink-0 text-txt-secondary hover:text-brand-main" title="Como funciona" data-testid="multiplier-info-btn">
+          <Info className="w-4 h-4" />
+        </button>
+      </div>
+      {goal > 0 && <ProgressStrip pct={pct} sales={sales} goal={goal} remaining={remaining} tone="neutral" />}
+    </div>
+  );
+}
+
+function ProgressStrip({ pct, sales, goal, remaining, tone }) {
+  const bar = tone === 'on-amber' ? 'bg-white' : 'bg-brand-main';
+  const track = tone === 'on-amber' ? 'bg-white/25' : 'bg-bg-secondary';
+  const text = tone === 'on-amber' ? 'text-white' : 'text-txt-primary';
+  return (
+    <div className={`mt-4 ${text}`}>
+      <div className="flex items-baseline justify-between text-xs mb-1">
+        <span className="font-bold">Vendas da 1ª geração no mês: {formatCurrency(sales)}</span>
+        <span className="font-bold">{pct.toFixed(1)}%</span>
+      </div>
+      <div className={`w-full h-2.5 rounded-full ${track} overflow-hidden`}>
+        <div className={`h-full ${bar} transition-all`} style={{ width: `${Math.min(100, pct)}%` }} data-testid="multiplier-progress" />
+      </div>
+      <div className="mt-1 text-[11px] opacity-90">
+        Meta: <b>{formatCurrency(goal)}</b>
+        {remaining > 0 ? <> · Faltam <b>{formatCurrency(remaining)}</b> para atingir</> : <> · <b>META ATINGIDA!</b> 🎯</>}
+      </div>
+    </div>
+  );
+}
+
+function nextMonthLabel(mk) {
+  if (!mk) return 'o próximo mês';
+  const [y, m] = mk.split('-').map(Number);
+  const d = new Date(y, m, 1);
+  return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+}
+
+function CampaignInfoModal({ m, onClose }) {
+  if (!m) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-auto shadow-2xl" onClick={(e) => e.stopPropagation()} data-testid="campaign-info-modal">
+        <div className="p-5 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Zap className="w-6 h-6 text-amber-500" />
+            <h2 className="font-heading font-black text-xl">Como funciona a campanha</h2>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 hover:bg-bg-secondary rounded-full" data-testid="campaign-info-close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <InfoBlock title={`Multiplicador ${m.multiplier_value}x`} icon={Zap}>
+            Quando ativado, sua cashback nas <b>gerações 3, 4, 5 e 6</b> é multiplicada por <b>{m.multiplier_value}</b>. As gerações 1 e 2 continuam com a porcentagem normal.
+          </InfoBlock>
+          <InfoBlock title="Como ativar" icon={Target}>
+            Bata a <b>meta de vendas da 1ª geração</b> no mês. A meta é a soma dos pedidos pagos dos seus indicados diretos. Se você atingir, o multiplicador acende <b>no mês seguinte</b>.
+          </InfoBlock>
+          <InfoBlock title="Bônus do 1º mês" icon={Award}>
+            No primeiro mês da campanha, <b>todo mundo</b> já entra com o multiplicador ativo — é o presente de boas-vindas. Só depois é que passa a depender da meta.
+          </InfoBlock>
+          <InfoBlock title="Quando desativa">
+            Se você <b>não bater a meta</b> em um mês, o multiplicador cai no mês seguinte. Pode reativar quando bater a meta de novo — sem penalidade.
+          </InfoBlock>
+          <div className="p-3 bg-bg-secondary rounded-lg text-xs text-txt-secondary">
+            <b>Aplicabilidade:</b> apenas comissões criadas <i>enquanto o multiplicador está ativo</i>. Não recalcula histórico.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoBlock({ title, icon: Icon, children }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1 font-bold text-txt-primary">
+        {Icon && <Icon className="w-4 h-4 text-brand-main" />} {title}
+      </div>
+      <div className="text-txt-secondary text-sm leading-relaxed pl-6">{children}</div>
     </div>
   );
 }

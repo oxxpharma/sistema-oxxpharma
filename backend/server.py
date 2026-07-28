@@ -31,6 +31,7 @@ import correios_service
 import maxx_service
 import tenant_service
 import igvd_service
+import multiplier_campaign
 import melhorenvio_service
 import store_extras
 
@@ -488,6 +489,29 @@ async def lifespan(app: FastAPI):
         logger.info("Migracao reset_referrals_for_card_program aplicada")
     # Inicia scheduler do cartao
     card_service.start_scheduler(lambda: app.db)
+    # Iter 54: adiciona cron da campanha do multiplicador (dia 1 as 00:05 BR)
+    try:
+        from apscheduler.triggers.cron import CronTrigger as _CT
+        _sch = card_service._scheduler
+        if _sch:
+            async def _multiplier_cron():
+                try:
+                    mk = multiplier_campaign.month_key()
+                    res = await multiplier_campaign.evaluate_month(app.db, mk)
+                    logger.info(f"[multiplier-cron] mes {mk}: {res}")
+                except Exception as e:
+                    logger.exception(f"[multiplier-cron] falhou: {e}")
+            _sch.add_job(_multiplier_cron, _CT(day=1, hour=0, minute=5, timezone=multiplier_campaign.TZ_BR), id="multiplier_monthly_eval", replace_existing=True)
+            logger.info("Scheduler campanha do multiplicador registrado (dia 1 00:05 BR)")
+    except Exception as e:
+        logger.warning(f"Falha ao registrar cron da campanha do multiplicador: {e}")
+    # indice unico para multiplier_status
+    try:
+        await app.db.multiplier_status.create_index([("user_id", 1), ("month", 1)], unique=True)
+        await app.db.multiplier_status.create_index("month")
+        await app.db.multiplier_status.create_index([("month", 1), ("active", 1)])
+    except Exception as _e:
+        logger.warning(f"multiplier_status index: {_e}")
     # Garantir token de webhook
     settings_doc = await app.db.settings.find_one({"_id": "global"}) or {}
     if not settings_doc.get("external_webhook_token"):
@@ -2786,6 +2810,19 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
         if a_net in (NETWORK_1, NETWORK_2):
             pcts = network1_pcts if a_net == NETWORK_1 else network2_pcts
             pct = pcts[generation - 1] if generation - 1 < len(pcts) else 0
+            # Iter 54: campanha do multiplicador — aplica sobre gen 3-6 do beneficiario
+            # SE ele estava com o multiplicador ativo no mes da criacao da comissao.
+            mult_val = 1.0
+            mult_applied = False
+            if generation >= 3 and pct > 0:
+                try:
+                    active, val = await multiplier_campaign.is_active_for(db, ancestor["user_id"])
+                    if active and val > 1.0:
+                        mult_val = float(val)
+                        mult_applied = True
+                        pct = round(pct * mult_val, 6)
+                except Exception as _e:
+                    logger.warning(f"multiplier check failed for {ancestor['user_id']}: {_e}")
             if pct > 0:
                 amt = round(subtotal * pct / 100, 2)
                 if amt > 0:
@@ -2807,6 +2844,9 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                         "tenant": order_tenant,
                         "created_at": now_iso(),
                     }
+                    if mult_applied:
+                        doc["multiplier_applied"] = mult_val
+                        doc["multiplier_month"] = multiplier_campaign.month_key()
                     if mark_retroactive:
                         doc["retroactive"] = True
                         doc["recalc_batch_id"] = batch_id
@@ -4231,6 +4271,90 @@ async def admin_igvd_reprocess_order(request: Request, body: IgvdReprocessOrderB
         "points_total": points_after,
         "voucher_code": order.get("igvd_voucher_code"),
     }
+
+
+# ==================== ADMIN MULTIPLIER CAMPAIGN (Iter 54) ====================
+
+class MultiplierCampaignCfg(BaseModel):
+    enabled: Optional[bool] = None
+    value: Optional[float] = None
+    started_at: Optional[str] = None  # ISO YYYY-MM-DD (marca o mes de arranque)
+    goals: Optional[Dict[str, float]] = None  # {"YYYY-MM": R$}
+
+
+@app.get("/api/admin/multiplier-campaign")
+async def admin_multiplier_cfg(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    cfg = await multiplier_campaign._load_campaign_cfg(db)
+    return cfg
+
+
+@app.put("/api/admin/multiplier-campaign")
+async def admin_update_multiplier_cfg(request: Request, body: MultiplierCampaignCfg, user: dict = Depends(require_admin())):
+    db = request.app.db
+    update: Dict = {}
+    if body.enabled is not None:
+        update["multiplier_campaign_enabled"] = bool(body.enabled)
+    if body.value is not None:
+        v = float(body.value)
+        if v < 1.0 or v > 20.0:
+            raise HTTPException(status_code=400, detail="Multiplicador deve estar entre 1.0 e 20.0")
+        update["multiplier_campaign_value"] = round(v, 3)
+    if body.started_at is not None:
+        # aceita YYYY-MM-DD; se veio vazio, limpa
+        s = (body.started_at or "").strip()
+        if s and not re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+            raise HTTPException(status_code=400, detail="started_at deve estar em formato YYYY-MM-DD")
+        update["multiplier_campaign_started_at"] = s or None
+    if body.goals is not None:
+        clean: Dict[str, float] = {}
+        for k, v in body.goals.items():
+            if re.match(r"^\d{4}-\d{2}$", str(k)):
+                try:
+                    fv = float(v)
+                    if fv > 0:
+                        clean[k] = round(fv, 2)
+                except (TypeError, ValueError):
+                    pass
+        update["multiplier_campaign_goals"] = clean
+    if not update:
+        raise HTTPException(status_code=400, detail="Nenhum campo enviado")
+    await db.settings.update_one({"_id": "global"}, {"$set": update}, upsert=True)
+    logger.info(f"Admin {user['user_id']} atualizou campanha multiplicador: {list(update.keys())}")
+    return await multiplier_campaign._load_campaign_cfg(db)
+
+
+@app.post("/api/admin/multiplier-campaign/reprocess")
+async def admin_multiplier_reprocess(request: Request, month: Optional[str] = None, user: dict = Depends(require_admin())):
+    db = request.app.db
+    mk = month or multiplier_campaign.month_key()
+    if not re.match(r"^\d{4}-\d{2}$", mk):
+        raise HTTPException(status_code=400, detail="month deve ser YYYY-MM")
+    res = await multiplier_campaign.evaluate_month(db, mk)
+    logger.info(f"Admin {user['user_id']} reprocessou multiplicador mes {mk}: {res}")
+    return res
+
+
+@app.get("/api/admin/multiplier-campaign/stats")
+async def admin_multiplier_stats(request: Request, month: Optional[str] = None, user: dict = Depends(require_admin())):
+    db = request.app.db
+    mk = month or multiplier_campaign.month_key()
+    return await multiplier_campaign.admin_stats(db, mk)
+
+
+@app.get("/api/admin/multiplier-campaign/users")
+async def admin_multiplier_users(request: Request, month: Optional[str] = None, filter: str = "all", search: Optional[str] = None, limit: int = 200, user: dict = Depends(require_admin())):
+    db = request.app.db
+    mk = month or multiplier_campaign.month_key()
+    rows = await multiplier_campaign.admin_list_users(db, mk, filter, search, limit)
+    return {"month": mk, "filter": filter, "users": rows}
+
+
+@app.get("/api/users/me/multiplier")
+async def my_multiplier(request: Request, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    return await multiplier_campaign.user_snapshot(db, user["user_id"])
+
 
 
 @app.post("/api/payments/webhook/mercadopago")
