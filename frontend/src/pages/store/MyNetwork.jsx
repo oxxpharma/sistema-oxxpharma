@@ -370,31 +370,49 @@ function MultiplierCard({ m, onInfo }) {
 
   if (m.active) {
     return (
-      <div className="mb-4 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-400 via-orange-400 to-red-500 text-white p-5 shadow-lg overflow-hidden relative" data-testid="multiplier-active-card">
-        <div className="absolute -right-8 -top-8 opacity-20">
-          <Zap className="w-40 h-40" strokeWidth={1.5} />
+      <div
+        className="mb-4 rounded-2xl border-2 border-amber-500/60 bg-slate-900 text-white p-5 shadow-xl overflow-hidden relative"
+        data-testid="multiplier-active-card"
+      >
+        {/* glow decorativo */}
+        <div className="absolute -right-10 -top-10 w-56 h-56 bg-amber-500/25 blur-3xl rounded-full pointer-events-none" />
+        <div className="absolute -left-16 bottom-0 w-40 h-40 bg-orange-500/15 blur-3xl rounded-full pointer-events-none" />
+        <div className="absolute right-4 top-4 opacity-10">
+          <Zap className="w-32 h-32 text-amber-400" strokeWidth={1.5} />
         </div>
+
         <div className="relative flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <Zap className="w-6 h-6 fill-white" />
-              <Badge variant="brand" className="bg-white text-amber-700 font-black">MULTIPLICADOR {m.multiplier_value}x ATIVO</Badge>
-              {m.streak_months > 0 && <span className="text-xs bg-white/20 rounded-full px-2 py-0.5 font-bold">{m.streak_months} {m.streak_months === 1 ? 'mês' : 'meses'} seguidos</span>}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-900 font-black text-[11px] uppercase tracking-wider px-3 py-1 rounded-full shadow-sm">
+                <Zap className="w-3.5 h-3.5 fill-slate-900" /> MULTIPLICADOR {m.multiplier_value}x ATIVO
+              </span>
+              {m.streak_months > 0 && (
+                <span className="text-[11px] bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 rounded-full px-2.5 py-0.5 font-bold">
+                  {m.streak_months} {m.streak_months === 1 ? 'mês seguido' : 'meses seguidos'}
+                </span>
+              )}
             </div>
-            <div className="text-xl md:text-2xl font-heading font-black leading-tight">
-              Suas gerações 3-6 estão pagando {m.multiplier_value}x mais este mês!
+            <div className="text-xl md:text-2xl font-heading font-black leading-tight text-white">
+              Suas gerações 3-6 estão pagando <span className="text-amber-400">{m.multiplier_value}x mais</span> este mês!
             </div>
-            <div className="text-xs opacity-90 mt-1">
+            <div className="text-sm text-slate-300 mt-1.5">
               {m.hit_goal_last_month
-                ? `Você bateu a meta no mês passado (${formatCurrency(m.sales_gen1_last_month)} de ${formatCurrency(m.goal_last_month)}).`
+                ? <>Você bateu a meta no mês passado (<b className="text-white">{formatCurrency(m.sales_gen1_last_month)}</b> de {formatCurrency(m.goal_last_month)}).</>
                 : 'Bônus de boas-vindas — bata a meta este mês para continuar no próximo!'}
             </div>
           </div>
-          <button type="button" onClick={onInfo} className="shrink-0 rounded-full bg-white/20 hover:bg-white/30 p-2 transition" title="Como funciona a campanha" data-testid="multiplier-info-btn">
-            <Info className="w-4 h-4" />
+          <button
+            type="button"
+            onClick={onInfo}
+            className="shrink-0 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 p-2 transition"
+            title="Como funciona a campanha"
+            data-testid="multiplier-info-btn"
+          >
+            <Info className="w-4 h-4 text-white" />
           </button>
         </div>
-        {goal > 0 && <ProgressStrip pct={pct} sales={sales} goal={goal} remaining={remaining} tone="on-amber" />}
+        {goal > 0 && <ProgressStrip pct={pct} sales={sales} goal={goal} remaining={remaining} tone="on-dark" />}
       </div>
     );
   }
@@ -424,21 +442,31 @@ function MultiplierCard({ m, onInfo }) {
 }
 
 function ProgressStrip({ pct, sales, goal, remaining, tone }) {
-  const bar = tone === 'on-amber' ? 'bg-white' : 'bg-brand-main';
-  const track = tone === 'on-amber' ? 'bg-white/25' : 'bg-bg-secondary';
-  const text = tone === 'on-amber' ? 'text-white' : 'text-txt-primary';
+  const isDark = tone === 'on-dark';
+  const isAmber = tone === 'on-amber';
+  const bar = isDark ? 'bg-gradient-to-r from-amber-400 to-orange-500' : isAmber ? 'bg-white' : 'bg-brand-main';
+  const track = isDark ? 'bg-white/10 border border-white/10' : isAmber ? 'bg-white/25' : 'bg-bg-secondary';
+  const text = isDark || isAmber ? 'text-white' : 'text-txt-primary';
+  const subtle = isDark ? 'text-slate-300' : isAmber ? 'text-white/90' : 'text-txt-secondary';
+  const strong = isDark ? 'text-amber-300' : 'text-white';
   return (
     <div className={`mt-4 ${text}`}>
-      <div className="flex items-baseline justify-between text-xs mb-1">
-        <span className="font-bold">Vendas da 1ª geração no mês: {formatCurrency(sales)}</span>
-        <span className="font-bold">{pct.toFixed(1)}%</span>
+      <div className="flex items-baseline justify-between text-xs mb-1.5">
+        <span className={`font-bold ${subtle}`}>Vendas da 1ª geração no mês: <b className="text-white">{formatCurrency(sales)}</b></span>
+        <span className={`font-black ${strong} text-sm`}>{pct.toFixed(1)}%</span>
       </div>
-      <div className={`w-full h-2.5 rounded-full ${track} overflow-hidden`}>
-        <div className={`h-full ${bar} transition-all`} style={{ width: `${Math.min(100, pct)}%` }} data-testid="multiplier-progress" />
+      <div className={`w-full h-3 rounded-full ${track} overflow-hidden`}>
+        <div
+          className={`h-full ${bar} transition-all shadow-[0_0_10px_rgba(251,191,36,0.4)]`}
+          style={{ width: `${Math.min(100, pct)}%` }}
+          data-testid="multiplier-progress"
+        />
       </div>
-      <div className="mt-1 text-[11px] opacity-90">
-        Meta: <b>{formatCurrency(goal)}</b>
-        {remaining > 0 ? <> · Faltam <b>{formatCurrency(remaining)}</b> para atingir</> : <> · <b>META ATINGIDA!</b> 🎯</>}
+      <div className={`mt-1.5 text-[11px] ${subtle}`}>
+        Meta: <b className="text-white">{formatCurrency(goal)}</b>
+        {remaining > 0
+          ? <> · Faltam <b className={strong}>{formatCurrency(remaining)}</b> para atingir</>
+          : <> · <b className={strong}>META ATINGIDA!</b> 🎯</>}
       </div>
     </div>
   );
