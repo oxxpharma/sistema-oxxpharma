@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
@@ -57,6 +57,7 @@ export default function AdminOrders() {
   const [backfillResult, setBackfillResult] = useState(null);
   const [trackingModal, setTrackingModal] = useState(null);
   const [trackingCode, setTrackingCode] = useState('');
+  const [nfOrder, setNfOrder] = useState(null); // Iter 55 — modal de upload de NF
 
   const runBackfill = async () => {
     if (!window.confirm('Tentar preencher CPF e CEP de TODOS os pedidos com dados faltantes a partir do cadastro do cliente, endereços salvos e pedidos anteriores?\n\nIsso pode levar alguns segundos.')) return;
@@ -135,6 +136,19 @@ export default function AdminOrders() {
       const r = await api.post(`/api/admin/orders/${o.order_id}/resend-invoice`, to.trim() ? { to: to.trim() } : {});
       toast.success(`Fatura reenviada para ${r.sent_to}`);
     } catch (err) { toast.error(err.message || 'Falha ao reenviar e-mail'); }
+  };
+
+  // Iter 55: download da NF anexada
+  const downloadNf = async (o) => {
+    try {
+      const nf = await api.get(`/api/admin/orders/${o.order_id}/nf`);
+      const a = document.createElement('a');
+      a.href = nf.data_url;
+      a.download = nf.name || `nf_${o.order_id.slice(-8).toUpperCase()}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) { toast.error(err.message || 'Falha ao baixar NF'); }
   };
 
   const deleteOrder = async (o) => {
@@ -270,6 +284,36 @@ export default function AdminOrders() {
                         )}
                         <button onClick={() => setSelected(o)} className="p-2 hover:bg-bg-secondary rounded" data-testid={`view-order-${o.order_id}`}><Eye className="w-4 h-4" /></button>
                         <button onClick={() => resendInvoice(o, false)} className="p-2 hover:bg-emerald-50 rounded ml-1" data-testid={`resend-invoice-${o.order_id}`} title="Reenviar fatura detalhada por e-mail"><Mail className="w-4 h-4 text-emerald-600" /></button>
+                        {/* Iter 55: Nota Fiscal */}
+                        {o.nf_meta ? (
+                          <>
+                            <button
+                              onClick={() => downloadNf(o)}
+                              className="p-2 hover:bg-sky-50 rounded ml-1"
+                              data-testid={`nf-download-${o.order_id}`}
+                              title={`Baixar NF: ${o.nf_meta.name} · ${new Date(o.nf_meta.uploaded_at).toLocaleString('pt-BR')} por ${o.nf_meta.uploaded_by_name || '—'}`}
+                            >
+                              <Download className="w-4 h-4 text-sky-600" />
+                            </button>
+                            <button
+                              onClick={() => setNfOrder(o)}
+                              className="p-2 hover:bg-amber-50 rounded ml-1"
+                              data-testid={`nf-replace-${o.order_id}`}
+                              title="Alterar NF anexada"
+                            >
+                              <FileEdit className="w-4 h-4 text-amber-600" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setNfOrder(o)}
+                            className="p-2 hover:bg-indigo-50 rounded ml-1"
+                            data-testid={`nf-attach-${o.order_id}`}
+                            title="Anexar Nota Fiscal"
+                          >
+                            <Paperclip className="w-4 h-4 text-indigo-600" />
+                          </button>
+                        )}
                         <button onClick={() => deleteOrder(o)} className="p-2 hover:bg-red-50 rounded ml-1" data-testid={`delete-order-${o.order_id}`} title="Deletar pedido"><Trash2 className="w-4 h-4 text-red-500" /></button>
                       </td>
                     </tr>
@@ -441,6 +485,132 @@ export default function AdminOrders() {
           </div>
         </div>
       )}
+
+      {/* Iter 55: NF upload modal */}
+      {nfOrder && (
+        <NfUploadModal
+          order={nfOrder}
+          onClose={() => setNfOrder(null)}
+          onSaved={async () => { setNfOrder(null); await load(page); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function NfUploadModal({ order, onClose, onSaved }) {
+  const [file, setFile] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const existing = order.nf_meta;
+  const isReplace = !!existing;
+
+  const handleFile = (f) => {
+    if (!f) return;
+    const maxBytes = 8 * 1024 * 1024;
+    if (f.size > maxBytes) {
+      toast.error(`Arquivo muito grande (${(f.size / 1024 / 1024).toFixed(1)} MB). Limite: 8 MB.`);
+      return;
+    }
+    const okTypes = ['application/pdf', 'application/xml', 'text/xml', 'image/jpeg', 'image/png', 'image/webp'];
+    const okExt = /\.(pdf|xml|jpg|jpeg|png|webp)$/i;
+    if (!okTypes.includes(f.type) && !okExt.test(f.name)) {
+      toast.error('Formato não suportado. Use PDF, XML, JPG, PNG ou WEBP.');
+      return;
+    }
+    setFile(f);
+  };
+
+  const submit = async () => {
+    if (!file) return;
+    setSaving(true);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      await api.post(`/api/admin/orders/${order.order_id}/nf`, { data: dataUrl, name: file.name });
+      toast.success(isReplace ? 'NF atualizada' : 'NF anexada');
+      onSaved?.();
+    } catch (err) { toast.error(err.message || 'Falha ao anexar NF'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} data-testid="nf-modal">
+        <div className="p-5 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText className="w-5 h-5 text-indigo-600" />
+            <h2 className="font-heading font-black text-lg">
+              {isReplace ? 'Alterar Nota Fiscal' : 'Anexar Nota Fiscal'}
+            </h2>
+          </div>
+          <button onClick={onClose} data-testid="nf-modal-close"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="text-xs text-txt-secondary">
+            Pedido <b>#{order.order_id.slice(-8).toUpperCase()}</b> · {order.customer_name}
+          </div>
+
+          {isReplace && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
+              <div className="font-bold text-amber-900 mb-1">NF atual anexada</div>
+              <div className="text-amber-800"><b>Arquivo:</b> {existing.name}</div>
+              <div className="text-amber-800"><b>Enviada em:</b> {new Date(existing.uploaded_at).toLocaleString('pt-BR')}</div>
+              <div className="text-amber-800"><b>Por:</b> {existing.uploaded_by_name || '—'}</div>
+              <div className="text-[11px] text-amber-700 mt-1">Ao salvar, o novo arquivo substitui o atual (o histórico fica registrado).</div>
+            </div>
+          )}
+
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files?.[0]); }}
+            className={`border-2 border-dashed rounded-xl p-6 text-center transition ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-border bg-bg-secondary/40'}`}
+            data-testid="nf-dropzone"
+          >
+            <Upload className="w-8 h-8 mx-auto text-indigo-500 mb-2" />
+            {file ? (
+              <div>
+                <div className="font-bold text-sm">{file.name}</div>
+                <div className="text-xs text-txt-secondary">{(file.size / 1024).toFixed(1)} KB · {file.type || 'tipo desconhecido'}</div>
+                <button
+                  type="button"
+                  onClick={() => setFile(null)}
+                  className="mt-2 text-xs text-rose-600 hover:underline"
+                  data-testid="nf-remove-selected"
+                >Remover</button>
+              </div>
+            ) : (
+              <>
+                <div className="text-sm text-txt-secondary">Arraste o arquivo aqui ou</div>
+                <label className="inline-block mt-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold cursor-pointer hover:bg-indigo-700">
+                  Selecionar arquivo
+                  <input
+                    type="file"
+                    accept="application/pdf,application/xml,text/xml,image/*,.pdf,.xml,.jpg,.jpeg,.png,.webp"
+                    className="hidden"
+                    onChange={(e) => handleFile(e.target.files?.[0])}
+                    data-testid="nf-file-input"
+                  />
+                </label>
+                <div className="text-[11px] text-txt-secondary mt-2">PDF, XML, JPG, PNG ou WEBP (até 8 MB)</div>
+              </>
+            )}
+          </div>
+
+          <div className="flex gap-2 justify-end pt-2 border-t border-border">
+            <Button variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button onClick={submit} loading={saving} disabled={!file} data-testid="nf-submit-btn">
+              <Save className="w-4 h-4" /> {isReplace ? 'Substituir NF' : 'Anexar NF'}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

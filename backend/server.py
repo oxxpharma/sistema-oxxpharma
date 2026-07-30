@@ -1909,6 +1909,101 @@ async def admin_delete_order(
     return {"ok": True, "summary": summary}
 
 
+# ==================== ADMIN ORDER NF (Nota Fiscal) — Iter 55 ====================
+
+class OrderNfIn(BaseModel):
+    data: str  # data URL: "data:application/pdf;base64,..." ou XML/imagem
+    name: Optional[str] = None
+
+
+def _parse_data_url(data_url: str) -> Dict:
+    """Extrai mime, tamanho e base64 do data URL. Levanta HTTPException se invalido."""
+    if not data_url or not data_url.startswith("data:"):
+        raise HTTPException(status_code=400, detail="Formato invalido (envie data URL: data:<mime>;base64,<payload>)")
+    try:
+        header, payload = data_url.split(",", 1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data URL malformado")
+    mime = "application/octet-stream"
+    if ";" in header:
+        mime = header[5:].split(";")[0] or mime
+    # Estima tamanho em bytes (base64 -> ~3/4)
+    est_bytes = int(len(payload) * 3 / 4)
+    max_size = 8 * 1024 * 1024  # 8 MB
+    if est_bytes > max_size:
+        raise HTTPException(status_code=400, detail=f"Arquivo muito grande ({round(est_bytes/1024/1024, 1)} MB). Limite: 8 MB")
+    return {"mime": mime, "size": est_bytes}
+
+
+@app.post("/api/admin/orders/{order_id}/nf")
+async def admin_upload_order_nf(request: Request, order_id: str, body: OrderNfIn, user: dict = Depends(require_admin())):
+    """Anexa (ou substitui) a Nota Fiscal de um pedido. Aceita PDF, XML, JPG, PNG.
+    Guarda historico de substituicoes (audit trail: quem/quando)."""
+    db = request.app.db
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0, "order_id": 1, "nf_meta": 1})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    info = _parse_data_url(body.data)
+    now = now_iso()
+    name = (body.name or "").strip() or f"nf_{order_id[-8:].upper()}"
+    meta = {
+        "name": name,
+        "mime": info["mime"],
+        "size": info["size"],
+        "uploaded_by": user["user_id"],
+        "uploaded_by_name": user.get("name") or user.get("email"),
+        "uploaded_at": now,
+    }
+    # Historico: preserva metadata da anterior no `nf_history` do pedido
+    prev = order.get("nf_meta")
+    history_entry = None
+    if prev:
+        history_entry = {**prev, "replaced_at": now, "replaced_by": user["user_id"], "replaced_by_name": user.get("name") or user.get("email")}
+    # Persiste arquivo em coleccao separada (mantem o doc do pedido leve)
+    await db.orders_nf.update_one(
+        {"order_id": order_id},
+        {"$set": {"order_id": order_id, "data_url": body.data, **meta}},
+        upsert=True,
+    )
+    upd: Dict = {"nf_meta": meta}
+    order_update = {"$set": upd}
+    if history_entry:
+        order_update["$push"] = {"nf_history": history_entry}
+    await db.orders.update_one({"order_id": order_id}, order_update)
+    logger.info(f"Admin {user['user_id']} anexou NF em {order_id} ({name}, {info['mime']}, {info['size']}b)")
+    return {"success": True, "order_id": order_id, "nf_meta": meta}
+
+
+@app.get("/api/admin/orders/{order_id}/nf")
+async def admin_get_order_nf(request: Request, order_id: str, user: dict = Depends(require_admin())):
+    """Retorna o data URL da NF + metadata (para download no browser)."""
+    db = request.app.db
+    doc = await db.orders_nf.find_one({"order_id": order_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="NF nao encontrada")
+    return doc
+
+
+@app.delete("/api/admin/orders/{order_id}/nf")
+async def admin_delete_order_nf(request: Request, order_id: str, user: dict = Depends(require_admin())):
+    """Remove a NF anexada de um pedido (mantem metadata no historico)."""
+    db = request.app.db
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0, "nf_meta": 1})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    prev = order.get("nf_meta")
+    if not prev:
+        raise HTTPException(status_code=404, detail="Pedido nao tem NF anexada")
+    now = now_iso()
+    await db.orders_nf.delete_one({"order_id": order_id})
+    await db.orders.update_one(
+        {"order_id": order_id},
+        {"$unset": {"nf_meta": ""}, "$push": {"nf_history": {**prev, "deleted_at": now, "deleted_by": user["user_id"], "deleted_by_name": user.get("name") or user.get("email")}}},
+    )
+    logger.info(f"Admin {user['user_id']} removeu NF de {order_id}")
+    return {"success": True, "order_id": order_id}
+
+
 # ==================== ADMIN PDV / MANUAL ORDER (Iter 53) ====================
 
 class PDVAddressIn(BaseModel):
