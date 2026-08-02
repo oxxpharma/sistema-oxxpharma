@@ -416,23 +416,32 @@ function MultiplierCard({ m, onInfo }) {
       </div>
     );
   }
-  // Inactive card — informativo/motivacional
+  // Inactive card — mantém identidade da campanha (leve gradient âmbar) mas em tom "aguardando"
   return (
-    <div className="mb-4 rounded-2xl border border-border bg-white p-5 shadow-sm" data-testid="multiplier-inactive-card">
+    <div
+      className="mb-4 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50 to-white p-5 shadow-sm"
+      data-testid="multiplier-inactive-card"
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <Target className="w-5 h-5 text-brand-main" />
-            <span className="font-heading font-bold">Campanha do multiplicador {m.multiplier_value}x</span>
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <Target className="w-5 h-5 text-amber-600" />
+            <span className="font-heading font-bold text-slate-800">Campanha do multiplicador {m.multiplier_value}x</span>
             {m.streak_months > 0 && <Badge variant="success">{m.streak_months} meses de sequência</Badge>}
           </div>
-          <div className="text-sm text-txt-secondary">
+          <div className="text-sm text-slate-600">
             {goal > 0
-              ? <>Bata a meta deste mês para ativar o multiplicador em {nextMonthLabel(m.month)}.</>
+              ? <>Bata a meta deste mês para ativar o multiplicador em <b className="text-amber-700">{nextMonthLabel(m.month)}</b>.</>
               : <>A campanha está pausada para este mês (sem meta configurada).</>}
           </div>
         </div>
-        <button type="button" onClick={onInfo} className="shrink-0 text-txt-secondary hover:text-brand-main" title="Como funciona" data-testid="multiplier-info-btn">
+        <button
+          type="button"
+          onClick={onInfo}
+          className="shrink-0 rounded-full bg-white border border-amber-200 hover:bg-amber-100 text-amber-700 p-2 transition"
+          title="Como funciona"
+          data-testid="multiplier-info-btn"
+        >
           <Info className="w-4 h-4" />
         </button>
       </div>
@@ -444,29 +453,31 @@ function MultiplierCard({ m, onInfo }) {
 function ProgressStrip({ pct, sales, goal, remaining, tone }) {
   const isDark = tone === 'on-dark';
   const isAmber = tone === 'on-amber';
-  const bar = isDark ? 'bg-gradient-to-r from-amber-400 to-orange-500' : isAmber ? 'bg-white' : 'bg-brand-main';
-  const track = isDark ? 'bg-white/10 border border-white/10' : isAmber ? 'bg-white/25' : 'bg-bg-secondary';
-  const text = isDark || isAmber ? 'text-white' : 'text-txt-primary';
-  const subtle = isDark ? 'text-slate-300' : isAmber ? 'text-white/90' : 'text-txt-secondary';
-  const strong = isDark ? 'text-amber-300' : 'text-white';
+  // Neutro (card inativo, fundo claro): usa cor de marca em vez de branco (invisivel).
+  const bar = isDark ? 'bg-gradient-to-r from-amber-400 to-orange-500' : isAmber ? 'bg-white' : 'bg-gradient-to-r from-amber-400 to-orange-500';
+  const track = isDark ? 'bg-white/10 border border-white/10' : isAmber ? 'bg-white/25' : 'bg-amber-100';
+  const text = isDark || isAmber ? 'text-white' : 'text-slate-800';
+  const subtle = isDark ? 'text-slate-300' : isAmber ? 'text-white/90' : 'text-slate-600';
+  const strongClass = isDark ? 'text-amber-300' : isAmber ? 'text-white' : 'text-amber-700';
+  const bold = isDark || isAmber ? 'text-white' : 'text-slate-900';
   return (
     <div className={`mt-4 ${text}`}>
       <div className="flex items-baseline justify-between text-xs mb-1.5">
-        <span className={`font-bold ${subtle}`}>Vendas da 1ª geração no mês: <b className="text-white">{formatCurrency(sales)}</b></span>
-        <span className={`font-black ${strong} text-sm`}>{pct.toFixed(1)}%</span>
+        <span className={`font-bold ${subtle}`}>Vendas da 1ª geração no mês: <b className={bold}>{formatCurrency(sales)}</b></span>
+        <span className={`font-black ${strongClass} text-sm`}>{pct.toFixed(1)}%</span>
       </div>
       <div className={`w-full h-3 rounded-full ${track} overflow-hidden`}>
         <div
-          className={`h-full ${bar} transition-all shadow-[0_0_10px_rgba(251,191,36,0.4)]`}
+          className={`h-full ${bar} transition-all ${isDark ? 'shadow-[0_0_10px_rgba(251,191,36,0.4)]' : ''}`}
           style={{ width: `${Math.min(100, pct)}%` }}
           data-testid="multiplier-progress"
         />
       </div>
       <div className={`mt-1.5 text-[11px] ${subtle}`}>
-        Meta: <b className="text-white">{formatCurrency(goal)}</b>
+        Meta: <b className={bold}>{formatCurrency(goal)}</b>
         {remaining > 0
-          ? <> · Faltam <b className={strong}>{formatCurrency(remaining)}</b> para atingir</>
-          : <> · <b className={strong}>META ATINGIDA!</b> 🎯</>}
+          ? <> · Faltam <b className={strongClass}>{formatCurrency(remaining)}</b> para atingir</>
+          : <> · <b className={strongClass}>META ATINGIDA!</b> 🎯</>}
       </div>
     </div>
   );
