@@ -256,8 +256,24 @@ export default function MyNetwork() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-sm">{g.generation}ª geração</div>
-                    <div className="text-xs text-txt-secondary">
-                      {g.members_count} {g.members_count === 1 ? 'membro' : 'membros'} · taxa <span className="font-semibold">{g.rate_pct}%</span>
+                    <div className="text-xs text-txt-secondary flex items-center gap-1.5 flex-wrap">
+                      {g.members_count} {g.members_count === 1 ? 'membro' : 'membros'} · taxa {(() => {
+                        // Iter 54: se multiplicador ativo e' gen >=3, exibe taxa multiplicada em destaque
+                        const multActive = multiplier?.campaign_enabled && multiplier?.active && (multiplier?.multiplier_value || 1) > 1;
+                        const applies = multActive && g.generation >= 3 && g.rate_pct > 0;
+                        if (!applies) {
+                          return <span className="font-semibold">{g.rate_pct}%</span>;
+                        }
+                        const boosted = +(g.rate_pct * multiplier.multiplier_value).toFixed(2);
+                        return (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="line-through text-txt-secondary/60">{g.rate_pct}%</span>
+                            <span className="inline-flex items-center gap-1 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-900 font-black px-1.5 py-0.5 rounded-md text-[11px] shadow-sm" title={`Multiplicador ${multiplier.multiplier_value}x aplicado`}>
+                              <Zap className="w-3 h-3 fill-slate-900" /> {boosted}%
+                            </span>
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="hidden sm:block text-right text-xs">
