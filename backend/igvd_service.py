@@ -93,6 +93,45 @@ async def get_config(db) -> Dict:
     }
 
 
+async def lookup_user_by_email(db, email: str) -> Dict:
+    """Iter 56: retorna user_id + lider (sponsor) do usuario pelo e-mail.
+    Nao expoe dados sensiveis (senha, endereco, CPF). O `leader` privilegia
+    `network_sponsor_id` (patrocinador MMN); cai para `sponsor_id` se ausente.
+    """
+    if not email:
+        return {"found": False, "user": None, "leader": None, "sponsor_source": None}
+    q = (email or "").strip().lower()
+    user = await db.users.find_one(
+        {"email": {"$regex": f"^{re.escape(q)}$", "$options": "i"}},
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1, "sponsor_id": 1, "network_sponsor_id": 1},
+    )
+    if not user:
+        return {"found": False, "user": None, "leader": None, "sponsor_source": None}
+    leader = None
+    src = None
+    net_sp = user.get("network_sponsor_id")
+    sp = user.get("sponsor_id")
+    if net_sp:
+        leader = await db.users.find_one({"user_id": net_sp}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1})
+        if leader:
+            src = "network_sponsor_id"
+    if not leader and sp:
+        leader = await db.users.find_one({"user_id": sp}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1})
+        if leader:
+            src = "sponsor_id"
+    return {
+        "found": True,
+        "user": {
+            "user_id": user.get("user_id"),
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "network_type": user.get("network_type"),
+        },
+        "leader": leader,
+        "sponsor_source": src,
+    }
+
+
 async def _find_user(db, email: str, cpf_digits: str) -> Optional[Dict]:
     """Busca user por CPF (varios formatos) e por e-mail (case-insensitive).
     Iter 48d: pega users antigos que so tem `cpf` formatado (sem `cpf_digits`)

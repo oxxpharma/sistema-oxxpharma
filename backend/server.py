@@ -4277,6 +4277,94 @@ async def igvd_voucher_webhook(request: Request):
     return out
 
 
+# ==================== IGVD USER LOOKUP (Iter 56) ====================
+
+class IgvdUserLookupIn(BaseModel):
+    email: str
+
+
+async def _igvd_lookup_authz(request: Request):
+    """Autenticacao compartilhada por produção e sandbox: x-Api-Key deve casar
+    com settings.igvd_voucher_secret (mesma chave da integração já existente).
+    """
+    db = request.app.db
+    cfg = await igvd_service.get_config(db)
+    expected = (cfg.get("igvd_voucher_secret") or "").strip()
+    received = (request.headers.get("x-api-key") or request.headers.get("x-Api-Key") or "").strip()
+    if not expected or not received or received != expected:
+        raise HTTPException(status_code=401, detail="x-Api-Key invalida ou ausente")
+    return db
+
+
+async def _log_igvd_lookup(db, endpoint: str, email: str, result: Dict, request: Request):
+    """Log de auditoria (coleção igvd_lookup_logs)."""
+    try:
+        await db.igvd_lookup_logs.insert_one({
+            "endpoint": endpoint,  # 'production' | 'sandbox'
+            "email": (email or "").strip().lower(),
+            "found": bool(result.get("found")),
+            "matched_user_id": (result.get("user") or {}).get("user_id"),
+            "matched_leader_id": (result.get("leader") or {}).get("user_id"),
+            "sponsor_source": result.get("sponsor_source"),
+            "ip": request.headers.get("x-forwarded-for") or (request.client.host if request.client else None),
+            "user_agent": request.headers.get("user-agent") or "",
+            "request_id": request.headers.get("x-request-id") or request.headers.get("Idempotency-Key"),
+            "at": now_iso(),
+        })
+    except Exception as e:
+        logger.warning(f"[IGVD-lookup] falha ao gravar log: {e}")
+
+
+@app.post("/api/integrations/igvd/user-lookup/sandbox")
+async def igvd_user_lookup_sandbox(request: Request, body: IgvdUserLookupIn):
+    """Iter 56: SANDBOX — mesmo contrato do endpoint de produção, porém não
+    consulta o banco de usuários reais. Devolve um payload simulado válido
+    para a IGVD validar o contrato/autenticação sem efeitos colaterais.
+    Autenticação: header `x-Api-Key` = `settings.igvd_voucher_secret`.
+    """
+    db = await _igvd_lookup_authz(request)
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="email inválido")
+    result = {
+        "found": True,
+        "sandbox": True,
+        "user": {"user_id": "usr_SANDBOX_1234", "name": "Usuário Simulado", "email": email, "network_type": "customer"},
+        "leader": {"user_id": "usr_SANDBOX_LEADER", "name": "Líder Simulado", "email": "leader.sandbox@example.com", "network_type": "network_1"},
+        "sponsor_source": "network_sponsor_id",
+        "message": "Sandbox: nada foi consultado no banco. Contrato validado.",
+    }
+    await _log_igvd_lookup(db, "sandbox", email, result, request)
+    return result
+
+
+@app.post("/api/integrations/igvd/user-lookup")
+async def igvd_user_lookup(request: Request, body: IgvdUserLookupIn):
+    """Iter 56: PRODUÇÃO — dado o e-mail do licenciado, retorna:
+      - user_id + nome/network_type
+      - leader (patrocinador): user_id + nome/email/network_type
+      - sponsor_source: qual campo do user apontou pro líder
+    Autenticação: header `x-Api-Key` = `settings.igvd_voucher_secret`.
+    Log de auditoria em `igvd_lookup_logs`.
+    """
+    db = await _igvd_lookup_authz(request)
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="email inválido")
+    result = await igvd_service.lookup_user_by_email(db, email)
+    await _log_igvd_lookup(db, "production", email, result, request)
+    return result
+
+
+@app.get("/api/admin/igvd/lookup-logs")
+async def admin_igvd_lookup_logs(request: Request, page: int = 1, limit: int = 30, user: dict = Depends(require_admin())):
+    """Painel admin: histórico de lookups (Iter 56)."""
+    db = request.app.db
+    total = await db.igvd_lookup_logs.count_documents({})
+    items = await db.igvd_lookup_logs.find({}, {"_id": 0}).sort("at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+    return {"items": items, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+
 @app.get("/api/admin/igvd/vouchers")
 async def admin_list_igvd_vouchers(request: Request, status: Optional[str] = None, page: int = 1, limit: int = 30, user: dict = Depends(require_admin())):
     db = request.app.db
