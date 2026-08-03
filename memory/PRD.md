@@ -1,418 +1,203 @@
-# OxxPharma — Product Requirements Document (PRD)
+# OxxPharma / Pharmakon — Product Requirements Document
 
-## Original Problem Statement
-Construir e finalizar o sistema **OxxPharma** (E-commerce + MMN/Multinível) e prepará-lo para deploy de produção em servidor Linux Ubuntu (`/var/www/oxxpharma`, domínio `oxxpharma.com.br`). Última fase: documentação de API para integração **Maxx MMN** + editor visual de páginas (CMS estilo Elementor) com **GrapesJS** + verificação final dos arquivos de dependências e scripts de deploy.
+> **Última revisão:** Agosto/2026 (após Iter 56)
+> **Arquivos irmãos:** `CHANGELOG.md` (histórico de iterações), `ROADMAP.md` (backlog priorizado), `test_credentials.md` (credenciais de teste).
 
-## Tech Stack
-- **Frontend**: React 18, TailwindCSS, React Router, Framer Motion, GrapesJS (CMS builder), Recharts, Sonner
-- **Backend**: FastAPI, Motor (Mongo Async), APScheduler, bcrypt+JWT, MercadoPago SDK, Resend, openpyxl, reportlab
-- **DB**: MongoDB 7
-- **Infra**: Ubuntu 22.04+/Nginx/Supervisor/Certbot (Let's Encrypt)
+---
 
-## Core Requirements
-1. **E-commerce real** com checkout MercadoPago (Sandbox/Produção via DB) e webhook HMAC.
-2. **Frete real Correios CWS** (Bearer Token, contrato, serviços PAC/SEDEX).
-3. **MMN/Pontuação**: import CSV, exportação XLSX, gestão profunda de usuários (hard delete, edit total, e-mail de 1º acesso), Cartão de Benefícios via cron.
-4. **Maxx MMN API** (Inbound sync + Outbound score push) + documentação `/docs/MAXX_MMN_API.md`.
-5. **CMS Visual GrapesJS** no admin (`/backoffice/paginas`, `/backoffice/aparencia`).
-6. **Credenciais sensíveis no DB** (`app_credentials`) — não no `.env`.
-7. **Deploy de Produção**: `install.sh`, `deploy.sh`, `update.sh`, templates Nginx/Supervisor, SSL.
+## 1. Visão Geral
 
-## What's Been Implemented (CHANGELOG)
-- ✅ Iter 1-15: Auth, catálogo, carrinho, MMN, gift card, dashboards
-- ✅ Iter 16-17: MercadoPago real + Correios CWS Bearer Token
-- ✅ Iter 18: Gestão admin de usuários + relatórios XLSX
-- ✅ Iter 19: Pacote `/app/deploy/` Linux Ubuntu (install/deploy/update + Nginx/Supervisor) + DEPLOY.md
-- ✅ Iter 20: Maxx MMN API + GrapesJS CMS (AdminPages, AdminAppearance, AdminMaxx, CmsPageView)
-- ✅ Iter 21: Validação final de `requirements.txt` + `package.json` + scripts de deploy
-- ✅ Iter 22 (Fev/2026): Fix do mapeamento `leader_external_id` → `network_sponsor_id` na Sync Externa.
-  - Helper `resolve_leader_links()` centralizado em `server.py`
-  - Persistência de `leader_external_id` em cada doc do user (mesmo se o líder ainda não existir)
-  - Resolução em cascata: ao criar/atualizar A, todos os usuários pendentes que tinham `leader_external_id == A.external_id` são auto-vinculados
-  - Auto-resolução no PUT admin: editar `leader_external_id` recalcula `network_sponsor_id`
-  - Modal admin (`UserEditModal.jsx`) agora exibe o campo `leader_external_id`
-  - Stats expandidos no log: `sponsors_mapped`, `sponsors_pending`, `leader_external_persisted`
-  - Testes de regressão: `/app/backend/tests/test_leader_external_id_sync.py` (3 cenários, 100% passing)
-- ✅ Iter 23 (Fev/2026): Painel admin detalhado por usuário (`/backoffice/usuarios/:user_id`)
-  - Endpoint agregador `GET /api/admin/users/{user_id}/details` retorna user + KPIs + listas
-  - Página `AdminUserDetails.jsx` com 6 abas: Visão Geral, Comissões, Pedidos, Rede MMN, Cartão de Benefícios, Pontos
-  - KPIs: saldo disponível/quarentena/pendente, total ganho/sacado/gasto, # pedidos, total cartão, pontos, downline/indicados, última compra
-  - Listas paginadas (até 200 comissões/pontos, 100 pedidos/downline, batches do cartão)
-  - Botão "Detalhes" ao lado de "Editar" na lista de usuários (modal de edição preservado)
-  - Frete + correção de `api.delete()` que faltava em `lib/api.js`
-  - Caixa do programa MMN: imagem decorativa configurável (URL, largura, rotação, translate X/Y, animação flutuante)
-- ✅ Iter 24 (Fev/2026): Match por CPF na sync Maxx + visualização pública de pontos
-  - Sync API Maxx (`POST /api/external/network1/sync` e `POST /api/admin/network1/import`) agora aceita campo `cpf` e prioriza match: external_id → CPF normalizado → email
-  - Quando CPF bate com user já cadastrado direto pela loja, vincula sem duplicar e atualiza external_id/leader_external_id/name/phone
-  - Stats expandidos: `linked_by_cpf` no retorno
-  - Cadastro público (`/cadastrar`) agora pede CPF (campo opcional mas recomendado)
-  - Novo índice `users.cpf_digits` (somente dígitos, sparse)
-  - Endpoint admin `GET /api/admin/maxx-pending-by-user` lista users com pontos pendentes agrupado
-  - Endpoint admin `POST /api/admin/maxx-sync-user/{user_id}` envia em massa pendentes de um único usuário (atualiza external_id nos logs antes do envio)
-  - Página admin `/backoffice/maxx-pendentes` com tabela e botão "Enviar pontos" por usuário
-  - Endpoint público `GET /api/users/me/points` retorna histórico + totais (sent/pending) sem mencionar "Maxx"
-  - Página loja `/meus-pontos` (link no menu user) com 3 cards (total/enviado/pendente) + tabela completa
-- ✅ Iter 25 (Fev/2026): Integração Melhor Envio + Frete grátis por audiências
-  - Novo módulo `melhorenvio_service.py` com OAuth2 completo (build URL + exchange code + auto-refresh do token)
-  - Tokens persistidos em `db.app_credentials` (não em .env — permite rotação sem redeploy)
-  - Endpoints admin: GET/PUT config, authorize-url, callback OAuth (RedirectResponse), disconnect, refresh manual, test-calculate, logs
-  - Página `/backoffice/melhor-envio` com tutorial, credenciais, CEP origem, sandbox toggle, botão conectar, teste rápido de cotação com tabela de resultados
-  - Provider switcher: `site_settings.shipping_provider` (correios | melhorenvio) com opção de fallback automático
-  - `POST /api/shipping/calculate` agora roteia dinâmicamente pelo provider configurado
-  - Frete grátis: novo modo `audiences` permitindo escolher Cliente/Rede 1/Rede 2 + categorias de usuário (mesmo padrão dos pontos)
-  - Collection `melhorenvio_logs` para auditoria das chamadas
-- ✅ Iter 26 (Fev/2026): Calculadora de frete + pricing por rede/programa + relatório de aprovados
-  - Fix crítico: URL base Melhor Envio corrigida de `api.melhorenvio.com.br` para `melhorenvio.com.br`
-  - Escopos OAuth reduzidos para `shipping-calculate shipping-tracking` (read-only, trava dupla contra geração de etiquetas)
-  - Removido frete fixo hardcoded R$15,90 em CartPage, CheckoutPage e `/api/checkout`
-  - Novo componente `ShippingCalculator.jsx` reutilizável (CEP + opções + seleção persistida em localStorage)
-  - Carrinho: calculadora inline; Checkout: auto-cotação ao escolher endereço
-  - `/api/checkout` agora aceita e valida shipping_price/carrier/service_id, com fallback server-side
-  - Pricing tiers: 2 novos tipos: `network` (Cliente/Rede 1/Rede 2) e `referral_active` (ativo no Programa de Benefícios)
-  - Relatório `/backoffice/programa-aprovados`: lotes por dia, KPIs, lista expandível, export CSV/XLSX por dia ou geral (21 colunas)
-- ✅ Iter 27 (Fev/2026): Fatura detalhada automática para e-mail configurável
-  - Novo campo `site_settings.order_invoice_email_to` (vazio = desabilitado)
-  - Campo configurável em `/backoffice/emails` (aba Credenciais Resend)
-  - Novo template `invoice_admin_paid` com fatura completa: itens (tabela), totais, frete (transportadora + serviço), desconto, cupom, endereço, pagamento, nota fiscal
-  - Trigger disparado quando pedido vira `payment_status=paid` em 2 pontos: admin marcar como pago + webhook de pagamento (MercadoPago)
-  - Itens pré-renderizados como HTML (render_template não suporta loops)
-  - Dispara apenas quando email configurado e pedido realmente pago
-- ✅ Iter 28 (Fev/2026): Maxx — auth `webhook_token` + função de envio de teste por usuário
-  - Novo tipo de auth `webhook_token` (default: header `X-Webhook-Token`) — alinhado com a doc Ozoxx/Maxx
-  - Nome do header configurável em ambos `webhook_token` e `apikey`
-  - Helper `send_test_for_user(db, user_id, points_value, product_name)` — envia 1 ponto sintético sem persistir no `points_log`
-  - Endpoint admin `POST /api/admin/maxx-test-send` (body `{user_id, points_value?, product_name?}`)
-  - Endpoint admin `GET /api/admin/maxx-test-users?q=&limit=` para autocompletar (busca em name/email/cpf/external_id)
-  - Aba "Teste de envio" no `/backoffice/maxx`: busca usuário com debounce, alerta visível se sem `external_id`, mostra request/headers/payload/response da Maxx para debug
-  - Header `Authorization` mascarado no retorno do teste (segurança ao printar/screenshot)
-- ✅ Iter 29 (Fev/2026): Maxx — proteção contra apagar token + detecção de erro no body
-  - **Bug fix crítico:** GET config agora retorna token mascarado (`C9E••••••••••D0E` — preserva tamanho). Antes retornava texto cru, causando risco de vazamento em print.
-  - **Bug fix crítico:** Save sem redigitar o token **não apaga mais** o valor salvo (antes: se o input ficasse mascarado e usuário clicasse Save, o PUT sobrescrevia o token real pela máscara — causando "Token Inválido" nas próximas chamadas)
-  - Proteção tripla em `update_config`: ignora valores vazios, só com `•/*`, ou não fornecidos
-  - Frontend: campo do token vem SEMPRE vazio no GET; placeholder mostra "Já salvo (X caracteres). Deixe vazio para manter."
-  - **Detecção de erro no body:** teste considera `{"error":"1", "error_msg":"..."}` como falha mesmo com HTTP 200 (era o caso da Ozoxx)
-  - Resposta do teste expõe `maxx_auth_value_length` e `_configured` para o UI dar feedback visual
-  - Mascaramento melhorado: `Bearer XXXXXX` → `Bearer XXX••••XXX` (preserva prefixo de schema)
-- ✅ Iter 30 (Fev/2026): Fusão de contas duplicadas + listagem nominal das 6 gerações
-  - **Detecção:** `GET /api/admin/duplicate-users` cruza `cpf_digits`, `email` e `phone_digits` (com migration lazy de `phone_digits` para users antigos), ordena com sugestão `suggested_keep` (quem tem orders/points + maior antiguidade)
-  - **Fusão:** `POST /api/admin/merge-users` body `{keep_user_id, drop_user_id}` — sobrescreve no keep apenas campos cadastrais preenchidos do drop (`name, email, phone, cpf, external_id, leader_external_id, network_type, rg, birth_date, mother_name`); preserva pix_key, addresses (deduplica por zip+number+street); migra `orders, commissions (user_id+from_user_id), withdrawals, points_log, payment_webhook_logs, addresses, card_batches.lines`; redireciona `sponsor_id`/`network_sponsor_id` de outros users; faz `$unset` nos campos com unique index do drop antes do `$set` no keep para evitar DuplicateKey; deleta drop ao final
-  - **Auditoria:** nova collection `merge_audit_log` com `merge_id, kept/deleted user_id, performed_by, snapshots, fields_overwritten, moved_counts`
-  - **Histórico:** `GET /api/admin/merge-audit-log?limit=N`
-  - **UI Admin:** `/backoffice/usuarios/duplicados` com banner de regras, tabs Duplicatas/Histórico, seleção radio (Manter) + checkbox (Fundir) por linha, dialog de confirmação irreversível, botão atalho em `/backoffice/usuarios`, item no menu lateral
-  - **6 gerações nominais:** `/api/users/me/network` agora retorna `members` array (name/email/external_id/created_at/referral_program_active) por geração; `MyNetwork.jsx` reescrito com accordion expandível por geração mostrando os nomes; `AdminUserDetails.jsx` já tinha `network.downline_by_generation` exibindo até 6 gerações
-  - Testes pytest: 14/14 passing (`test_merge_users.py` 4 + `test_merge_users_edgecases.py` 10)
-- ✅ Iter 31 (Fev/2026): Comissão MMN flui pela cadeia de afiliados (até 6 gerações)
-  - **Nova regra crítica:** quando um pedido vira pago, a lógica de comissão MMN agora sobe pela cadeia `sponsor_id` (afiliados) **com fallback para `network_sponsor_id`** (Maxx), até 6 níveis. A cada nível, se o ancestor for `network_1`/`network_2` E tiver `referral_program_active=True`, recebe comissão da geração N usando a taxa da própria rede (network1_generations / network2_generations). Múltiplos MMN na mesma cadeia recebem cada um sua geração relativa ao comprador.
-  - **Cenário típico:** Giovani (N1 ativo) → A (customer+programa) → B → C → D → E → F (customer compra). Resultado: E ganha afiliado gen 0, Giovani ganha MMN gen 6 (taxa N1: 0,5%). Antes Giovani não ganhava nada porque a cadeia parava no primeiro `customer`.
-  - **Visualização da rede unificada:** `/api/users/me/network` e `/api/admin/users/{id}/details.network.downline_by_generation` agora fazem BFS unificado por `sponsor_id` OU `network_sponsor_id` (dedup por user_id). Inclui customers e MMN misturados — `MyNetwork.jsx` exibe badge "Rede 1/2" no membro quando aplicável.
-  - **Compatibilidade:** preserva o fluxo Maxx (cadeia via `network_sponsor_id` continua funcionando para usuários importados sem `sponsor_id`).
-  - Testes pytest: 20/20 passing (`test_mmn_via_affiliate_chain.py` 3 novos + 17 pré-existentes inalterados).
-- ✅ Iter 32 (Fev/2026): Dashboard administrativo redesenhado
-  - **Novos campos do `/api/admin/dashboard`:** `avg_ticket`, `revenue_by_day` (30 dias), `weekly_comparison` (current/previous + %delta de receita e pedidos), `top_buyers` (top 10 por valor pago acumulado), `top_affiliates` (top 10 por comissões geradas, com referrals_count e referral_code), `commissions_summary` (pending/paid/paid_out/cancelled), `orders_by_status` agora retorna lista com count + total R$
-  - **Frontend `AdminDashboard.jsx` reescrito** com 4 KPI cards no topo (faturamento em destaque com gradient laranja + delta vs. semana anterior, pedidos com delta, ticket médio, clientes ativos), gráfico de linha Recharts dos últimos 30 dias com gradient e tooltip, donut chart de status com lista detalhada (count + R$), Top 10 compradores e Top 10 indicadores lado a lado (com pódio ouro/prata/bronze nos 3 primeiros, link para detalhes do user, badges de rede), card de comissões consolidadas (cores semânticas), tabela de pedidos recentes
-  - Tudo com `data-testid` para automação e responsivo (lg:grid-cols-3, lg:grid-cols-4)
-- ✅ Iter 33 (Fev/2026): Recálculo retroativo de comissões
-  - **Função reusável `compute_order_commissions(db, order, customer, settings, ...)`** extraída em `server.py` que reproduz fielmente a regra de comissão do checkout (afiliado gen 0 + MMN 1ª–6ª pela cadeia `sponsor_id → network_sponsor_id`, MMN com `referral_program_active`).
-  - **`POST /api/admin/recalc-commissions/preview`** (modo SIMULAR): aceita filtros `{date_from, date_to, customer_email, user_id, order_ids}`, busca apenas pedidos `payment_status=paid` SEM nenhuma comissão registrada, simula o cálculo e retorna sumário (orders_eligible, total_commissions, total_amount, beneficiaries, affected_orders com breakdown por geração).
-  - **`POST /api/admin/recalc-commissions/apply`** (modo APLICAR): mesma assinatura — grava comissões com `retroactive=true` e `recalc_batch_id=<batch>`. **Idempotente**: re-checa antes de inserir e pula pedidos já com comissão. Audit log completo em `db.recalc_audit_log`.
-  - **`GET /api/admin/recalc-commissions/history`**: lista lotes anteriores para rastreabilidade.
-  - **UI `/backoffice/recalcular-comissoes`** (`AdminRecalcCommissions.jsx`): banner de regras, 3 filtros (datas + email cliente), botão "Simular recálculo" → 4 KPI cards de sumário + tabela de beneficiários + lista expandível de pedidos afetados com breakdown por linha, botão "Confirmar e gravar" com modal de confirmação irreversível, toggle "Ver histórico" com tabela de auditoria. Item de menu adicionado em "MMN / Comissões".
-  - Testes pytest: 5/5 passing (`test_recalc_commissions.py`: preview não persiste, apply grava com flags, idempotência, history endpoint, exige admin). Total da suíte: **25/25 passing**.
-- ✅ Iter 34-37 (Fev/2026): Pacote 6 features (Roles, Impersonation, Equipe, Voucher, Pontos espelho Equipe 1, Comissões por origem) — backend e frontend completos.
-- ✅ Iter 38 (Fev/2026): Voucher no checkout + Maxx por pedido + Pagamento full-voucher
-  - **Frontend Checkout (`CheckoutPage.jsx`):** novo bloco "Saldo Voucher disponível" (busca via `GET /api/users/me/voucher`); checkbox "Usar saldo voucher"; cálculo dinâmico do total com voucher abatendo (`min(saldo, total)`); ao marcar, mostra linhas "Voucher aplicado" e "Restante a pagar"; quando voucher cobre 100%, esconde métodos PIX/Cartão/Boleto, troca o aviso e marca pedido como pago direto sem MercadoPago.
-  - **Backend `/api/payments/create/{order_id}`:** se `order.total <= 0` (totalmente coberto pelo voucher), chama `mark_order_paid(... source="voucher")` retornando `{provider: "voucher", paid: true}` — pula MP, dispara emissão de NF, comissões → paid, registro de pontos e e-mails normalmente.
-  - **MercadoPago:** quando há voucher_used > 0 ou cupom, agora envia uma única linha consolidada `Pedido #ord_xxx` com `order.total` real (antes mandaria subtotal+frete sem desconto, cobrando demais).
-  - **Maxx — agregação por pedido (`maxx_service.py::_build_payload`):** antes 1 entrada por produto (gerava N logs na Maxx por compra). Agora agrupa por `(user_id, order_id)`: soma pontos, soma quantidade total, lista produtos em `products[]` e gera resumo `product_name = "Vit C x2; Omega 3 x1"`. Cliente + sponsor espelhado de Equipe 1 do mesmo pedido continuam como 2 entradas (chaves distintas).
-  - **Bugfix Impersonation (voltava para admin em <1s):** `get_current_user` lia o cookie `access_token` ANTES do header `Authorization`. Como o login grava um cookie httpOnly do admin, a impersonation (que troca só o token do localStorage) era ignorada pelo backend → `/api/auth/me` retornava admin → UI revertia. Corrigido: header Authorization tem prioridade sobre cookie.
-  - **Bugfix Fatura admin não enviada:** `_send_admin_invoice_if_configured` lia `order_invoice_email_to` do doc `settings{_id:"site"}` (configs visuais da loja), mas a chave é salva via PUT `/api/admin/settings` em `settings{_id:"global"}`. Sempre retornava vazio e o email não disparava. Corrigido para usar `get_settings(db)`. Validado E2E: invoice_admin_paid para giovani.mella@gmail.com = sent:True.
-  - **Bugfix menu admin igual para todos:** o filtro `can?.[it.perm]` do sidebar dependia de uma propriedade `perm` que nenhum item tinha → todo admin via todo o menu. Adicionada `perm` em cada item (`integrations`/`financial`/`commercial`/`editProducts`/`manageRoles`). Resultado validado em 4 logins distintos: super_admin 33 itens, admin 20, financeiro 10, comercial 13 — cada um vê apenas o que sua role permite.
-  - **Hardening de roles:** `isSuperAdmin` no frontend e `require_super_admin` no backend passaram a ser strict (apenas `role='super_admin'`). Antes admin legacy com access_level=0 ainda "viava" super e burlava a regra de "admin não vê integrações críticas". Migração do `admin@oxxpharma.com` de `role='admin'` para `role='super_admin'` aplicada via `seed_admin` (roda em todo startup, mantém promoção idempotente).
-  - Testes: 19/20 passing (1 skipped). Roles: super/admin/financeiro/comercial criados em `test_credentials.md` para validação manual.
-- ✅ Iter 39-41 (Fev/2026): Funil /indique-ganhe, Preço Clube p/ não-membros, Relatório Comissões por Geração, retenção `pending_enrollment`, modo `force` no recálculo, filtro de data + Top10 vendas diretas no Dashboard.
-- ✅ Iter 42 (Fev/2026): **Fix crítico: Comissões duplicadas no DB** (cliente reportou pagamento de R$1.422 vs R$1.278 esperado).
-  - **Root cause**: `admin_recalc_apply` em modo `force` filtrava apenas `status="paid"` para preservar histórico, mas comissões já SAQUEADAS pelo usuário (`status="paid_out"`) eram ignoradas no filtro `paid_keys` → o recalc deletava as `pending` e recriava idênticas, gerando 2 comissões para o mesmo (order, user, type, generation).
-  - **Fix backend**: `paid_keys` agora bloqueia inserção quando existir comissão com `status in ["paid","paid_out"]`. `delete_many` continua restrito a `pending|pending_enrollment` para nunca tocar histórico.
-  - **Defesa em profundidade**: criado **índice único** `uq_commission_per_beneficiary` em `(order_id, user_id, type, generation)`; `insert_many` migrado para `ordered=False` com try/except (idempotente mesmo em race conditions).
-  - **Cleanup**: script `tests/cleanup_duplicate_commissions.py` removeu 3 grupos duplicados do DB de produção (mantendo `paid_out` por prioridade).
-  - **Validação**: todos os amounts agora batem matematicamente com `subtotal × rate`; recalc force executado 2x sem gerar nenhuma duplicata.
-  - Testes: `test_iter42_no_duplicate_commissions.py` (3 testes — sem duplicatas no DB, índice único existente, recalc force idempotente sobre paid/paid_out) — **todos PASS**.
-- ✅ Iter 42b (Fev/2026): **Reverter status de comissões (paid|paid_out → pending)** — apenas super_admin.
-  - Endpoints: `POST /api/admin/commissions/revert/preview` + `/apply` (`require_super_admin()`).
-  - Aceita 4 modos de filtro combináveis: `commission_ids[]`, `order_ids[]`, `user_id`, intervalo `start/end`.
-  - Reverte massa (>1 pedido) exige `confirm=True` (proteção contra acidente).
-  - Atualização: `status="pending"`, remove `paid_at`/`paid_out_at`/`withdrawal_id`; grava `reverted_at`/`reverted_by_email` (audit leve embutido).
-  - Frontend (`AdminCommissionsByGeneration.jsx`): botão "↩ Reverter" por linha + "Reverter pedido inteiro" no expand + "Reverter por filtro" no topo. Modal `RevertCommissionsModal` mostra preview, contadores, alerta de saques afetados, e exige digitar `REVERTER` para confirmação em massa.
-  - Testes: `test_iter42_revert_commissions.py` (5 testes — RBAC super_admin only, exige filtro, confirm em massa, desvinculação de withdrawal_id, ignora pending) — **todos PASS**.
-- ✅ Iter 42c (Fev/2026): **Comissões NÃO transitam mais para "paid" automaticamente** — apenas super_admin via UI.
-  - **Removido** trigger automático nos 2 pontos: `update_order_status` (admin marca pedido pago) e `mark_order_paid` (webhook MercadoPago / pagamento via voucher). Ambos continuam emitindo NF, registrando pontos e disparando emails — só a transição `commission.status pending → paid` foi removida.
-  - **Novo endpoint**: `POST /api/admin/commissions/approve/preview` + `/apply` (`require_super_admin()`). Aceita os mesmos 4 modos de filtro do revert. Massa (>1 pedido) exige `confirm=True`.
-  - **Frontend** (`CommissionsStatusModal.jsx` — substituiu `RevertCommissionsModal`): modal genérico que serve tanto revert (amber) quanto approve (emerald). Botões "✓ Aprovar" por linha (apenas se `pending`) + "Aprovar pendentes do pedido" no expand + "Aprovar por filtro" no topo.
-  - Testes: `test_iter42c_approve_commissions.py` (5 testes — aprovação não-automática ao marcar pedido pago, RBAC, preview, ignora paid/paid_out, confirm em massa) — **todos PASS**.
-- ✅ Iter 42d (Fev/2026): **Comissões agora são criadas APENAS quando o pedido vira `paid`** (root cause do "recálculo não funciona").
-  - **Bug**: comissões eram criadas no `/api/checkout` imediatamente na criação do pedido. Pedidos cancelados/abandonados/pendentes geravam comissões órfãs. O recálculo (`_list_orders_for_recalc`) só lê pedidos `payment_status=paid`, então **nunca tocava** essas órfãs → cliente via 18 comissões e o force recriava só 9 → DB ficava com 18 (9 paid + 9 órfãs).
-  - **Fix**: removido bloco de criação de comissões do checkout. Adicionado helper `_create_commissions_for_paid_order(db, order_id)` chamado em `mark_order_paid` (webhook MP/voucher) e `update_order_status` quando `status="paid"`. Idempotente: se já existem comissões para o pedido, pula.
-  - **Cleanup**: script `cleanup_orphan_commissions.py` removeu 9 comissões órfãs em 6 pedidos pending. DB final: 9 comissões (R$ 85,07) batendo exatamente com o preview do recálculo.
-  - **Status inicial das comissões**: `pending` (beneficiário inscrito) ou `pending_enrollment` (não inscrito). Nunca `paid` direto — admin precisa aprovar manualmente (Iter 42c).
-  - Testes: `test_iter42d_commissions_only_when_paid.py` (4 testes — sem órfãs no DB, criação ao marcar paid, idempotência, recálculo force pós-cleanup) — **todos PASS**.
-- ✅ Iter 42e (Fev/2026): **Renomeação visual "Comissão" → "Cashback"** em todo o sistema (frontend + emails).
-  - Substituídos 97 ocorrências em 19 arquivos do frontend + email templates (`commission_earned`, `welcome`).
-  - Termos especiais: "Comissões por Geração" → **"Cashback por Geração"** · "Recalcular Comissões" → **"Recalcular Cashbacks"** · "Comissão de afiliado" → **"Cashback de Indicação"**.
-  - **Mantidos** intactos: URLs (`/api/admin/commissions/*`, `/backoffice/comissoes-por-geracao`), nomes de variáveis JS/Python, schema do banco (collection `commissions`, campos `commission_id`), slug de email (`commission_earned`), data-testids — preserva integrações externas (Maxx, scripts) e não exige migração.
-- ✅ Iter 42f (Fev/2026): **Fix bug merge-users 500 + ajuste de saldo Cashback admin**.
-  - **Bug**: `api.js` quebrava com `JSON.parse` em respostas não-JSON (502/503 de proxy/cloudflare). Frontend agora usa try/catch e mostra mensagem decente do backend.
-  - **Backend merge-users**: try/catch global retornando 500 com `detail` em JSON (nunca mais texto puro). Limpeza de campos com índice único (email, cpf_digits, external_id, phone_digits) feita ANTES do `$set` no keep para evitar `DuplicateKeyError`.
-  - **Ajuste de Cashback** (super_admin): `POST /api/admin/users/:id/cashback-adjust` — cria comissão `type=admin_adjustment, status=paid` com nota obrigatória (≥3 chars). Valida que débito não deixa saldo negativo. Frontend: modal `CashbackAdjustModal.jsx` na tab "Visão Geral" da ficha do usuário.
-- ✅ Iter 42g (Fev/2026): **Frete grátis com múltiplas regras OR**.
-  - Novo schema: `free_shipping_enabled` (bool) + `free_shipping_rules: [{name, account_types, categories, min_subtotal}]` — match em qualquer regra libera (OR), critérios dentro da regra são AND.
-  - Helper `_evaluate_free_shipping(settings, user_doc, subtotal)` reutilizado nos 2 pontos do código (checkout e cálculo público de frete).
-  - Retrocompatibilidade: schema legado (`free_shipping_mode/audiences/min_subtotal`) continua funcionando se `free_shipping_rules` estiver vazio.
-  - UI (`AdminAppearance.jsx`): empty state com 3 presets ("para tudo", "acima de R$", "Equipe"). Cada regra editável tem nome, chips de tipo de conta + categorias, valor mínimo, e resumo visual no rodapé.
-  - Testes: `test_iter42g_free_shipping_rules.py` (9 testes — regras OR, AND interno, disabled flag, schemas legados, regras prevalecem sobre legacy) — **todos PASS**.
-- ✅ Iter 42h (Fev/2026): **Barra de progresso até o frete grátis** no Carrinho e Checkout.
-  - Componente `FreeShippingProgress.jsx` reutilizável: 2 estados (faltam X / conquistado), versão compacta para o checkout.
-  - Helper `evaluateFreeShipping` em `src/lib/freeShipping.js` espelhando o backend `_evaluate_free_shipping` (suporta multi-regras OR + legado).
-  - Pluga em `CartPage.jsx` e `CheckoutPage.jsx` substituindo o aviso textual antigo. Mostra barra apenas quando há regra com `min_subtotal > 0` (regras puramente por público continuam silenciosas, pois progresso não faz sentido aí).
-  - Validação visual: configurada regra "Acima de R$ 500", carrinho com R$ 29,90 mostra "Faltam R$ 470,10" + barra com fill proporcional.
-  - Testes: 9 testes paridade backend + 13 testes paridade frontend (helper) — **22/22 PASS**.
+E-commerce **multi-tenant** (OxxPharma + Pharmakon) com sistema MMN (multi-nível) integrado, rodando em codebase e banco únicos. Catálogo de produtos e cadastro de usuários são compartilhados; **transações, dashboards, temas visuais e domínios são separados por tenant** via header HTTP `Host`/`X-Tenant`.
 
-## Files of Reference
-- `/app/backend/requirements.txt` — todas libs (mercadopago 2.2.1, resend 2.22, openpyxl 3.1+, reportlab 4+, apscheduler, motor, bcrypt, etc.)
-- `/app/frontend/package.json` — grapesjs 0.22.16 + presets/blocks-basic
-- `/app/deploy/{install,deploy,update}.sh` + templates Nginx/Supervisor + env examples
-- `/app/DEPLOY.md` — guia completo
-- `/app/docs/MAXX_MMN_API.md` — documentação API Maxx
+### Personas
+1. **Cliente final** — compra na loja, pode ativar programa de indicação.
+2. **Indicador (afiliado)** — ganha cashback nas compras via `?ref=`.
+3. **Rede MMN (Equipe 1 / Equipe 2)** — ganha comissão de gerações 1-6 abaixo.
+4. **Admin / Atendimento / Estoque** — RBAC granular (ver §6).
 
-## Backlog / Future
-- **P1**: Blocos customizados OxxPharma para o GrapesJS (grid produtos em destaque, depoimentos, banner promo).
-- **P2**: Job cron de backup automático Mongo + rotação de logs.
-- **P2**: 2FA para admin.
-- **P2**: PWA / push notifications para clientes.
+---
 
-## Test Credentials
-## Iter 42k (Fev/2026): 5 melhorias (1 bug P0 + 4 features)
-- **Bug P0**: Top 10 Indicadores e relatório "Cashback por Geração" sem Afiliado Direto quando `affiliate_commission_rate=0`.
-  - Top 10 refeito: agrupa por `_buyer.sponsor_id` de pedidos pagos (não depende de comissão `type=affiliate`).
-  - Relatório por geração agora exclui `admin_adjustment` da agregação (deixava de mostrar "Noneª geração").
-- **Badge para visitantes editável**: novo campo global `guest_tier_label_global` em site-settings sobrescreve `tier.label` individual de produtos. Editável em `/backoffice/aparencia` → "Card do produto".
-- **Pontos totais no carrinho e pedido**: linha "Você ganhará X pontos" no resumo do carrinho + no card do pedido (`OrderDetails`), só aparece se elegível (usa `canSeeProductPoints`).
-- **Tamanho da fonte do card de produto**: 5 sliders em `/backoffice/aparencia` → "Card do produto" (Marca, Título, Preço, Preço riscado, Rótulos) com preview "Aa" em tempo real.
-- **Banner carrossel**: schema novo `hero_slides: [{title, subtitle, image_url, cta_label, cta_link, overlay_opacity}]` com autoplay configurável e dots. Componente `HeroCarousel.jsx` na home. Retrocompatibilidade: se `hero_slides` vazio, usa `hero_image_url/hero_title/hero_subtitle/hero_cta_*` antigos.
-- Testes: 39/39 pytest passando (preservados todos os anteriores).
+## 2. Tech Stack
 
-Ver `/app/memory/test_credentials.md`. Admin: `admin@oxxpharma.com` / `admin123`.
+| Camada     | Tecnologia |
+|------------|------------|
+| Frontend   | React 18, TailwindCSS, React Router, Framer Motion, Recharts, Sonner, TipTap, GrapesJS |
+| Backend    | FastAPI, Motor (Mongo Async), APScheduler, bcrypt+JWT, MercadoPago SDK, Resend, openpyxl, reportlab |
+| Banco      | MongoDB 7 (coleção única compartilhada + campo `tenant` por documento) |
+| Infra      | Ubuntu 22.04+ / Nginx / Supervisor / Certbot |
+| Integrações| MercadoPago (pagamentos) · Melhor Envio + Correios CWS (frete) · Resend (email) · Maxx MMN (sync outbound) · IGVD (vouchers + user-lookup) · Cartão de Benefícios (adapter genérico) |
 
-## Iter 42j (Fev/2026): Fix endereço no XLSX/CSV de aprovados no Programa de Benefícios
-- **Bug**: exportador lia apenas `enr.address.*` (aninhado), mas o admin de produção configurou `enrollment_fields` com chaves flat em PT (`cep`, `rua`, `numero`, `bairro`, `cidade`, `uf`, `complemento`) → colunas vazias no XLSX.
-- **Fix**: novo helper `_extract_enrollment_address(enr, user)` com 3 fontes em ordem: aninhado → flat PT/EN com aliases → `user.addresses[0]` fallback.
-- Aliases suportados: `cep|zip|zip_code|postal_code`, `rua|street|endereco|logradouro`, `numero|number`, `complemento|complement|apto`, `bairro|neighborhood`, `cidade|city|municipio`, `uf|state|estado`.
-- Testes: `test_iter42j_enrollment_address_export.py` (7 testes — todos PASS).
+---
 
-## Iter 43 (Fev/2026): Multi-tenant Fases 1-4 (OxxPharma + Pharmakon)
+## 3. Requisitos Funcionais Principais
 
-### Fase 1 — Backbone (já entregue)
-- Middleware FastAPI detecta tenant pelo Host / X-Tenant.
-- Coleção `tenants` com cache, bootstrap automático (OxxPharma laranja + Pharmakon azul).
-- Backfill: pedidos/carrinhos/comissões/cupons/points_log antigos → `tenant=oxxpharma`.
-- Toggle `brands_unified` força tenant primary.
-- Frontend: `TenantSwitcher` no header admin + página `/backoffice/marcas`.
+### 3.1 E-commerce
+- Checkout MercadoPago (sandbox/produção via DB, HMAC webhook).
+- Frete real: Melhor Envio (OAuth2) OU Correios CWS (Bearer + contrato) — provider switcher no admin.
+- Retirada no local (checkout toggle, frete zerado, dados de retirada na fatura).
+- Cupons + regras de frete grátis por audiência.
+- Preços contextuais por produto (`pricing_tiers`) — guest/logged/category/network_type.
 
-### Fase 2 — Filtros tenant em endpoints admin
-- `/api/admin/dashboard?tenant=X`, `/api/admin/orders?tenant=X`, `/api/admin/commissions-by-generation?tenant=X`, `/api/admin/commissions-report?tenant=X`, `/api/admin/invoices?tenant=X`, `/api/admin/points-report?tenant=X`.
-- Helper `tenant_service.get_admin_tenant_filter(request, qparam)` reutilizado.
-- `points_log` gravado com tenant herdado do pedido.
+### 3.2 MMN & Cashback
+- Rede em 6 gerações (`network_1` corporativo + `network_2` propagandista).
+- Comissões automáticas ao pagar pedido (`_create_commissions_for_paid_order`).
+- Programa de indicação — usuário adere via `/indique-ganhe`, ganha `referral_code`.
+- Cashback separado em: pending → paid → sent_to_card (D+2 via cron).
+- Import CSV, exportação XLSX, recálculo retroativo.
 
-### Fase 3 — Tema visual dinâmico (TenantContext)
-- Novo `contexts/TenantContext.js` carrega `/api/tenant/current` no boot.
-- Aplica `--brand-main` CSS var (cor da marca) automaticamente.
-- Atualiza `document.title` com nome da marca.
-- Plugado no `App.js` como provider raiz (envolve Auth/Ref/Cart).
+### 3.3 Campanha do Multiplicador (Iter 54)
+- Multiplica taxa de comissão das gerações 3-6 por N× quando o sponsor bate a **meta mensal de vendas na 1ª geração**.
+- Metas mês a mês configuráveis; mês de bootstrap ativa todo mundo.
+- Cron dia 1 00:05 BR avalia; admin pode reprocessar manualmente.
 
-### Fase 4 — Pagamento e Emails por tenant
-- MercadoPago `metadata.tenant` no body de criação de preference + `statement_descriptor` por marca.
-- `email_templates` ganhou campo `tenant` (null = global). Índice composto `(slug, tenant)` unique.
-- `get_template(slug, tenant)` busca específico-por-tenant primeiro, fallback global.
-- `send_template` / `trigger` aceitam `tenant=` opcional.
-- Admin CRUD aceita `tenant` no body (permite mesmo slug em marcas diferentes).
+### 3.4 Multi-tenant
+- Isolamento de tenant por: `orders`, `commissions`, `coupons`, `themes` (via campo `tenant`).
+- Shared: `users`, `products`, `categories`.
+- Middleware `tenant_service.get_tenant(request)` — resolve por `Host` header ou `X-Tenant`.
+- Appearance separada (logo, cores, blocks) por tenant.
 
-### Testes
-- **Fase 1**: `test_iter43_multi_tenant_backbone.py` (6 testes — PASS).
-- **Fases 2-4**: `test_iter43_multi_tenant_filters.py` (4 testes — PASS).
-- **Total iter43**: **10/10 passing**.
+### 3.5 CMS Visual (Page Builder)
+- `/backoffice/paginas` + `/backoffice/aparencia` — editor drag-and-drop estilo Elementor.
+- Suporta Hero Carousel, Upload de imagem inline, blocks de largura total.
+- Renderizado dinamicamente em `CmsPageView`.
 
-### Passo a passo final para ativar Pharmakon
-1. DNS: `pharmakon.com.br` e `www.pharmakon.com.br` apontando para o IP do servidor da OxxPharma.
-2. Nginx: adicionar bloco `server_name pharmakon.com.br www.pharmakon.com.br;` no mesmo `proxy_pass` do frontend.
-3. Em `/backoffice/marcas` ajustar logo/cor/nome do programa do Pharmakon (default azul, "Clube Pharmakon").
-4. Em produtos: deixar default visível em ambas; para preço diferente, abrir produto e preencher "Preço por marca → Pharmakon".
-5. Resend: verificar domínio `pharmakon.com.br` (se quiser emails com from específico) — colocar email em `/backoffice/marcas`.
-6. Templates de email específicos: clonar template global no admin e marcar tenant=pharmakon (para personalizar).
+### 3.6 Integrações IGVD
+- **Voucher inbound** (`/api/integrations/igvd/voucher` + `/sandbox`): recebe adesão, gera pedido pago automático do "kit adesão", dispara comissões/pontos/fatura.
+- **User lookup** (`/api/integrations/igvd/user-lookup` + `/sandbox`) — Iter 56: dado o e-mail, retorna user_id + leader (network_sponsor prioritário). Auditoria em `igvd_lookup_logs`.
+- Kit config editável com `unit_price` override por item (Iter 52).
+- Botão admin "Reprocessar hooks" para pedidos antigos (Iter 49).
 
+### 3.7 PDV / Frente de Caixa (Iter 53)
+- `/backoffice/pdv` — criar pedido manual com cliente cadastrado OU guest.
+- Escolha por item de qual `pricing_tier` aplicar (ou preço custom).
+- Frete: valor manual / grátis / retirada.
+- Pagamento: Cartão / Cartão parcelado (2-12x) / Pix — sem gateway.
+- Flags: `skip_maxx_sync`, `skip_points`, `mark_paid`.
 
-## Iter 46 (Fev/2026): SKU na fatura por e-mail (com fallback retroativo)
+### 3.8 Notas Fiscais (Iter 55)
+- Upload PDF/XML/JPG/PNG/WEBP ≤ 8MB por pedido.
+- Botões condicionais na lista: anexar (📎) / baixar (⬇️) / substituir (✏️).
+- Auditoria em `order.nf_history` (quem/quando anexou/substituiu/removeu).
 
-### Contexto
-Equipe de faturamento pediu para o SKU dos produtos aparecer no e-mail da fatura detalhada — facilita separação/conferência. Iteração 43 já snapshotava SKU/EAN nos itens novos, mas:
-- Estava renderizado em letra pequena embaixo do nome do produto (pouca visibilidade).
-- Pedidos legados (pre-Iter 43) não tinham SKU snapshotado e portanto não exibiam nada.
+---
 
-### Solução
-Em `_send_admin_invoice_if_configured`:
-- Tabela de itens ganhou **coluna dedicada "SKU"** entre "Produto" e "Qtd", em fonte monoespaçada para destacar.
-- EAN, quando existir, aparece em segunda linha pequena dentro da mesma célula.
-- **Fallback retroativo**: para pedidos legados sem SKU no snapshot, faz 1 batch lookup em `db.products` (1 query só, independente da quantidade de itens) e completa SKU/EAN no render.
+## 4. Estado do Projeto
 
-### Validação (script local)
-1. Pedido legacy (item com `sku=""`) + produto cadastrado com `sku="OZX-SPORT-60"` → renderiza `OZX-SPORT-60` na coluna SKU.
-2. Pedido novo (item com `sku="ABC-001"`) → usa snapshot direto.
+| Componente                    | Status        |
+|-------------------------------|---------------|
+| E-commerce base               | ✅ Produção   |
+| MMN + Cashback                | ✅ Produção   |
+| Multi-tenant OxxPharma        | ✅ Produção   |
+| Multi-tenant Pharmakon        | 🟡 DNS pendente |
+| IGVD inbound (vouchers)       | ✅ Produção   |
+| IGVD outbound (user lookup)   | ✅ Iter 56    |
+| Campanha do Multiplicador     | ✅ Iter 54    |
+| PDV                           | ✅ Iter 53    |
+| Anexo de NF                   | ✅ Iter 55    |
+| CMS Page Builder              | ✅ Iter 20    |
+| Maxx MMN sync                 | 🟡 Ativação em produção pendente |
+| Cartão de Benefícios          | 🟡 Mocked (adapter genérico) |
+| 2FA / PWA Push                | ❌ Roadmap    |
 
+### Coverage de testes
+- Suíte pytest: **iter 16-20, 42*, 49, 53, 54, 55, 56** — todas com relatórios 100% PASS registrados em `/app/test_reports/iteration_*.json`.
 
+---
 
-### Contexto / Problema
-Faturas chegando ao cliente sem CPF e/ou CEP. Causa raiz:
-- `user.cpf` podia ficar vazio; nada validava no checkout.
-- `AddressCreate.zip_code: str` aceitava string vazia.
-- O CPF não era snapshotado no pedido — se o user limpasse o cadastro depois, a fatura perdia o dado.
-- Não havia ferramenta para o admin corrigir pedidos legados.
+## 5. Modelo de Dados (esquemas críticos)
 
-### Solução
-**Backend**
-- `AddressCreate` ganhou `@field_validator("zip_code")` (exige 8 dígitos, normaliza para `12345-678`) e `_non_empty` em street/number/neighborhood/city/state.
-- `POST /api/checkout` bloqueia (HTTP 400 com mensagem PT-BR) quando o user não tem 11 dígitos de CPF ou o endereço escolhido tem CEP inválido. Antes de gravar, normaliza o `zip_code` no `shipping_address`.
-- Snapshot no doc do pedido: `customer_cpf` (formatado), `customer_cpf_digits` (somente dígitos) e `customer_phone`.
-- Fatura HTML usa `order.customer_cpf` com fallback ao `user.cpf` — preserva dado mesmo se o user editar o perfil depois.
-- `GET /api/admin/orders?missing_data=true` filtra pedidos sem CPF ou com CEP inválido (regex `\d{5}-?\d{3}`).
-- `PUT /api/admin/orders/{order_id}/fix-missing` aceita `{customer_cpf, propagate_to_user, shipping_address}` e atualiza patch-style (registra `data_fixed_by/at`).
+### `users`
+```
+{ user_id, email, cpf, cpf_digits, name, phone, addresses[], role,
+  network_type: customer|network_1|network_2,
+  sponsor_id, network_sponsor_id, leader_external_id, external_id,
+  referral_code, referral_program_active, referral_enrollment{},
+  voucher_balance, tenant }
+```
 
-**Frontend**
-- `lib/api.js`: erros 422 do Pydantic (array de objetos) agora são serializados em mensagens humanas (sem "Value error,").
-- `CheckoutPage.jsx`: banner vermelho "CPF obrigatório" com link direto para `/minha-conta` quando falta CPF; botão "Confirmar pedido" fica desabilitado e mostra motivo em PT-BR.
-- `AdminOrders.jsx`: novo filtro "Dados incompletos" (chip vermelho), linha pintada de rosa para pedidos com gaps, etiqueta "⚠ CPF/CEP" e botão `FileEdit` que abre o modal `FixOrderModal` (CPF + endereço completo, com checkbox "Salvar também no cadastro do cliente").
+### `orders`
+```
+{ order_id, user_id (null se guest), customer_{name,email,cpf,phone},
+  items[], subtotal, shipping_cost, discount, total,
+  payment_status, payment_method (card|card_installments|pix|mp),
+  payment_installments, payment_notes,
+  shipping_address, is_pickup, pickup_snapshot,
+  sponsor_id, tenant,
+  # PDV (Iter 53)
+  source: pdv|store|igvd, manual, created_by_admin, admin_notes,
+  skip_maxx_sync, skip_points,
+  # IGVD (Iter 48–52)
+  igvd_voucher_code, igvd_amount_brl,
+  # NF (Iter 55)
+  nf_meta{name,mime,size,uploaded_by_name,uploaded_at}, nf_history[]
+}
+```
 
-### Arquivos
-- `backend/server.py` — `AddressCreate`, `checkout` (validações + snapshot), template fatura, `admin_list_orders` (filtro), novo `admin_fix_order_missing`.
-- `frontend/src/lib/api.js`
-- `frontend/src/pages/store/CheckoutPage.jsx`
-- `frontend/src/pages/backoffice/AdminOrders.jsx`
+### `commissions`
+```
+{ commission_id, user_id, order_id, customer_id, customer_name,
+  type: affiliate|network_gen, network_type, generation,
+  amount, rate, order_subtotal,
+  status: pending_enrollment|pending|paid|cancelled,
+  sent_to_card, sent_to_card_at, card_batch_id,
+  # Multiplier (Iter 54)
+  multiplier_applied, multiplier_month,
+  tenant, created_at }
+```
 
-### Backfill automatizado (lote)
-- `POST /api/admin/orders/backfill-missing-data`: varre TODOS os pedidos com gaps e tenta preencher puxando de:
-  1. `users.cpf`/`users.cpf_digits` (cadastro / Clube de Benefícios já caem aqui — sao salvos no mesmo doc do user)
-  2. `users.addresses[]` (default primeiro, depois primeiro com CEP de 8 dígitos)
-  3. `shipping_address` de pedidos anteriores do mesmo user com CEP válido
-- Retorna estatísticas por fonte (`cpf_sources.user`, `cep_sources.user_address`, `cep_sources.prior_order`) e lista do que ainda falta para correção manual.
-- Botão "Preencher CPF/CEP automaticamente" no topo de `/backoffice/pedidos` + card de resultado com o resumo.
+### `multiplier_status` (Iter 54)
+```
+{ user_id, month (YYYY-MM), active, goal, sales_gen1, hit_goal,
+  streak_months, evaluated_at }  # unique (user_id, month)
+```
 
-### Validação automática (curl)
-1. POST endereço com `zip_code: "123"` → 422 com `"CEP invalido: precisa ter 8 digitos (ex: 01310-100)"`.
-2. GET `/api/admin/orders?missing_data=true` → 44 pedidos legados detectados.
-3. PUT `/fix-missing` com CPF de 3 dígitos → 400 com `"CPF deve ter 11 digitos"`.
-4. PUT `/fix-missing` válido → grava `123.456.789-01` e `01310-100` (formatados).
+### `settings` (docs `_id: "global"`)
+Contém: MercadoPago, Correios CWS, Melhor Envio, Resend, Maxx, tenants, IGVD (`igvd_voucher_enabled`, `igvd_voucher_secret`, `igvd_kit_items`), Campanha multiplicador (`multiplier_campaign_*`), regras de frete grátis, cores/logo por tenant.
 
-## Iter 44 (Fev/2026): Aparência por marca + Page Builder com carrossel e upload
+### Coleções acessórias
+`points_log`, `orders_nf`, `igvd_vouchers`, `igvd_lookup_logs` (Iter 56), `card_batches`, `app_credentials`, `pages`, `categories`, `coupons`, `themes`, `settings`.
 
-### Contexto / Problema
-Após a Iter 43 introduzir o backbone multi-tenant (OxxPharma + Pharmakon), a página de Aparência continuava global — logos, banner, cores, rodapé e textos eram compartilhados. Resultado: a Pharmakon herdava a logo da OxxPharma e a aba "Logo por local" só permitia configurar um conjunto.
+---
 
-### Solução
-- **Backend**: `db.settings` agora armazena um documento por marca (`{_id: "site:<tenant_id>"}`). `_get_site_settings(db, tenant_id)` resolve o doc da marca; quando o tenant é o primário e ainda não existe doc novo, faz **fallback automático para o doc legado `{_id: "site"}`** (zero migração para a OxxPharma). Tenants secundários sem doc próprio recebem `DEFAULT_SITE_SETTINGS` — **não herdam** da OxxPharma, evitando logos iguais.
-- **Endpoints**:
-  - `GET /api/site-settings` → usa `request.state.tenant` (resolvido pelo Host).
-  - `GET /api/admin/site-settings?tenant=<id>` → admin escolhe explicitamente qual marca ler.
-  - `PUT /api/admin/site-settings?tenant=<id>` → grava em `{_id: "site:<id>"}`. No primeiro PUT da OxxPharma, **migra o doc legado** para `{_id: "site:oxxpharma"}` antes de aplicar o patch (zero perda de dados).
-- **Callers internos** (checkout, calculate-shipping) passam `tenant_service.get_tenant(request)` — frete grátis e provider de envio podem variar por marca.
-- **Frontend `AdminAppearance.jsx`**: barra superior com pills das marcas ("Editando aparência de: [OxxPharma] [Pharmakon]"). Selecionar uma marca recarrega settings com `?tenant=`. O Save envia `?tenant=`. Persistência da marca ativa em `localStorage.appearance_tenant`.
+## 6. RBAC (Roles)
 
-### Arquivos
-- `backend/server.py` — `_get_site_settings`, GET/PUT site-settings, 3 callers internos atualizados.
-- `frontend/src/pages/backoffice/AdminAppearance.jsx` — barra de marcas + load/save tenant-aware.
+Definido em `/app/backend/role_profiles.py` e checado no frontend via `AuthContext.can`:
 
-### Como testar manualmente
-1. `/backoffice/aparencia` → ver pill "OxxPharma · principal" selecionada + valores históricos preservados.
-2. Clicar em "Pharmakon" → logos vazias, cores default azul, sliders no padrão. Configurar e Salvar.
-3. Voltar para OxxPharma → continua com os valores antigos (independentes).
-4. Acessar `pharmakon.com.br` (ou `?as_tenant=pharmakon`) → loja pública pega `/api/site-settings` da Pharmakon.
+| Role         | Escopo |
+|--------------|--------|
+| super_admin  | Tudo (inclui integrações, tenant settings) |
+| admin        | Tudo exceto config sensível de integração |
+| atendimento  | Pedidos + usuários (dashboard oculto) |
+| estoque      | Apenas Pedidos + Cupons |
+| customer     | Loja + Programa de Indicação |
 
-### Page Builder: bloco `hero_carousel` + upload de imagem
-- Novo bloco **Banner Carrossel** na biblioteca: lista de slides (título, subtítulo, imagem, CTA, link, escurecimento) + `autoplay_seconds` e `show_dots` no nível do bloco.
-- Renderer `HeroCarouselBlock` em `DynamicBlocks.jsx`: troca automática de slides (autoplay configurável, 0 = manual), indicadores clicáveis, transição CSS de background.
-- Backend `VALID_BLOCK_TYPES` já aceitava `hero_carousel` (incluído na lista do startup).
-- **Componente `ImageUploadField`** (botão "Enviar imagem" + preview + campo URL alternativo) substituiu os campos URL nos blocos `hero`, `image` e em cada slide do carrossel. Upload via `/api/admin/upload-image` (mesmo endpoint usado pela aba Aparência).
+---
 
+## 7. Convenções
 
+- Timezone canônica: **America/Sao_Paulo** (usado em cron, month_key, dashboards).
+- IDs curtos exibidos ao usuário: últimos 8 chars do `order_id` em UPPERCASE (ex.: `#10E6A477`).
+- Comissões idempotentes via índice único `uq_commission_per_beneficiary`.
+- Uploads inline (imagens de produto, NF): data URL base64 armazenado no DB, com projeção de campos pesados nas listagens.
 
-### P0 — Fix merge-users (E11000 com terceiro) + Varredura na rede
-- **Fix bug merge-users**: o check de colisão de email só validava se o email do drop colidia com um keep/drop, mas ignorava colisão case-insensitive e os outros campos com índice único (`cpf_digits`, `phone_digits`, `external_id`, `referral_code`). Agora cada campo com índice único é verificado contra **TERCEIROS users**; em caso de colisão, o campo é **PULADO** (mantém o do keep) em vez de quebrar com 500. Resposta da API agora inclui `skipped_due_collision` listando quais campos foram preservados e qual user é o "dono" do valor em conflito. UI mostra warning amarelo de 10s.
-- **Varredura na rede com modal de seleção**:
-  - `POST /api/admin/network/resolve-pending-leaders` → PREVIEW: retorna lista de pendentes separados em `resolvable` (líder já existe na base) vs `unresolvable` (esperando líder).
-  - `POST /api/admin/network/resolve-pending-leaders/apply` (body: `user_ids[]`) → aplica vinculo apenas nos selecionados.
-  - Componente `ResolvePendingLeadersModal.jsx` + botão em `/backoffice/redes` (aba Equipe 1).
+---
 
-### P1 — Aprovação automática Programa de Benefícios
-- Config: `auto_approve_enrollment` (bool) + `auto_approve_delay_minutes` (int) em `card_config`.
-- Função `_auto_approve_pending_enrollments(db, config)` no `card_service.py` roda no tick a cada minuto: para cada pendência cujo `submitted_at + delay <= now`, gera referral_code único, ativa programa e promove comissões `pending_enrollment` → `pending`.
-- UI: card "Aprovação automática" em `/backoffice/gift-cards` com checkbox + campo de delay.
+## 8. Deployment
 
-### P1 — Dashboard: Top 10 produtos mais vendidos
-- Novo campo `top_products` no `/api/admin/dashboard` com agregação `$unwind` de `orders.items` filtrando `payment_status=paid` (respeita filtro de período).
-- Card `TopProductsCard` no `AdminDashboard.jsx` com imagem, qty, pedidos, receita.
+- Pacote em `/app/deploy/` com `install.sh`, `deploy.sh`, `update.sh`, templates Nginx + Supervisor.
+- Documentação principal: `/app/deploy/DEPLOY.md`.
+- Credenciais sensíveis em `db.app_credentials` (nunca `.env`).
+- Cron interno via APScheduler dentro do backend (não usa cron do sistema).
 
-### P1 — Fix Top 10 indicadores R$ 0,00
-- Removido `period_filter` da query de commissions: os `sponsor_order_ids` já vêm restritos pelo período (via `top_aff_agg`), e commissions podem ter `created_at` diferente do pedido (ex: recalculo retroativo) causando R$ 0,00 indevido.
+---
 
-### P1 — Editor rico de templates de email (TipTap)
-- Pacotes: `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-image`, `@tiptap/extension-link`.
-- Componente `EmailTemplateEditor.jsx` substitui o textarea HTML cru no editor de modelos.
-- Toolbar com: negrito/itálico/tachado, H1/H2/parágrafo, listas, citação, código, **divisor**, link, **upload de imagem** (`/api/admin/upload-image`), **inserir logo da empresa** (via `/api/site-settings.logo_url`), **dropdown de variáveis dinâmicas** ({{user.name}}, {{order.total}}, etc), undo/redo.
+## 9. Documentos Auxiliares
 
-### Testes
-- `test_iter42o_merge_and_resolve.py` (2 testes) — PASS. Suíte iter42*: **60/60 passing**.
-
-## Iter 42n (Fev/2026): Indicações Diretas + Top 10 cashback contam APENAS pedidos via link
-- **Bug**: o card "Indicações Diretas" em `/minha-rede` mostrava R$ 0,00 mesmo quando havia cashback gerado por pedidos feitos no link do user (porque `affiliate_commission_rate=0` deixava o `type="affiliate"` zerado). E o Top 10 Indicadores do Dashboard somava TODO o cashback da conta do user, não só dos pedidos via link.
-- **Fix backend `/api/users/me/network`**: `by_source.affiliate` agora é redefinido como cashback de pedidos cujo `order.sponsor_id == user_id` (independente do `type`). Adicionado também `orders_count` no breakdown. Frontend atualizou subtítulo do card: "Cashback gerado por compras no meu link".
-- **Fix backend `/api/admin/dashboard` (top_affiliates)**: a agregação `aff_commissions` agora filtra `commissions.order_id IN sponsor.direct_orders` (os order_ids da agregação anterior), em vez de somar tudo do user. Resultado: `commission_total` reflete só os pedidos via link de indicação.
-- Testes: `test_iter42n_referral_only_metrics.py` (2 testes) — PASS. Total suíte iter42*: **44/44 passing**.
-
-## Iter 42m (Fev/2026): "Compras por Indicação" no relatório admin + /minha-rede enxuto
-- **Admin Cashback por Geração**: nova 4ª categoria "Compras por Indicação" (verde) — cashbacks gerados por pedidos via link `?ref=` (filtro `order.sponsor_id != null`). Aparece como barra paralela (stackId="r") no gráfico, fatia adicional no pie e bloco extra na tabela "Resumo por geração". Texto explicativo deixa claro que estes valores **não somam** com Equipe 1/2 — é visão paralela.
-- **Backend**: helper `_build_referral_sales_summary(db, match)` retorna agregação por geração. Adicionado ao response de `/api/admin/commissions-by-generation` como `referral_sales_by_generation`.
-- **/minha-rede do usuário**: esconde card da Equipe que o user NÃO faz parte (se `network_1`, oculta "Equipe 2" e vice-versa). Card chamado só "Equipe" (sem número). Removido subtítulo "Estrutura propagandista (até 6ª gen)". Grid `sm:grid-cols-3` → `sm:grid-cols-2`.
-
-
-## Iter 42l (Fev/2026): Fix 3 regressões críticas (afiliação perdida + banner + pontos no carrinho)
-- **Bug P0 — Pedidos via link de indicação perdiam `sponsor_id`** (afiliados sem cashback de indicações diretas, sumiam do Top 10).
-  - **Root cause**: order só armazenava `affiliate_id` (não `sponsor_id`); user que registrou direto e depois comprou via ref_code não tinha `sponsor_id` persistido; query do Top 10 lia apenas de `users.sponsor_id` via lookup.
-  - **Fix 1**: `/api/checkout` agora persiste `user.sponsor_id` (sticky) quando ref_code resolve para afiliado válido — apenas se user ainda não tinha sponsor (sem sobrescrever histórico).
-  - **Fix 2**: order document recebe `sponsor_id` (snapshot do checkout) — preserva afiliação mesmo se user mudar de sponsor no futuro.
-  - **Fix 3**: aggregation do Top 10 usa `$ifNull: ["$sponsor_id", "$_buyer.sponsor_id"]` — prioriza snapshot do pedido com fallback ao perfil atual.
-  - **Backfill**: script `tests/backfill_order_sponsor_id.py` (dry-run + `--apply`). Aplicado em produção: 13 pedidos recuperaram `sponsor_id` via `affiliate_id` + 2 users tiveram `sponsor_id` ressuscitado a partir do histórico de compras.
-- **Bug P1 — Hero Carousel não exibia imagem de fundo**:
-  - **Root cause**: data URLs (`data:image/...;base64,...`) entravam em `url()` sem aspas, com vírgulas e `=` que quebram o parser CSS quando o token não está quoted.
-  - **Fix**: `url("${sl.image_url}")` com aspas duplas e remoção do `background: undefined` shorthand que estava resetando `background-image`. Estrutura de style refatorada em ternário condicional (imagem OU gradient).
-- **Bug P2 — Total de pontos não aparecia no carrinho**:
-  - **Root cause**: endpoint `/api/cart` enriquecia itens com nome/preço/imagem mas não incluía `points_value` (frontend lia `i.points_value` sempre `undefined`).
-  - **Fix**: enriquecimento agora inclui `"points_value": float(prod.get("points_value") or 0)`.
-- Testes: `test_iter42l_sponsor_id_preserved.py` (3 testes — sticky sponsor_id, points_value no cart, agg Top 10 com fallback) — todos PASS. Total suíte iter42*: **42/42 passing**.
-
-## Iter 49 (Fev/2026): Reprocess IGVD hooks + Filtro Mês Atual + Métricas de Rede
-- **Endpoint admin `POST /api/admin/igvd/reprocess-order`** — recebe `{order_id}` (aceita ID completo `ord_xxxxxxxxxxxx`, ID curto de 8 chars `#10E6A477` ou `10E6A477` — regex suffix case-insensitive, prefere pedidos IGVD ordenados por created_at DESC).
-  - Executa `_post_igvd_order_created` (comissões, pontos Maxx, fatura por e-mail).
-  - Idempotente: comissões existentes não duplicam (índice `uq_commission_per_beneficiary`); retorna `commissions_created`/`points_created` (delta) e totais.
-  - Validações escalonadas: 400 empty → 404 not found → 400 not IGVD → 400 not paid → 200 success.
-- **PeriodFilter reutilizável** (`/app/frontend/src/components/PeriodFilter.jsx`):
-  - Dois modos: `Mês/Ano` (dropdowns + botão "Aplicar" + "Mês atual") e `Intervalo` (from/to date pickers).
-  - Export helper `getCurrentMonthRange()` — primeiro/último dia do mês atual.
-  - Aplicado em `AdminDashboard.jsx`, `MyNetwork.jsx`, `MyReferral.jsx` (todas com default = mês atual).
-- **`/api/users/me/network`, `/api/users/me/referral`, `/api/users/me/commissions`**: aceitam `start`/`end` (YYYY-MM-DD) e filtram commissions.created_at + orders.created_at pelo range.
-- **MyNetwork — novas colunas por geração**:
-  - `received_total` = comissões (paid+pending) do user daquela geração no período.
-  - `purchases_total` / `purchases_count` = soma de `orders.total` (paid) dos downlines daquela geração no período.
-  - KPIs principais atualizados: "Valor recebido no período" (paid+pending) e "Total de compras da rede" (substituindo o antigo "Pendente/Recebido").
-- **UI AdminIgvd**: novo card "Reprocessar hooks de pedido IGVD" com input + botão + card de resultado (counters de cashback/pontos + voucher_code).
-- Tests: `/app/backend/tests/test_iter49_reprocess_and_period.py` (17/17 PASS): auth 401/403, validações 400/404, full/short ID, idempotência, novos campos de MyNetwork, filtro de período em referral/commissions.
-
-## Project Health
-- **Broken**: nenhum
-- **Mocked**: API externa Cartão de Benefícios (adapter genérico — depende do fornecedor)
-- **Test coverage**: iter 16-20 e iter 49 todas PASS 100%
+| Documento | Conteúdo |
+|-----------|----------|
+| `/app/memory/CHANGELOG.md`                  | Histórico completo de iterações (datado) |
+| `/app/memory/ROADMAP.md`                    | Backlog priorizado P0/P1/P2/P3 |
+| `/app/memory/test_credentials.md`           | Credenciais de admin/customers de teste |
+| `/app/docs/IGVD_USER_LOOKUP_API.md`         | Contrato público da API OxxPharma → IGVD (Iter 56) |
+| `/app/docs/MAXX_MMN_API.md`                 | Contrato da integração Maxx MMN |
+| `/app/deploy/DEPLOY.md`                     | Instruções de deploy em Ubuntu |
