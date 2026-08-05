@@ -13,8 +13,8 @@
 
 A IGVD precisa atualizar cadastros e, para tanto, consulta a OxxPharma pelo **e-mail** do licenciado, recebendo em resposta:
 
-- **user_id** — identificador único do licenciado dentro da OxxPharma
-- **leader** — patrocinador/líder do licenciado, com **user_id**, **nome**, **e-mail** e tipo de rede
+- **user_id** — identificador legado numérico do licenciado dentro da OxxPharma (mesma numeração usada historicamente pela IGVD, ex.: `"5180"`). Fallback para o ID interno (`user_XXX`) se o legado não estiver cadastrado.
+- **leader** — patrocinador/líder do licenciado, com **user_id** (legado numérico), **nome**, **e-mail** e tipo de rede
 
 A hierarquia utilizada é a de **negócio (MMN)**: se o licenciado tiver `network_sponsor_id` (patrocinador MMN), é esse o líder retornado. Caso contrário, cai automaticamente para `sponsor_id` (patrocinador de indicação/afiliado). O campo `sponsor_source` na resposta informa qual das duas hierarquias foi usada.
 
@@ -58,13 +58,13 @@ x-Api-Key: SUA_CHAVE
 {
   "found": true,
   "user": {
-    "user_id": "user_adae431c883d",
+    "user_id": "5180",
     "name": "Maria Costa",
     "email": "maria@rede1.com.br",
     "network_type": "network_1"
   },
   "leader": {
-    "user_id": "user_483613649bbd",
+    "user_id": "4309",
     "name": "Joao Silva",
     "email": "joao@rede1.com.br",
     "network_type": "network_1"
@@ -78,12 +78,12 @@ x-Api-Key: SUA_CHAVE
 | Campo                     | Tipo                 | Descrição |
 |---------------------------|----------------------|-----------|
 | `found`                   | boolean              | `true` se o e-mail existe na base; `false` caso contrário. |
-| `user.user_id`            | string               | ID único do usuário na OxxPharma. Persistente. |
+| `user.user_id`            | string               | ID legado numérico do usuário (ex.: `"5180"`). Fallback para o ID interno `user_XXX` se o cadastro não tiver ID legado. |
 | `user.name`               | string               | Nome completo do licenciado. |
 | `user.email`              | string               | E-mail cadastrado (na forma armazenada). |
 | `user.network_type`       | string \| null       | `customer` \| `network_1` \| `network_2` |
 | `leader`                  | object \| null       | Líder/patrocinador. `null` se o usuário não tiver patrocinador. |
-| `leader.user_id`          | string               | ID único do líder. |
+| `leader.user_id`          | string               | ID legado numérico do líder (mesma regra de fallback). |
 | `leader.name`             | string               | Nome do líder. |
 | `leader.email`            | string               | E-mail do líder. |
 | `leader.network_type`     | string \| null       | Tipo de rede do líder. |
@@ -138,13 +138,13 @@ x-Api-Key: SUA_CHAVE
   "found": true,
   "sandbox": true,
   "user": {
-    "user_id": "usr_SANDBOX_1234",
+    "user_id": "5180",
     "name": "Usuário Simulado",
     "email": "qualquer@email.com",
     "network_type": "customer"
   },
   "leader": {
-    "user_id": "usr_SANDBOX_LEADER",
+    "user_id": "4309",
     "name": "Líder Simulado",
     "email": "leader.sandbox@example.com",
     "network_type": "network_1"
@@ -277,3 +277,4 @@ data = r.json()
 | Versão | Data      | Notas                                              |
 |--------|-----------|----------------------------------------------------|
 | 1.0    | Ago/2026  | Lançamento inicial (Iter 56). Endpoint produção + sandbox + auditoria. |
+| 1.1    | Fev/2026  | (Iter 57) `user.user_id` e `leader.user_id` passam a retornar o ID legado numérico (`external_id`, ex.: `"5180"`) quando disponível — fallback para o ID interno `user_XXX` mantém compatibilidade. |

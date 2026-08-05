@@ -4,6 +4,13 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 57 (Fev/2026) — IGVD Lookup: ID legado numérico (`external_id`)
+- `lookup_user_by_email` agora projeta e retorna o campo `external_id` do usuário (e do líder) como `user.user_id` / `leader.user_id`.
+- Fallback seguro: se o usuário não tiver `external_id`, mantém o `user_id` interno (`user_XXX`) — garante retrocompatibilidade.
+- Sandbox atualizado com exemplos numéricos (`"5180"` / `"4309"`) espelhando o formato de produção.
+- Documentação `IGVD_USER_LOOKUP_API.md` atualizada (v1.1) com nova semântica do campo, tabelas e exemplos.
+- Validado por curl: usuário real com `external_id`, usuário sem `external_id` (fallback), e-mail inexistente e falha de autenticação.
+
 ## Iter 56 (Ago/2026) — Integração OxxPharma → IGVD: User Lookup
 - **Endpoints** `POST /api/integrations/igvd/user-lookup` (produção) + `/sandbox` (homologação).
   - Autenticação: header `x-Api-Key` = `settings.igvd_voucher_secret` (mesma chave dos vouchers).

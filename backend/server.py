@@ -4329,8 +4329,8 @@ async def igvd_user_lookup_sandbox(request: Request, body: IgvdUserLookupIn):
     result = {
         "found": True,
         "sandbox": True,
-        "user": {"user_id": "usr_SANDBOX_1234", "name": "Usuário Simulado", "email": email, "network_type": "customer"},
-        "leader": {"user_id": "usr_SANDBOX_LEADER", "name": "Líder Simulado", "email": "leader.sandbox@example.com", "network_type": "network_1"},
+        "user": {"user_id": "5180", "name": "Usuário Simulado", "email": email, "network_type": "customer"},
+        "leader": {"user_id": "4309", "name": "Líder Simulado", "email": "leader.sandbox@example.com", "network_type": "network_1"},
         "sponsor_source": "network_sponsor_id",
         "message": "Sandbox: nada foi consultado no banco. Contrato validado.",
     }

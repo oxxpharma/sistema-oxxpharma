@@ -97,37 +97,63 @@ async def lookup_user_by_email(db, email: str) -> Dict:
     """Iter 56: retorna user_id + lider (sponsor) do usuario pelo e-mail.
     Nao expoe dados sensiveis (senha, endereco, CPF). O `leader` privilegia
     `network_sponsor_id` (patrocinador MMN); cai para `sponsor_id` se ausente.
+
+    Iter 57: `user_id` na resposta usa o `external_id` (ID legado numerico,
+    ex.: "5180") quando disponivel, com fallback para o `user_id` interno.
+    A IGVD depende do ID legado para reconciliar cadastros historicos.
     """
     if not email:
         return {"found": False, "user": None, "leader": None, "sponsor_source": None}
     q = (email or "").strip().lower()
+    projection = {
+        "_id": 0, "user_id": 1, "external_id": 1, "name": 1, "email": 1,
+        "network_type": 1, "sponsor_id": 1, "network_sponsor_id": 1,
+    }
     user = await db.users.find_one(
         {"email": {"$regex": f"^{re.escape(q)}$", "$options": "i"}},
-        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1, "sponsor_id": 1, "network_sponsor_id": 1},
+        projection,
     )
     if not user:
         return {"found": False, "user": None, "leader": None, "sponsor_source": None}
-    leader = None
+
+    def _legacy_id(doc: Dict) -> Optional[str]:
+        raw = doc.get("external_id")
+        if raw is None or raw == "":
+            raw = doc.get("user_id")
+        return str(raw) if raw is not None else None
+
+    leader_doc = None
     src = None
+    leader_projection = {"_id": 0, "user_id": 1, "external_id": 1, "name": 1, "email": 1, "network_type": 1}
     net_sp = user.get("network_sponsor_id")
     sp = user.get("sponsor_id")
     if net_sp:
-        leader = await db.users.find_one({"user_id": net_sp}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1})
-        if leader:
+        leader_doc = await db.users.find_one({"user_id": net_sp}, leader_projection)
+        if leader_doc:
             src = "network_sponsor_id"
-    if not leader and sp:
-        leader = await db.users.find_one({"user_id": sp}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "network_type": 1})
-        if leader:
+    if not leader_doc and sp:
+        leader_doc = await db.users.find_one({"user_id": sp}, leader_projection)
+        if leader_doc:
             src = "sponsor_id"
+
+    leader_payload = None
+    if leader_doc:
+        leader_payload = {
+            "user_id": _legacy_id(leader_doc),
+            "name": leader_doc.get("name"),
+            "email": leader_doc.get("email"),
+            "network_type": leader_doc.get("network_type"),
+        }
+
     return {
         "found": True,
         "user": {
-            "user_id": user.get("user_id"),
+            "user_id": _legacy_id(user),
             "name": user.get("name"),
             "email": user.get("email"),
             "network_type": user.get("network_type"),
         },
-        "leader": leader,
+        "leader": leader_payload,
         "sponsor_source": src,
     }
 
