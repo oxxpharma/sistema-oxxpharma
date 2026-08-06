@@ -4054,16 +4054,23 @@ async def mock_confirm_payment(request: Request, order_id: str, user: dict = Dep
 
 
 async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, source: str = "mp"):
-    """Helper centralizado: marca pedido como pago, cria nota, paga commissions, registra pontos, dispara email."""
-    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
-    if not order:
-        return None
-    if order.get("payment_status") == "paid":
-        return order  # idempotente
-    await db.orders.update_one(
-        {"order_id": order_id},
+    """Helper centralizado: marca pedido como pago, cria nota, paga commissions, registra pontos, dispara email.
+
+    Iter 58: **transicao atomica** para `payment_status=paid`. O gateway Mercado
+    Pago costuma enviar mais de um webhook por pagamento em milissegundos; a
+    checagem antiga (`find_one` -> `update_one`) permitia que ambos passassem o
+    guard e disparassem comissoes/pontos duplicados. Agora usamos
+    `find_one_and_update` condicional -> apenas um webhook 'vence' e roda os
+    hooks; os demais recebem o pedido ja pago e retornam idempotentes.
+    """
+    updated = await db.orders.find_one_and_update(
+        {"order_id": order_id, "payment_status": {"$ne": "paid"}},
         {"$set": {"payment_status": "paid", "order_status": "paid", "paid_at": now_iso(), "payment_id": payment_id, "paid_via": source}},
+        return_document=True,
     )
+    if updated is None:
+        # Ja estava pago (ou nao existe) -> nao roda hooks de novo
+        return await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     # Nota fiscal
     fresh = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if fresh and not fresh.get("invoice_number"):
@@ -4092,13 +4099,30 @@ async def register_points_from_order(db, order_id: str):
     """Registra logs de pontos para cada item com points_value > 0.
     Iter 53: respeita flags `skip_points` (nao gera logs) e `skip_maxx_sync`
     (gera logs mas nao dispara realtime para Maxx). Sao setadas no PDV admin
-    para permitir vendas de balcao/ajustes sem impactar rede/pontuacao."""
+    para permitir vendas de balcao/ajustes sem impactar rede/pontuacao.
+
+    Iter 58: **guard atomico** contra race conditions. Webhooks do Mercado Pago
+    (e outros gatilhos concorrentes) podiam invocar essa funcao duas vezes em
+    milissegundos, cada chamada passando pelo check antigo (find_one) antes da
+    outra inserir logs, resultando em ENVIO DUPLICADO de pontos para a Maxx.
+    Agora usamos `find_one_and_update` com filtro `points_registered != True`
+    -> apenas UMA invocacao consegue marcar o pedido; as demais retornam.
+    """
     o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not o:
         return
     if o.get("skip_points"):
         return
-    # Idempotencia: se ja registrou, ignora
+    # Iter 58: guarda atomica — vence quem conseguir setar points_registered=True
+    won = await db.orders.find_one_and_update(
+        {"order_id": order_id, "points_registered": {"$ne": True}},
+        {"$set": {"points_registered": True, "points_registered_at": now_iso()}},
+    )
+    if won is None:
+        # Outra invocacao concorrente ja registrou. Idempotente.
+        return
+    # Iter 58: safety net legado — se por algum motivo ha logs pre-existentes
+    # (pedidos antigos criados antes deste guard), nao duplica.
     existing = await db.points_log.find_one({"order_id": order_id})
     if existing:
         return

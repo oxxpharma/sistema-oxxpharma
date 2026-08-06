@@ -4,6 +4,14 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 58 (Fev/2026) — 🚨 Fix crítico: envio duplicado de pontos para a Maxx
+- **Sintoma:** Alguns pedidos disparavam DUAS chamadas quase simultâneas para `/api/Faturas/receberpontos` da Maxx, gerando `movimento_id` e `fatura_id` diferentes na origem — o cliente recebia **pontos em dobro**.
+- **Causa raiz:** `register_points_from_order` e `mark_order_paid` usavam checagens não-atômicas (`find_one` → `update_one`). Sob webhooks concorrentes do Mercado Pago (que envia múltiplas notificações em milissegundos por pagamento aprovado), ambas as execuções passavam pelo guard antes de qualquer uma persistir → race condition.
+- **Fix:**
+  - `mark_order_paid`: substituído por `find_one_and_update` condicional (`payment_status != paid`). Só o webhook vencedor roda comissões/pontos/emails; os demais retornam idempotentes.
+  - `register_points_from_order`: guard atômico via `find_one_and_update` setando `orders.points_registered=True` — apenas UMA invocação registra pontos e dispara `maxx_service.trigger_realtime`.
+- **Validação:** Teste de concorrência com 5 invocações paralelas → 1 conjunto de pontos criado (antes: 5). Preview DB confirmou 2 pedidos históricos afetados (`ord_6b00158702eb`, `ord_5cfa1dd75aa5`).
+
 ## Iter 57 (Fev/2026) — IGVD Lookup: ID legado numérico (`external_id`)
 - `lookup_user_by_email` agora projeta e retorna o campo `external_id` do usuário (e do líder) como `user.user_id` / `leader.user_id`.
 - Fallback seguro: se o usuário não tiver `external_id`, mantém o `user_id` interno (`user_XXX`) — garante retrocompatibilidade.
