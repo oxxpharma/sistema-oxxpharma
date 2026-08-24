@@ -4,6 +4,19 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 59 (Fev/2026) — Supressão mensal da rede (MMN)
+- Novo módulo `/app/backend/network_suppression_service.py` (~380 linhas).
+- **Fluxo:** admin sobe `.xls/.xlsx` de cancelados da Ozoxx → sistema faz match por e-mail → gera **preview em rascunho** classificando cada linha (`matched | not_found | already_cancelled | email_ambiguous`) → admin confere e confirma → apply em **duas fases** (marca todos como suprimidos, depois reparent).
+- **Cascata resolvida:** `_resolve_upline` sobe a árvore ignorando quem também está no lote — filhos nunca ficam órfãos apontando pra outro suprimido no mesmo mês.
+- **Revert:** guarda snapshot em `pre_suppression_*` no user + `children_reassigned` na entry; permitido só no **mesmo mês** da aplicação (janela até fechamento de comissão).
+- **Efeitos por usuário suprimido:** `suppressed=true`, `network_type='customer'`, filhos reatribuídos ao upline ativo mais próximo (null se raiz). Login, pedidos e histórico permanecem consultáveis. Comissões em aberto NÃO são mexidas.
+- **Endpoints:** `POST /api/admin/network-suppression/upload`, `GET /batches`, `GET /batches/{id}`, `POST /batches/{id}/apply`, `POST /batches/{id}/revert`, `DELETE /batches/{id}` (só rascunhos).
+- **Parser:** aceita `.xls` (converte via LibreOffice CLI) e `.xlsx` (openpyxl). Detecta colunas por variações (EMAIL/E-MAIL/etc). Ignora `ID/LOGIN/NOME VENDEDOR`.
+- **UI:** `/backoffice/supressao-rede` — dropzone, tabela de lotes com badges, drawer detalhado com abas por status + busca + botão de confirmação explícita.
+- **Novas coleções:** `network_suppression_batches`, `network_suppression_entries`.
+- **Deps:** requer `soffice` (LibreOffice) instalado no host para converter `.xls` (legado OLE); `.xlsx` funciona sem essa dependência.
+- **Validado:** teste programático de cascata (`A→B→C→D` com A e B suprimidos, C sobe pra ROOT via A→A também suprimido) + E2E via HTTP (upload/list/apply/revert/idempotência).
+
 ## Iter 58 (Fev/2026) — 🚨 Fix crítico: envio duplicado de pontos para a Maxx
 - **Sintoma:** Alguns pedidos disparavam DUAS chamadas quase simultâneas para `/api/Faturas/receberpontos` da Maxx, gerando `movimento_id` e `fatura_id` diferentes na origem — o cliente recebia **pontos em dobro**.
 - **Causa raiz:** `register_points_from_order` e `mark_order_paid` usavam checagens não-atômicas (`find_one` → `update_one`). Sob webhooks concorrentes do Mercado Pago (que envia múltiplas notificações em milissegundos por pagamento aprovado), ambas as execuções passavam pelo guard antes de qualquer uma persistir → race condition.

@@ -40,16 +40,19 @@ async function request(path, { method = 'GET', body, headers = {}, ...rest } = {
 
   const adminTenant = previewTenant || localStorage.getItem('admin_tenant');
   const tenantHeader = adminTenant && adminTenant !== 'all' ? { 'X-Tenant': adminTenant } : {};
+  // Iter 59: se body for FormData, NAO serializa nem seta Content-Type
+  // (o browser injeta o boundary correto sozinho).
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...tenantHeader,
       ...headers,
     },
     credentials: 'include',
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
     ...rest,
   });
   const text = await res.text();

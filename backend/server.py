@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, BackgroundTasks, Header
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, BackgroundTasks, Header, UploadFile, File, Form
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, field_validator
@@ -34,6 +34,7 @@ import igvd_service
 import multiplier_campaign
 import melhorenvio_service
 import store_extras
+import network_suppression_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -442,6 +443,7 @@ async def lifespan(app: FastAPI):
     await app.db.users.create_index("leader_external_id", sparse=True)
     await app.db.users.create_index("cpf_digits", sparse=True)
     await igvd_service.ensure_indexes(app.db)
+    await network_suppression_service.ensure_indexes(app.db)
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
@@ -4387,6 +4389,81 @@ async def admin_igvd_lookup_logs(request: Request, page: int = 1, limit: int = 3
     total = await db.igvd_lookup_logs.count_documents({})
     items = await db.igvd_lookup_logs.find({}, {"_id": 0}).sort("at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"items": items, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+
+# ==================== NETWORK SUPPRESSION (Iter 59) ====================
+
+@app.post("/api/admin/network-suppression/upload")
+async def admin_ns_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    reference_month: Optional[str] = Form(None),
+    user: dict = Depends(require_admin()),
+):
+    """Sobe .xls/.xlsx de cancelados da Ozoxx e cria um lote em status=draft.
+    NAO aplica nada — retorna preview para o admin conferir e confirmar depois.
+    """
+    db = request.app.db
+    fname = (file.filename or "").lower()
+    if not (fname.endswith(".xls") or fname.endswith(".xlsx")):
+        raise HTTPException(status_code=400, detail="Arquivo deve ser .xls ou .xlsx")
+    data = await file.read()
+    if not data or len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Arquivo vazio ou maior que 20 MB")
+    try:
+        result = await network_suppression_service.build_preview(
+            db, data, file.filename or "planilha.xlsx", user, reference_month=reference_month,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@app.get("/api/admin/network-suppression/batches")
+async def admin_ns_list_batches(request: Request, page: int = 1, limit: int = 30, user: dict = Depends(require_admin())):
+    db = request.app.db
+    return await network_suppression_service.list_batches(db, page=page, limit=limit)
+
+
+@app.get("/api/admin/network-suppression/batches/{batch_id}")
+async def admin_ns_get_batch(request: Request, batch_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    detail = await network_suppression_service.get_batch_detail(db, batch_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Lote nao encontrado")
+    return detail
+
+
+@app.post("/api/admin/network-suppression/batches/{batch_id}/apply")
+async def admin_ns_apply(request: Request, batch_id: str, user: dict = Depends(require_super_admin())):
+    db = request.app.db
+    try:
+        r = await network_suppression_service.apply_batch(db, batch_id, user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **r}
+
+
+@app.post("/api/admin/network-suppression/batches/{batch_id}/revert")
+async def admin_ns_revert(request: Request, batch_id: str, user: dict = Depends(require_super_admin())):
+    db = request.app.db
+    try:
+        r = await network_suppression_service.revert_batch(db, batch_id, user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **r}
+
+
+@app.delete("/api/admin/network-suppression/batches/{batch_id}")
+async def admin_ns_delete_draft(request: Request, batch_id: str, user: dict = Depends(require_super_admin())):
+    db = request.app.db
+    try:
+        ok = await network_suppression_service.delete_draft(db, batch_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Lote nao encontrado")
+    return {"ok": True}
 
 
 @app.get("/api/admin/igvd/vouchers")

@@ -31,6 +31,7 @@ aiofiles>=23.2,<25.0
 # Reports
 openpyxl>=3.1,<4.0
 reportlab>=4.0,<5.0
+pandas>=2.0,<4.0
 
 # Utils
 python-jose[cryptography]>=3.3,<4.0

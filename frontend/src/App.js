@@ -60,6 +60,7 @@ import AdminMaxxPending from './pages/backoffice/AdminMaxxPending';
 import AdminIgvd from './pages/backoffice/AdminIgvd';
 import AdminPDV from './pages/backoffice/AdminPDV';
 import AdminMultiplierCampaign from './pages/backoffice/AdminMultiplierCampaign';
+import AdminNetworkSuppression from './pages/backoffice/AdminNetworkSuppression';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
@@ -150,6 +151,7 @@ function AppRoutes() {
         <Route path="frete" element={<AdminShipping />} />
         <Route path="maxx" element={<AdminMaxx />} />
         <Route path="maxx-pendentes" element={<AdminMaxxPending />} />
+        <Route path="supressao-rede" element={<AdminNetworkSuppression />} />
         <Route path="igvd" element={<AdminIgvd />} />
         <Route path="melhor-envio" element={<AdminMelhorEnvio />} />
         <Route path="programa-aprovados" element={<AdminReferralApproved />} />
