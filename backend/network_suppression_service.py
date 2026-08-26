@@ -392,25 +392,35 @@ async def apply_batch(db, batch_id: str, admin_user: Dict) -> Dict[str, Any]:
 
     # Fase 1: marca todos como suprimidos (guarda snapshot p/ revert)
     #
-    # Guarda o estado ANTIGO em campos `pre_suppression_*` — usado no revert.
+    # Iter 60: Ao suprimir, o antigo `network_sponsor_id` (lider da Equipe) vira o novo
+    # `sponsor_id` (afiliado permanente) — o usuario passa a ser "cliente direto" do
+    # ex-lider. Comissoes futuras do suprimido geram 8% de afiliado para o ex-lider.
+    # `network_sponsor_id` eh limpo (usuario nao esta mais em nenhuma rede MMN).
+    # Snapshot pre-suppression permite revert completo.
     for uid in to_suppress_ids:
         u = await db.users.find_one({"user_id": uid}, {"_id": 0, "network_type": 1, "network_sponsor_id": 1, "sponsor_id": 1})
         if not u:
             continue
-        await db.users.update_one(
-            {"user_id": uid},
-            {"$set": {
-                "suppressed": True,
-                "suppressed_at": now,
-                "suppressed_batch_id": batch_id,
-                "suppressed_reason": f"Cancelamento Ozoxx — lote {batch_id}",
-                "pre_suppression_network_type": u.get("network_type"),
-                "pre_suppression_network_sponsor_id": u.get("network_sponsor_id"),
-                "pre_suppression_sponsor_id": u.get("sponsor_id"),
-                "network_type": "customer",
-                "updated_at": now,
-            }},
-        )
+        old_net_sponsor = u.get("network_sponsor_id")
+        set_doc = {
+            "suppressed": True,
+            "suppressed_at": now,
+            "suppressed_batch_id": batch_id,
+            "suppressed_reason": f"Cancelamento Ozoxx — lote {batch_id}",
+            "pre_suppression_network_type": u.get("network_type"),
+            "pre_suppression_network_sponsor_id": old_net_sponsor,
+            "pre_suppression_sponsor_id": u.get("sponsor_id"),
+            "network_type": "customer",
+            "network_sponsor_id": None,
+            "updated_at": now,
+        }
+        # Se tinha lider Equipe, promove pra Patrocinador (afiliado). Se nao tinha
+        # lider Equipe, deixa o sponsor_id atual intacto.
+        if old_net_sponsor:
+            set_doc["sponsor_id"] = old_net_sponsor
+            set_doc["sponsor_promoted_from_network_at"] = now
+            set_doc["sponsor_promoted_batch_id"] = batch_id
+        await db.users.update_one({"user_id": uid}, {"$set": set_doc})
 
     # Fase 2: reparent — para cada suprimido, filhos diretos vao pro new_network_sponsor_id
     reassigned_total = 0

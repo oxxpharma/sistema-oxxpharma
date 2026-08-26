@@ -4,6 +4,12 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 60 (Fev/2026) — Ajustes: supressão vira afiliado + Comercial acessa Produtos
+- **Supressão:** ao suprimir usuário X que tinha `network_sponsor_id=L`, agora o líder L é **promovido a `sponsor_id`** (afiliado permanente) e o `network_sponsor_id` de X é limpo. X vira "cliente direto" do ex-líder — compras futuras geram 8% de afiliado pro L. Se X não tinha líder Equipe, o `sponsor_id` antigo é preservado.
+- **Revert:** restaura ambos os campos ao estado pré-supressão via snapshot (`pre_suppression_network_sponsor_id` + `pre_suppression_sponsor_id`), sem regressão.
+- **Comercial → Produtos:** perfil `comercial` agora vê e edita "Produtos" no backoffice. Backend já autorizava (`require_admin` aceita comercial); só o `can.editProducts` do AuthContext estava restrito.
+- Validado: cenário X (com afiliado antigo) → apply promove L a sponsor_id (mantém snapshot do ORIG_AFF) → filhos sobem pro L → revert restaura tudo.
+
 ## Iter 59 (Fev/2026) — Supressão mensal da rede (MMN)
 - Novo módulo `/app/backend/network_suppression_service.py` (~380 linhas).
 - **Fluxo:** admin sobe `.xls/.xlsx` de cancelados da Ozoxx → sistema faz match por e-mail → gera **preview em rascunho** classificando cada linha (`matched | not_found | already_cancelled | email_ambiguous`) → admin confere e confirma → apply em **duas fases** (marca todos como suprimidos, depois reparent).

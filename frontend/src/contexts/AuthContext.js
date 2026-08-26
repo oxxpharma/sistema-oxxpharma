@@ -114,7 +114,7 @@ export function AuthProvider({ children }) {
     // Iter 48: Estoque nao ve dashboard (metricas agregadas / faturamento total)
     viewDashboard: !['estoque'].includes(role),
     impersonate: canImpersonate,
-    editProducts: ['super_admin', 'admin', 'estoque'].includes(role),
+    editProducts: ['super_admin', 'admin', 'estoque', 'comercial'].includes(role),
     editOrders: ['super_admin', 'admin', 'comercial', 'estoque'].includes(role),
     editCoupons: ['super_admin', 'admin', 'comercial', 'estoque'].includes(role),
     manageRoles: isSuperAdmin,
