@@ -4,6 +4,11 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 64.1 (Fev/2026) — Reenvio para Maxx sempre visível
+- **Correção:** os checkboxes e o botão "Reenviar para a Maxx" só apareciam quando `sent_to_maxx=false`. Isso escondia o botão exatamente no caso em que o admin mais precisa: quando a Maxx respondeu HTTP 200 sem external_id (marcando `sent_to_maxx=true` no nosso DB) mas na verdade não efetivou lá.
+- Agora QUALQUER lançamento com `log_id` pode ser marcado e reenviado. A coluna passou a se chamar **"Enviado à Maxx"** (Sim + data / Não) — deixa claro o estado real.
+- Backend: removido early-return de "todos já enviados". Se admin marca e clica, o sistema reenvia mesmo assim.
+
 ## Iter 64 (Fev/2026) — Reenvio manual seletivo de pontos para a Maxx
 - Novo endpoint `POST /api/admin/users/{user_id}/points/resend-maxx` recebe `{log_ids: [...]}` e reenvia SOMENTE os lançamentos selecionados. Antes de enviar, atualiza os logs com o `external_id` atual do user (útil para casos em que o vínculo Maxx foi feito DEPOIS da compra).
 - Validação: 400 se `log_ids` vazio; 400 se user sem `external_id`; 404 se user não existe.

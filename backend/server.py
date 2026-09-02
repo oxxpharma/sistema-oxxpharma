@@ -7509,12 +7509,11 @@ async def admin_points_resend_maxx(request: Request, user_id: str, payload: Maxx
     ).to_list(10000)
     if not points:
         return {"success": False, "error": "Nenhum ponto encontrado com esses log_ids"}
-    already_sent = [p["log_id"] for p in points if p.get("sent_to_maxx")]
-    if already_sent and len(already_sent) == len(points):
-        return {"success": True, "sent_count": 0, "skipped": True, "reason": "todos ja enviados"}
+    # Iter 64.1: NAO abortamos se ja foram enviados — admin pode querer reenviar
+    # (caso comum: envio "aparentemente sucesso" na Maxx pra user sem external_id,
+    # que na verdade nao efetivou nada la).
     resp = await maxx_service.send_points(db, points, kind="manual_resend")
     resp["requested_count"] = len(payload.log_ids)
-    resp["already_sent_count"] = len(already_sent)
     return resp
 
 

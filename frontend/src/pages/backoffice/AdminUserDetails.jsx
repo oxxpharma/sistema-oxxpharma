@@ -467,8 +467,11 @@ function PointsTab({ points, userId, userExternalId, onRefresh }) {
   const [sending, setSending] = React.useState(false);
 
   const logs = points.logs || [];
-  const sendable = logs.filter(l => l.log_id && !l.sent_to_maxx);
-  const anySendable = sendable.length > 0;
+  // Iter 64.1: qualquer ponto com log_id pode ser reenviado (inclusive os
+  // marcados como `sent_to_maxx=true` — a Maxx pode ter respondido 200 mas nao
+  // efetivado por falta de external_id no momento do envio).
+  const selectable = logs.filter(l => l.log_id);
+  const hasAny = selectable.length > 0;
 
   const toggle = (log_id) => {
     setSelected(s => {
@@ -479,8 +482,8 @@ function PointsTab({ points, userId, userExternalId, onRefresh }) {
   };
   const toggleAll = () => {
     setSelected(s => {
-      if (s.size === sendable.length) return new Set();
-      return new Set(sendable.map(l => l.log_id));
+      if (s.size === selectable.length) return new Set();
+      return new Set(selectable.map(l => l.log_id));
     });
   };
 
@@ -520,7 +523,7 @@ function PointsTab({ points, userId, userExternalId, onRefresh }) {
             <div className="text-3xl font-heading font-black text-amber-900">{points.total.toLocaleString('pt-BR')}</div>
           </div>
         </div>
-        {anySendable && (
+        {hasAny && (
           <div className="flex items-center gap-2 flex-wrap">
             {!userExternalId && (
               <span className="text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded">
@@ -547,13 +550,13 @@ function PointsTab({ points, userId, userExternalId, onRefresh }) {
           <table className="w-full text-sm">
             <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
               <tr>
-                {anySendable && (
+                {hasAny && (
                   <th className="text-center p-3 w-10">
                     <input
                       type="checkbox"
-                      checked={selected.size > 0 && selected.size === sendable.length}
+                      checked={selected.size > 0 && selected.size === selectable.length}
                       onChange={toggleAll}
-                      title="Selecionar todos os pendentes"
+                      title="Selecionar todos"
                       data-testid="resend-select-all"
                     />
                   </th>
@@ -564,18 +567,17 @@ function PointsTab({ points, userId, userExternalId, onRefresh }) {
                 <th className="text-center p-3">Qtd.</th>
                 <th className="text-right p-3">Pts/un.</th>
                 <th className="text-right p-3">Total</th>
-                <th className="text-center p-3">Aplicado</th>
+                <th className="text-center p-3">Enviado à Maxx</th>
               </tr>
             </thead>
             <tbody>
               {logs.map((l, i) => {
-                const isSendable = l.log_id && !l.sent_to_maxx;
                 const isSelected = l.log_id && selected.has(l.log_id);
                 return (
                   <tr key={l.log_id || i} className={`border-t border-border hover:bg-bg-secondary/40 ${isSelected ? 'bg-amber-50/60' : ''}`}>
-                    {anySendable && (
+                    {hasAny && (
                       <td className="p-3 text-center">
-                        {isSendable ? (
+                        {l.log_id ? (
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -594,8 +596,11 @@ function PointsTab({ points, userId, userExternalId, onRefresh }) {
                     <td className="p-3 text-right text-xs">{l.points_unit ?? '-'}</td>
                     <td className="p-3 text-right font-bold">{l.points_total ?? '-'}</td>
                     <td className="p-3 text-center">
-                      {l.sent_to_maxx ? <Badge variant="success">Sim</Badge> :
-                        (l.applied_externally ? <Badge variant="success">Sim</Badge> : <Badge>Pendente</Badge>)}
+                      {l.sent_to_maxx ? (
+                        <Badge variant="success">Sim{l.sent_to_maxx_at ? ` · ${formatDateTime(l.sent_to_maxx_at).split(',')[0]}` : ''}</Badge>
+                      ) : (
+                        <Badge>Não</Badge>
+                      )}
                     </td>
                   </tr>
                 );
