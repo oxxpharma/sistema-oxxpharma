@@ -1,4 +1,5 @@
 // Service Worker for OxxPharma PWA
+/* global clients */
 const CACHE_NAME = 'oxxpharma-v3-icons-1777854900';
 const STATIC_CACHE = 'oxxpharma-static-v3-icons-1777854900';
 

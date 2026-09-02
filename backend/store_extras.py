@@ -220,6 +220,45 @@ def effective_price(product: Dict[str, Any], user: Optional[Dict[str, Any]], ten
     }
 
 
+def combo_line_total(product: Dict[str, Any], qty: int, unit_price: float, *, allowed: bool = True) -> Dict[str, Any]:
+    """Iter 61: aplica combo_pricing do produto se a quantidade bater com uma
+    linha configurada. Retorna {'line_total', 'applied', 'combo_price', 'unit_from_combo'}.
+
+    Regras (confirmadas com o dono do produto):
+    - Combo REPLACE (nao acumula com afiliado/tier/cashback/cupom).
+    - `allowed=False` -> ignora combo (usado quando ha cupom/voucher no checkout).
+    - Se qty NAO bater exatamente com uma linha `combo_pricing`, usa
+      `unit_price * qty` (comportamento padrao).
+    """
+    qty = int(qty or 0)
+    unit_price = float(unit_price or 0)
+    default_total = round(unit_price * qty, 2)
+    if not allowed or qty <= 0:
+        return {"line_total": default_total, "applied": False, "combo_price": None, "unit_from_combo": unit_price}
+    combos = product.get("combo_pricing") or []
+    if not combos:
+        return {"line_total": default_total, "applied": False, "combo_price": None, "unit_from_combo": unit_price}
+    match = None
+    for c in combos:
+        try:
+            cq = int(c.get("qty") or 0)
+            cp = float(c.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cq == qty and cp > 0:
+            match = {"qty": cq, "price": cp, "discount_pct": float(c.get("discount_pct") or 0)}
+            break
+    if not match:
+        return {"line_total": default_total, "applied": False, "combo_price": None, "unit_from_combo": unit_price}
+    combo_total = round(match["price"], 2)
+    return {
+        "line_total": combo_total,
+        "applied": True,
+        "combo_price": match,
+        "unit_from_combo": round(combo_total / qty, 4),
+    }
+
+
 def apply_pricing_to_product(product: Dict[str, Any], user: Optional[Dict[str, Any]], tenant: Optional[str] = None) -> Dict[str, Any]:
     """Decora o produto com 'effective_price' e 'tier_applied' sem mutar o documento original.
 

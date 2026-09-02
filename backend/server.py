@@ -99,6 +99,13 @@ DEFAULT_SETTINGS = {
     "email_trigger_welcome": True,
     # Webhook inbound Rede 1
     "external_webhook_token": "",               # gerado no seed
+    # Iter 61: WhatsApp de vendas (botao "Comprar pelo WhatsApp" na PDP)
+    "whatsapp_enabled": False,
+    "whatsapp_number": "",                       # formato E.164 sem sinal, ex: 5511999998888
+    "whatsapp_message_template": (
+        "Olá! Tenho interesse no produto *{product_name}* — R$ {product_price}.\n"
+        "Link: {product_url}"
+    ),
 }
 
 async def get_settings(db):
@@ -273,10 +280,13 @@ class AddressCreate(BaseModel):
 class ProductCreate(BaseModel):
     name: str
     description: str
+    description_html: Optional[str] = None  # Iter 61: HTML rico do editor TipTap (fallback: description em texto puro)
     price: float
     discount_price: Optional[float] = None
-    category: str
-    subcategory: Optional[str] = None
+    category: Optional[str] = None  # legado - mantido para compat; usar `categories` daqui pra frente
+    categories: List[str] = []  # Iter 61: multi-categoria
+    subcategory: Optional[str] = None  # legado
+    subcategories: List[str] = []  # Iter 61: multi-subcategoria
     images: List[str] = []
     stock: int = 0
     active: bool = True
@@ -293,6 +303,11 @@ class ProductCreate(BaseModel):
     ean: Optional[str] = None
     # Iter 43: override de preco por tenant {tenant_id: price}. Vazio = usa preco padrao.
     price_by_tenant: Optional[Dict[str, float]] = None
+    # Iter 61: novos campos
+    consumption_days: Optional[int] = None  # tempo de consumo estimado (dias)
+    features: List[str] = []  # bullet points de caracteristicas (mostrado abaixo do nome)
+    custom_fields: List[Dict] = []  # [{id?, title, text}] - quadros abaixo do botao comprar
+    combo_pricing: List[Dict] = []  # [{qty, price, discount_pct}] - preco por quantidade combinada
 
 class CategoryCreate(BaseModel):
     name: str
@@ -947,18 +962,121 @@ async def delete_category(request: Request, category_id: str, user: dict = Depen
         raise HTTPException(status_code=404, detail="Categoria nao encontrada")
     return {"message": "Categoria removida"}
 
+
+# ==================== SUBCATEGORIES (Iter 61) ====================
+
+class SubcategoryCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    category_ids: List[str] = []  # muitos-para-muitos com categorias
+    order: int = 0
+    active: bool = True
+
+
+@app.get("/api/subcategories")
+async def list_subcategories(request: Request, category_id: Optional[str] = None):
+    """Lista publica: opcional filtra por category_id vinculado."""
+    db = request.app.db
+    q = {"active": True}
+    if category_id:
+        q["category_ids"] = category_id
+    subs = await db.subcategories.find(q, {"_id": 0}).sort("order", 1).to_list(500)
+    return {"subcategories": subs}
+
+
+@app.get("/api/admin/subcategories")
+async def admin_list_subcategories(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    subs = await db.subcategories.find({}, {"_id": 0}).sort("order", 1).to_list(500)
+    return {"subcategories": subs}
+
+
+@app.post("/api/admin/subcategories")
+async def admin_create_subcategory(request: Request, data: SubcategoryCreate, user: dict = Depends(require_admin())):
+    db = request.app.db
+    doc = {"subcategory_id": gen_id("subcat_"), **data.model_dump(), "created_at": now_iso()}
+    await db.subcategories.insert_one(doc)
+    return await db.subcategories.find_one({"subcategory_id": doc["subcategory_id"]}, {"_id": 0})
+
+
+@app.put("/api/admin/subcategories/{subcategory_id}")
+async def admin_update_subcategory(request: Request, subcategory_id: str, data: SubcategoryCreate, user: dict = Depends(require_admin())):
+    db = request.app.db
+    upd = data.model_dump()
+    upd["updated_at"] = now_iso()
+    r = await db.subcategories.update_one({"subcategory_id": subcategory_id}, {"$set": upd})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Subcategoria nao encontrada")
+    return await db.subcategories.find_one({"subcategory_id": subcategory_id}, {"_id": 0})
+
+
+@app.delete("/api/admin/subcategories/{subcategory_id}")
+async def admin_delete_subcategory(request: Request, subcategory_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    r = await db.subcategories.delete_one({"subcategory_id": subcategory_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Subcategoria nao encontrada")
+    return {"message": "Subcategoria removida"}
+
+
+# ==================== PRODUCT FIELD TEMPLATES (Iter 61) ====================
+
+class ProductFieldTemplate(BaseModel):
+    name: str
+    fields: List[Dict] = []  # [{title, text}]
+
+
+@app.get("/api/admin/product-field-templates")
+async def admin_list_field_templates(request: Request, user: dict = Depends(require_admin())):
+    db = request.app.db
+    items = await db.product_field_templates.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"templates": items}
+
+
+@app.post("/api/admin/product-field-templates")
+async def admin_create_field_template(request: Request, data: ProductFieldTemplate, user: dict = Depends(require_admin())):
+    db = request.app.db
+    doc = {"template_id": gen_id("tpl_"), "name": data.name, "fields": data.fields or [], "created_at": now_iso()}
+    await db.product_field_templates.insert_one(doc)
+    return await db.product_field_templates.find_one({"template_id": doc["template_id"]}, {"_id": 0})
+
+
+@app.delete("/api/admin/product-field-templates/{template_id}")
+async def admin_delete_field_template(request: Request, template_id: str, user: dict = Depends(require_admin())):
+    db = request.app.db
+    r = await db.product_field_templates.delete_one({"template_id": template_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Template nao encontrado")
+    return {"message": "Template removido"}
+
+
 # ==================== PRODUCTS (PUBLIC) ====================
 
 @app.get("/api/products")
-async def list_products(request: Request, category: Optional[str] = None, search: Optional[str] = None, featured: Optional[bool] = None, page: int = 1, limit: int = 20):
+async def list_products(request: Request, category: Optional[str] = None, subcategory: Optional[str] = None, search: Optional[str] = None, featured: Optional[bool] = None, page: int = 1, limit: int = 20):
     db = request.app.db
     q = {"active": True}
     if category:
-        q["category"] = {"$regex": f"^{category}$", "$options": "i"}
+        # Iter 61: aceita category legado (case-insensitive) OU categories[] (id exato)
+        q["$or"] = [
+            {"category": {"$regex": f"^{re.escape(category)}$", "$options": "i"}},
+            {"categories": category},
+        ]
+    if subcategory:
+        sub_filter = [{"subcategory": subcategory}, {"subcategories": subcategory}]
+        if q.get("$or"):
+            q = {"$and": [q, {"$or": sub_filter}]}
+        else:
+            q["$or"] = sub_filter
     if featured:
         q["featured"] = True
     if search:
-        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}, {"brand": {"$regex": search, "$options": "i"}}]
+        search_or = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}, {"brand": {"$regex": search, "$options": "i"}}]
+        if q.get("$or") or q.get("$and"):
+            base = q if not q.get("$and") else q
+            q = {"$and": [base, {"$or": search_or}]}
+        else:
+            q["$or"] = search_or
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     user = await get_optional_user(request)
@@ -998,9 +1116,14 @@ async def admin_list_products(request: Request, category: Optional[str] = None, 
     db = request.app.db
     q = {}
     if category:
-        q["category"] = category
+        # Iter 61: aceita produtos cujo `category` legado bate OU `categories[]` contem o id
+        q["$or"] = [{"category": category}, {"categories": category}]
     if search:
-        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}]
+        search_or = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}]
+        if q.get("$or"):
+            q = {"$and": [q, {"$or": search_or}]}
+        else:
+            q["$or"] = search_or
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
@@ -1048,9 +1171,26 @@ async def get_cart(request: Request, user: dict = Depends(get_current_user)):
             price_info = store_extras.effective_price(prod, user, tenant=_tenant)
             price = float(price_info["price"])
             original = float(price_info["original_price"])
-            total = price * item["quantity"]
+            # Iter 61: combo pricing (só no cart display; no checkout com cupom/voucher, combo é revalidado)
+            combo = store_extras.combo_line_total(prod, item["quantity"], price, allowed=True)
+            total = combo["line_total"] if combo["applied"] else round(price * item["quantity"], 2)
             subtotal += total
-            enriched.append({**item, "name": prod["name"], "price": price, "original_price": original, "tier_applied": price_info.get("applied_tier"), "image": (prod.get("images") or [None])[0], "total": total, "stock": prod.get("stock", 0), "points_value": float(prod.get("points_value") or 0), "sku": prod.get("sku"), "ean": prod.get("ean")})
+            enriched.append({
+                **item,
+                "name": prod["name"],
+                "price": combo["unit_from_combo"] if combo["applied"] else price,
+                "original_price": original,
+                "unit_regular_price": price,
+                "tier_applied": price_info.get("applied_tier"),
+                "combo_applied": combo["applied"],
+                "combo_price": combo.get("combo_price"),
+                "image": (prod.get("images") or [None])[0],
+                "total": total,
+                "stock": prod.get("stock", 0),
+                "points_value": float(prod.get("points_value") or 0),
+                "sku": prod.get("sku"),
+                "ean": prod.get("ean"),
+            })
     return {"items": enriched, "subtotal": round(subtotal, 2), "count": len(enriched)}
 
 @app.post("/api/cart/items")
@@ -1177,6 +1317,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     items = []
     subtotal = 0
     _tenant = tenant_service.get_tenant(request)
+    # Iter 61: combo pricing so eh aplicado se cliente NAO usar cupom e NAO usar voucher/pontos.
+    combo_allowed = not bool(getattr(data, "coupon_code", None)) and float(getattr(data, "voucher_amount", 0) or 0) <= 0
     for ci in cart["items"]:
         prod = await db.products.find_one({"product_id": ci["product_id"], "active": True}, {"_id": 0})
         if not prod:
@@ -1186,9 +1328,28 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         # preco efetivo considerando pricing_tiers do usuario E override por tenant
         price_info = store_extras.effective_price(prod, user, tenant=_tenant)
         price = float(price_info["price"])
-        total = round(price * ci["quantity"], 2)
+        combo = store_extras.combo_line_total(prod, ci["quantity"], price, allowed=combo_allowed)
+        if combo["applied"]:
+            total = combo["line_total"]
+            unit = combo["unit_from_combo"]
+        else:
+            unit = price
+            total = round(price * ci["quantity"], 2)
         subtotal += total
-        items.append({"product_id": prod["product_id"], "name": prod["name"], "price": price, "quantity": ci["quantity"], "total": total, "image": (prod.get("images") or [None])[0], "points_value": float(prod.get("points_value") or 0), "tier_applied": price_info.get("applied_tier"), "sku": prod.get("sku"), "ean": prod.get("ean")})
+        items.append({
+            "product_id": prod["product_id"],
+            "name": prod["name"],
+            "price": unit,
+            "quantity": ci["quantity"],
+            "total": total,
+            "image": (prod.get("images") or [None])[0],
+            "points_value": float(prod.get("points_value") or 0),
+            "tier_applied": price_info.get("applied_tier"),
+            "combo_applied": combo["applied"],
+            "combo_price": combo.get("combo_price"),
+            "sku": prod.get("sku"),
+            "ean": prod.get("ean"),
+        })
         # Decrement stock
         await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
     if not items:
@@ -7335,6 +7496,16 @@ async def public_site_settings(request: Request):
         "hours": cfg.get("pickup_hours") or "",
         "instructions": cfg.get("pickup_instructions") or "",
     }
+    # Iter 61: expoe config publica do WhatsApp de vendas
+    try:
+        gs = await get_settings(request.app.db)
+        out["whatsapp"] = {
+            "enabled": bool(gs.get("whatsapp_enabled")),
+            "number": gs.get("whatsapp_number") or "",
+            "message_template": gs.get("whatsapp_message_template") or "",
+        }
+    except Exception:
+        out["whatsapp"] = {"enabled": False, "number": "", "message_template": ""}
     return out
 
 
@@ -7390,10 +7561,10 @@ async def admin_upload_image(request: Request, user: dict = Depends(require_admi
     return {"upload_id": upload_id, "url": data_url}
 
 
-# ==================== CMS PAGES (Editor visual) ====================
+# ==================== CMS PAGES (Editor visual - legacy) ====================
 
 @app.get("/api/pages/{slug}")
-async def public_get_page(request: Request, slug: str):
+async def public_get_cms_page(request: Request, slug: str):
     db = request.app.db
     p = await db.cms_pages.find_one({"slug": slug, "published": True}, {"_id": 0, "components_json": 0})
     if not p:
@@ -7409,7 +7580,7 @@ async def admin_list_pages(request: Request, user: dict = Depends(require_admin(
 
 
 @app.get("/api/admin/pages/{page_id}")
-async def admin_get_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
+async def admin_get_cms_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
     db = request.app.db
     p = await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
     if not p:

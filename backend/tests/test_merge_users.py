@@ -17,7 +17,6 @@ import pytest
 import requests
 from pymongo import MongoClient
 
-API_URL = os.environ.get("API_URL") or _read_env_url() if False else None
 def _read_env_url():
     try:
         with open('/app/frontend/.env') as f:
@@ -27,6 +26,8 @@ def _read_env_url():
     except Exception:
         pass
     return 'http://localhost:8001'
+
+API_URL = os.environ.get("API_URL") or _read_env_url()
 
 API_URL = os.environ.get("API_URL") or _read_env_url()
 ADMIN_EMAIL = "admin@oxxpharma.com"

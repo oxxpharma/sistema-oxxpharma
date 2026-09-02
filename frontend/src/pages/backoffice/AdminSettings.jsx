@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Save, Settings as SettingsIcon, Loader2, Percent, Award, Wallet, Building2 } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Loader2, Percent, Award, Wallet, Building2, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AdminSettings() {
@@ -40,6 +40,10 @@ export default function AdminSettings() {
         company_phone: settings.company_phone || '',
         company_email: settings.company_email || '',
         invoice_prefix: settings.invoice_prefix || 'OXX',
+        // Iter 61: WhatsApp de vendas
+        whatsapp_enabled: !!settings.whatsapp_enabled,
+        whatsapp_number: (settings.whatsapp_number || '').replace(/\D/g, ''),
+        whatsapp_message_template: settings.whatsapp_message_template || '',
       };
       const updated = await api.put('/api/admin/settings', payload);
       setSettings(updated);
@@ -158,6 +162,31 @@ export default function AdminSettings() {
           <Input label="Telefone" value={settings.company_phone || ''} onChange={e => setSettings({ ...settings, company_phone: e.target.value })} />
           <Input label="Email" value={settings.company_email || ''} onChange={e => setSettings({ ...settings, company_email: e.target.value })} />
           <Input label="Prefixo do nº da nota" className="md:col-span-2" value={settings.invoice_prefix || ''} onChange={e => setSettings({ ...settings, invoice_prefix: e.target.value })} hint={`Exemplo atual: ${settings.invoice_prefix || 'OXX'}-000001`} />
+        </div>
+      </div>
+
+      {/* Iter 61: WhatsApp de vendas */}
+      <div className="bg-white rounded-xl border border-border p-6 mt-6" data-testid="whatsapp-settings">
+        <h2 className="font-heading font-black text-lg flex items-center gap-2 mb-1"><MessageCircle className="w-5 h-5 text-[#25D366]" /> Botão "Comprar pelo WhatsApp"</h2>
+        <p className="text-xs text-txt-secondary mb-4">Se ativo, aparece um botão verde na página de cada produto que abre uma conversa no WhatsApp já com a mensagem preenchida.</p>
+        <label className="flex items-center gap-2 text-sm mb-4">
+          <input type="checkbox" checked={!!settings.whatsapp_enabled} onChange={e => setSettings({ ...settings, whatsapp_enabled: e.target.checked })} data-testid="whatsapp-enabled" />
+          <span className="font-semibold">Ativar botão nos produtos</span>
+        </label>
+        <div className="grid md:grid-cols-2 gap-3">
+          <Input label="Número do WhatsApp (com DDI, só dígitos)" value={settings.whatsapp_number || ''} onChange={e => setSettings({ ...settings, whatsapp_number: e.target.value })} placeholder="Ex: 5511999998888" data-testid="whatsapp-number" hint="Formato E.164 sem sinal. Ex: 55 + DDD + número." />
+        </div>
+        <div className="mt-3">
+          <label className="text-sm font-bold text-txt-secondary block mb-1">Template da mensagem</label>
+          <textarea
+            rows={4}
+            value={settings.whatsapp_message_template || ''}
+            onChange={e => setSettings({ ...settings, whatsapp_message_template: e.target.value })}
+            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+            placeholder="Olá! Tenho interesse no produto *{product_name}* — R$ {product_price}. Link: {product_url}"
+            data-testid="whatsapp-template"
+          />
+          <p className="text-xs text-txt-secondary mt-1">Variáveis disponíveis: <code>{'{product_name}'}</code>, <code>{'{product_price}'}</code>, <code>{'{product_url}'}</code>, <code>{'{quantity}'}</code></p>
         </div>
       </div>
     </div>

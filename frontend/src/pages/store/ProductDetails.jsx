@@ -11,7 +11,7 @@ import { useSiteSettings } from '../../hooks/useSiteSettings';
 import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 import { evaluateFreeShipping } from '../../lib/freeShipping';
 import FreeShippingProgress from '../../components/store/FreeShippingProgress';
-import { ShoppingCart, Truck, ShieldCheck, Minus, Plus, Loader2, ArrowLeft, Award } from 'lucide-react';
+import { ShoppingCart, Truck, ShieldCheck, Minus, Plus, Loader2, ArrowLeft, Award, Check, Clock, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=800';
@@ -90,7 +90,34 @@ export default function ProductDetails() {
         <div>
           {product.brand && <Badge variant="brand" className="mb-2">{product.brand}</Badge>}
           <h1 className="font-heading font-black text-2xl md:text-3xl text-txt-primary" data-testid="product-name">{product.name}</h1>
-          <p className="text-sm text-txt-secondary mt-3 leading-relaxed">{product.description}</p>
+          {/* Iter 61: caracteristicas em toppicos abaixo do nome */}
+          {Array.isArray(product.features) && product.features.length > 0 && (
+            <ul className="mt-3 space-y-1.5" data-testid="product-features">
+              {product.features.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-txt-primary">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* Iter 61: descricao rica (HTML se disponivel, senao texto puro) */}
+          {product.description_html ? (
+            <div
+              className="prose prose-sm max-w-none mt-4 text-txt-primary"
+              dangerouslySetInnerHTML={{ __html: product.description_html }}
+              data-testid="product-description-html"
+            />
+          ) : (
+            <p className="text-sm text-txt-secondary mt-3 leading-relaxed">{product.description}</p>
+          )}
+          {/* Iter 61: tempo de consumo */}
+          {product.consumption_days > 0 && (
+            <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-txt-secondary bg-bg-secondary rounded-full px-2.5 py-1" data-testid="product-consumption">
+              <Clock className="w-3.5 h-3.5" />
+              Dura aproximadamente <b className="text-txt-primary">{product.consumption_days} dia{product.consumption_days > 1 ? 's' : ''}</b>
+            </div>
+          )}
 
           <div className="mt-6 flex items-baseline gap-3">
             <span className="font-heading font-black text-4xl text-txt-primary" data-testid="product-price">{formatCurrency(price)}</span>
@@ -137,6 +164,33 @@ export default function ProductDetails() {
             <span className="text-xs text-txt-secondary">{product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque'}</span>
           </div>
 
+          {/* Iter 61: combo pricing selector */}
+          {Array.isArray(product.combo_pricing) && product.combo_pricing.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-2" data-testid="combo-selector">
+              {[{ qty: 1, price: price * 1, label: '1 un.', off: 0, unit: price }, ...product.combo_pricing.map(c => ({
+                qty: c.qty, price: c.price, label: `${c.qty} un.`, off: c.discount_pct || 0, unit: (c.price / c.qty),
+              }))].map((opt, idx) => {
+                const active = qty === opt.qty;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setQty(Math.min(product.stock, opt.qty))}
+                    className={`text-left rounded-lg border-2 px-3 py-2.5 transition ${active ? 'border-brand-main bg-brand-light/60' : 'border-border hover:border-brand-main/40'}`}
+                    data-testid={`combo-opt-${opt.qty}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-bold text-txt-primary">{opt.label}</div>
+                      {opt.off > 0 && <Badge variant="danger" className="text-[10px]">-{opt.off}%</Badge>}
+                    </div>
+                    <div className="text-xs text-txt-secondary mt-0.5">{formatCurrency(opt.unit)} / un.</div>
+                    <div className="text-sm font-heading font-black text-brand-main">{formatCurrency(opt.price)}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Iter 42i: feedback de frete gratis baseado no subtotal hipotetico (carrinho atual + este produto) */}
           {(() => {
             const hypoSubtotal = (cart?.subtotal || 0) + (price * qty);
@@ -164,6 +218,44 @@ export default function ProductDetails() {
               Comprar agora
             </Button>
           </div>
+
+          {/* Iter 61: Comprar pelo WhatsApp */}
+          {settings?.whatsapp?.enabled && settings?.whatsapp?.number && (() => {
+            const rawNum = String(settings.whatsapp.number || '').replace(/\D/g, '');
+            const publicUrl = typeof window !== 'undefined' ? window.location.href : '';
+            const tpl = settings.whatsapp.message_template || 'Olá! Tenho interesse no produto *{product_name}* — R$ {product_price}.\nLink: {product_url}';
+            const linePrice = (product.combo_pricing || []).find(c => Number(c.qty) === Number(qty));
+            const shownPrice = linePrice ? linePrice.price : (price * qty);
+            const msg = tpl
+              .replace(/\{product_name\}/g, product.name || '')
+              .replace(/\{product_price\}/g, shownPrice.toFixed(2).replace('.', ','))
+              .replace(/\{quantity\}/g, String(qty))
+              .replace(/\{product_url\}/g, publicUrl);
+            const href = `https://wa.me/${rawNum}?text=${encodeURIComponent(msg)}`;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 flex items-center justify-center gap-2 w-full bg-[#25D366] hover:bg-[#20b358] text-white font-bold rounded-lg py-3 transition"
+                data-testid="whatsapp-buy-btn"
+              >
+                <MessageCircle className="w-5 h-5" /> Comprar pelo WhatsApp
+              </a>
+            );
+          })()}
+
+          {/* Iter 61: campos personalizados (quadros) */}
+          {Array.isArray(product.custom_fields) && product.custom_fields.length > 0 && (
+            <div className="mt-6 space-y-3" data-testid="product-custom-fields">
+              {product.custom_fields.map((cf, i) => (
+                <div key={i} className="bg-bg-secondary border border-border rounded-lg p-3">
+                  {cf.title && <div className="font-bold text-sm text-txt-primary mb-0.5">{cf.title}</div>}
+                  {cf.text && <div className="text-sm text-txt-secondary whitespace-pre-line">{cf.text}</div>}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="mt-6 grid grid-cols-2 gap-3 text-xs">
             <div className="flex items-center gap-2 p-3 bg-bg-secondary rounded-lg">

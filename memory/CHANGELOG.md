@@ -4,6 +4,45 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 61 (Fev/2026) — Overhaul do cadastro de produtos + PDP
+**Cadastro do produto:**
+- **Descrição rica** via editor TipTap (bold/itálico/sublinhado/listas/citação/link/H1-3/limpar). Componente `RichTextEditor` reutilizável.
+- **Tempo de consumo** (`consumption_days`) — dias estimados de duração do produto.
+- **Características** (`features[]`) — lista dinâmica de bullet points exibida em tópicos abaixo do nome na PDP.
+- **Campos personalizados** (`custom_fields[]`) — adição ilimitada de quadros {título, texto} exibidos abaixo do botão de compra.
+- **Templates de campos personalizados** — CRUD em `product_field_templates`. Botão "Salvar template" e dropdown "Aplicar template" no formulário.
+- **Combo de quantidade** (`combo_pricing[]`) — array `{qty, price, discount_pct}`, editor com adição/remoção linha a linha, seletor visual na PDP.
+- **Multi-categoria** (`categories[]`) + **Multi-subcategoria** (`subcategories[]`) via checkbox lists no form. Compat mantida com `category`/`subcategory` legado.
+
+**Nova entidade Subcategorias:**
+- Coleção `subcategories`: `{subcategory_id, name, category_ids[], order, active}` — muitos-para-muitos com categorias.
+- Endpoints: `GET /api/subcategories` (público, filtra por category_id), `GET/POST/PUT/DELETE /api/admin/subcategories`.
+- UI unificada em `/backoffice/categorias` (seção "Subcategorias" abaixo).
+
+**PDP (`ProductDetails`):**
+- Renderiza `description_html` como HTML sanitizado (fallback para texto puro).
+- Bullet points de características abaixo do nome.
+- Badge de "tempo de consumo".
+- Seletor visual de combo (1u / 2u / 3u com % off e preço unitário).
+- Botão **"Comprar pelo WhatsApp"** (verde WhatsApp) abaixo do botão de compra, gera link `wa.me` com template preenchido (`{product_name}`, `{product_price}`, `{quantity}`, `{product_url}`).
+- Quadros de campos personalizados renderizados no final da coluna direita.
+
+**Settings (Admin → Configurações):**
+- Bloco WhatsApp: toggle enabled, número E.164, template editável de mensagem.
+- Endpoint público `/api/site-settings` agora expõe `whatsapp: {enabled, number, message_template}`.
+
+**Combo pricing no checkout:**
+- Aplicado automaticamente quando `qty` bate exatamente com uma linha configurada.
+- **NÃO aplica** se cliente tiver `coupon_code` ou `voucher_amount > 0` (combo é exclusivo com outros descontos).
+- Cart display sempre mostra o combo se aplicável (informativo).
+
+**Fixes de higiene junto com o feature:**
+- Removido arquivo órfão `role_profiles_endpoints.py` (era dead code, decorators órfãos).
+- Renomeadas funções duplicadas `public_get_page`/`admin_get_page` legado para `_cms_` (rota não muda).
+- `test_merge_users.py` — corrigida ordem de declaração de `_read_env_url`.
+- `sw.js` — adicionado `/* global clients */` para lint.
+- `api.js` — detecta FormData e não força `Content-Type` JSON (permite uploads via `api.post`).
+
 ## Iter 60 (Fev/2026) — Ajustes: supressão vira afiliado + Comercial acessa Produtos
 - **Supressão:** ao suprimir usuário X que tinha `network_sponsor_id=L`, agora o líder L é **promovido a `sponsor_id`** (afiliado permanente) e o `network_sponsor_id` de X é limpo. X vira "cliente direto" do ex-líder — compras futuras geram 8% de afiliado pro L. Se X não tinha líder Equipe, o `sponsor_id` antigo é preservado.
 - **Revert:** restaura ambos os campos ao estado pré-supressão via snapshot (`pre_suppression_network_sponsor_id` + `pre_suppression_sponsor_id`), sem regressão.
