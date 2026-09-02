@@ -4,6 +4,17 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 64 (Fev/2026) — Reenvio manual seletivo de pontos para a Maxx
+- Novo endpoint `POST /api/admin/users/{user_id}/points/resend-maxx` recebe `{log_ids: [...]}` e reenvia SOMENTE os lançamentos selecionados. Antes de enviar, atualiza os logs com o `external_id` atual do user (útil para casos em que o vínculo Maxx foi feito DEPOIS da compra).
+- Validação: 400 se `log_ids` vazio; 400 se user sem `external_id`; 404 se user não existe.
+- Aba **Pontos** do admin (`AdminUserDetails > PointsTab`) agora tem:
+  - Checkbox por lançamento (só habilita para pontos NÃO enviados)
+  - "Selecionar todos" no header
+  - Botão **"Reenviar N para a Maxx"** com contador dinâmico
+  - Aviso se usuário não tem ID Externo (bloqueia envio)
+  - Coluna "Aplicado" agora diferencia "Sim" (`sent_to_maxx=true`) de "Pendente"
+- Requer super_admin (mesma role do "sync-user" existente).
+
 ## Iter 63 (Fev/2026) — Autocomplete de CEP no formulário "Aderir ao Programa"
 - `ReferralEnrollmentForm.jsx` agora detecta o campo CEP (por `mask='cep'` ou key regex `cep|zip|postal_?code`) e, quando o usuário digita 8 dígitos, chama **ViaCEP** (`https://viacep.com.br/ws/{cep}/json/`) e preenche automaticamente os campos de endereço (`rua/logradouro`, `bairro`, `cidade/localidade`, `uf/estado`, `complemento`).
 - Ícone de loading (spinner) aparece no input do CEP durante a busca.

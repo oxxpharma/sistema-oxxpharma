@@ -7473,6 +7473,51 @@ async def admin_maxx_sync_user(request: Request, user_id: str, user: dict = Depe
     return await maxx_service.send_points(db, pending, kind="manual_by_user")
 
 
+class MaxxResendPayload(BaseModel):
+    log_ids: List[str]
+
+
+@app.post("/api/admin/users/{user_id}/points/resend-maxx")
+async def admin_points_resend_maxx(request: Request, user_id: str, payload: MaxxResendPayload, user: dict = Depends(require_super_admin())):
+    """Iter 64: reenvia para a Maxx APENAS os points_log selecionados (log_ids).
+    Usado quando o usuario nao tinha external_id no momento da compra e agora
+    tem — o admin escolhe na tabela quais pontos quer sincronizar.
+
+    Antes de enviar, atualiza os logs com o `external_id` atual do user.
+    """
+    db = request.app.db
+    if not payload.log_ids:
+        raise HTTPException(status_code=400, detail="Selecione ao menos um lançamento.")
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    if not target.get("external_id"):
+        raise HTTPException(status_code=400, detail="Usuario sem external_id. Vincule primeiro (sync Maxx ou edicao manual).")
+
+    # Atualiza os points_log alvo com dados atuais do user
+    await db.points_log.update_many(
+        {"user_id": user_id, "log_id": {"$in": payload.log_ids}},
+        {"$set": {
+            "user_external_id": target.get("external_id"),
+            "user_name": target.get("name"),
+            "user_email": target.get("email"),
+        }},
+    )
+    points = await db.points_log.find(
+        {"user_id": user_id, "log_id": {"$in": payload.log_ids}},
+        {"_id": 0},
+    ).to_list(10000)
+    if not points:
+        return {"success": False, "error": "Nenhum ponto encontrado com esses log_ids"}
+    already_sent = [p["log_id"] for p in points if p.get("sent_to_maxx")]
+    if already_sent and len(already_sent) == len(points):
+        return {"success": True, "sent_count": 0, "skipped": True, "reason": "todos ja enviados"}
+    resp = await maxx_service.send_points(db, points, kind="manual_resend")
+    resp["requested_count"] = len(payload.log_ids)
+    resp["already_sent_count"] = len(already_sent)
+    return resp
+
+
 @app.get("/api/users/me/points")
 async def my_points_history(request: Request, user: dict = Depends(get_current_user)):
     """Historico de pontos do usuario logado, com totais e status (pendente vs enviado).

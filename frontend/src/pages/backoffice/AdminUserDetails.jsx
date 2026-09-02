@@ -6,10 +6,11 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import {
   ArrowLeft, Loader2, Mail, Phone, Wallet, CircleDollarSign, ShoppingCart,
-  CreditCard, Users, Trophy, TrendingUp, Clock, Pencil, SlidersHorizontal,
+  CreditCard, Users, Trophy, TrendingUp, Clock, Pencil, SlidersHorizontal, Send, RefreshCw,
 } from 'lucide-react';
 import UserEditModal from '../../components/UserEditModal';
 import CashbackAdjustModal from '../../components/admin/CashbackAdjustModal';
+import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 
 const TABS = [
@@ -106,7 +107,7 @@ export default function AdminUserDetails() {
       {tab === 'orders' && <OrdersTab list={orders} />}
       {tab === 'network' && <NetworkTab network={network} u={u} />}
       {tab === 'card' && <CardTab card={card} />}
-      {tab === 'points' && <PointsTab points={points} />}
+      {tab === 'points' && <PointsTab points={points} userId={u.user_id} userExternalId={u.external_id} onRefresh={load} />}
 
       {editing && (
         <UserEditModal
@@ -461,23 +462,102 @@ function CardTab({ card }) {
 /* ============================================================================ */
 /* TAB: Pontos                                                                  */
 /* ============================================================================ */
-function PointsTab({ points }) {
+function PointsTab({ points, userId, userExternalId, onRefresh }) {
+  const [selected, setSelected] = React.useState(new Set());
+  const [sending, setSending] = React.useState(false);
+
+  const logs = points.logs || [];
+  const sendable = logs.filter(l => l.log_id && !l.sent_to_maxx);
+  const anySendable = sendable.length > 0;
+
+  const toggle = (log_id) => {
+    setSelected(s => {
+      const next = new Set(s);
+      if (next.has(log_id)) next.delete(log_id); else next.add(log_id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected(s => {
+      if (s.size === sendable.length) return new Set();
+      return new Set(sendable.map(l => l.log_id));
+    });
+  };
+
+  const resendSelected = async () => {
+    if (!userExternalId) {
+      toast.error('Usuário ainda não tem ID Externo configurado. Vincule primeiro.');
+      return;
+    }
+    if (selected.size === 0) { toast.error('Selecione ao menos um lançamento.'); return; }
+    if (!window.confirm(`Reenviar ${selected.size} lançamento(s) para a Maxx?`)) return;
+    setSending(true);
+    try {
+      const resp = await api.post(`/api/admin/users/${userId}/points/resend-maxx`, { log_ids: Array.from(selected) });
+      if (resp.success) {
+        toast.success(`${resp.sent_count} lançamento(s) enviado(s) para a Maxx`);
+      } else if (resp.skipped) {
+        toast.info(resp.reason || 'Nada a enviar');
+      } else {
+        toast.error(resp.error || 'Falha ao enviar para a Maxx');
+      }
+      setSelected(new Set());
+      onRefresh && onRefresh();
+    } catch (err) {
+      toast.error(err.message || 'Erro no envio');
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-center gap-4">
-        <Trophy className="w-10 h-10 text-amber-600" />
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-amber-700">Total de pontos</div>
-          <div className="text-3xl font-heading font-black text-amber-900">{points.total.toLocaleString('pt-BR')}</div>
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-4">
+          <Trophy className="w-10 h-10 text-amber-600" />
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-amber-700">Total de pontos</div>
+            <div className="text-3xl font-heading font-black text-amber-900">{points.total.toLocaleString('pt-BR')}</div>
+          </div>
         </div>
+        {anySendable && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {!userExternalId && (
+              <span className="text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded">
+                Usuário sem ID Externo — configure antes de reenviar
+              </span>
+            )}
+            <Button
+              size="sm"
+              onClick={resendSelected}
+              disabled={sending || selected.size === 0 || !userExternalId}
+              data-testid="resend-maxx-btn"
+            >
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Reenviar {selected.size > 0 ? `${selected.size} ` : ''}para a Maxx
+            </Button>
+          </div>
+        )}
       </div>
-      {points.logs.length === 0 ? (
+
+      {logs.length === 0 ? (
         <EmptyState text="Nenhum ponto registrado." />
       ) : (
         <div className="bg-white border border-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
               <tr>
+                {anySendable && (
+                  <th className="text-center p-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={selected.size > 0 && selected.size === sendable.length}
+                      onChange={toggleAll}
+                      title="Selecionar todos os pendentes"
+                      data-testid="resend-select-all"
+                    />
+                  </th>
+                )}
                 <th className="text-left p-3">Data</th>
                 <th className="text-left p-3">Pedido</th>
                 <th className="text-left p-3">Produto</th>
@@ -488,17 +568,38 @@ function PointsTab({ points }) {
               </tr>
             </thead>
             <tbody>
-              {points.logs.map((l, i) => (
-                <tr key={i} className="border-t border-border hover:bg-bg-secondary/40">
-                  <td className="p-3 text-xs text-txt-secondary">{l.registered_at ? formatDateTime(l.registered_at) : '-'}</td>
-                  <td className="p-3 font-mono text-xs">{l.order_id || '-'}</td>
-                  <td className="p-3 text-xs">{l.product_name || l.product_id || '-'}</td>
-                  <td className="p-3 text-center text-xs">{l.quantity || '-'}</td>
-                  <td className="p-3 text-right text-xs">{l.points_unit ?? '-'}</td>
-                  <td className="p-3 text-right font-bold">{l.points_total ?? '-'}</td>
-                  <td className="p-3 text-center">{l.applied_externally ? <Badge variant="success">Sim</Badge> : <Badge>—</Badge>}</td>
-                </tr>
-              ))}
+              {logs.map((l, i) => {
+                const isSendable = l.log_id && !l.sent_to_maxx;
+                const isSelected = l.log_id && selected.has(l.log_id);
+                return (
+                  <tr key={l.log_id || i} className={`border-t border-border hover:bg-bg-secondary/40 ${isSelected ? 'bg-amber-50/60' : ''}`}>
+                    {anySendable && (
+                      <td className="p-3 text-center">
+                        {isSendable ? (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggle(l.log_id)}
+                            data-testid={`resend-check-${l.log_id}`}
+                          />
+                        ) : (
+                          <span className="text-txt-secondary/60 text-xs">—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="p-3 text-xs text-txt-secondary">{l.registered_at ? formatDateTime(l.registered_at) : '-'}</td>
+                    <td className="p-3 font-mono text-xs">{l.order_id || '-'}</td>
+                    <td className="p-3 text-xs">{l.product_name || l.product_id || '-'}</td>
+                    <td className="p-3 text-center text-xs">{l.quantity || '-'}</td>
+                    <td className="p-3 text-right text-xs">{l.points_unit ?? '-'}</td>
+                    <td className="p-3 text-right font-bold">{l.points_total ?? '-'}</td>
+                    <td className="p-3 text-center">
+                      {l.sent_to_maxx ? <Badge variant="success">Sim</Badge> :
+                        (l.applied_externally ? <Badge variant="success">Sim</Badge> : <Badge>Pendente</Badge>)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
