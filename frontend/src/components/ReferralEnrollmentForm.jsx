@@ -66,6 +66,7 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
   const [values, setValues] = useState({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -81,6 +82,61 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
   }, []);
 
   const setField = (key, val) => setValues(v => ({ ...v, [key]: val }));
+
+  // Iter 63: helper para achar campo pelo alias de nome (cep, rua, bairro, cidade, uf...)
+  const findFieldKey = React.useCallback((patterns) => {
+    for (const f of fields) {
+      for (const p of patterns) {
+        if (new RegExp(`^${p}$`, 'i').test(f.key)) return f.key;
+      }
+    }
+    return null;
+  }, [fields]);
+
+  const cepKey = React.useMemo(() => {
+    const byMask = fields.find(f => f.mask === 'cep');
+    if (byMask) return byMask.key;
+    return findFieldKey(['cep', 'zip', 'zip_?code', 'postal_?code']);
+  }, [fields, findFieldKey]);
+
+  // Iter 63: busca endereco pelo CEP quando o usuario digita 8 digitos
+  useEffect(() => {
+    if (!cepKey) return;
+    const raw = String(values[cepKey] || '').replace(/\D/g, '');
+    if (raw.length !== 8) return;
+    let cancelled = false;
+    (async () => {
+      setCepLoading(true);
+      try {
+        const resp = await fetch(`https://viacep.com.br/ws/${raw}/json/`);
+        if (!resp.ok) throw new Error('CEP não encontrado');
+        const data = await resp.json();
+        if (cancelled) return;
+        if (data.erro) { toast.error('CEP não encontrado'); return; }
+        const patches = {};
+        const map = [
+          [['rua', 'street', 'endereco', 'logradouro', 'address'], data.logradouro],
+          [['bairro', 'neighborhood'], data.bairro],
+          [['cidade', 'city', 'municipio'], data.localidade],
+          [['uf', 'estado', 'state'], data.uf],
+          [['complemento', 'complement'], data.complemento],
+        ];
+        for (const [aliases, val] of map) {
+          if (!val) continue;
+          const key = findFieldKey(aliases);
+          if (key) patches[key] = val;
+        }
+        if (Object.keys(patches).length) {
+          setValues(v => ({ ...v, ...patches }));
+        }
+      } catch (err) {
+        toast.error('Não foi possível buscar o CEP');
+      } finally {
+        if (!cancelled) setCepLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [values, cepKey, findFieldKey]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -143,7 +199,13 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
               <b>Atenção:</b> sua adesão será analisada pelo administrador antes de ser ativada. Você receberá um e-mail com a resposta.
             </div>
             {fields.map(f => (
-              <FieldRenderer key={f.key} field={f} value={values[f.key]} onChange={(v) => setField(f.key, v)} />
+              <FieldRenderer
+                key={f.key}
+                field={f}
+                value={values[f.key]}
+                onChange={(v) => setField(f.key, v)}
+                loading={f.key === cepKey ? cepLoading : false}
+              />
             ))}
             <div className="pt-3 flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
@@ -159,7 +221,7 @@ export default function ReferralEnrollmentForm({ onClose, onSuccess }) {
   );
 }
 
-function FieldRenderer({ field, value, onChange }) {
+function FieldRenderer({ field, value, onChange, loading = false }) {
   // Detecta se eh campo de data de nascimento (mesmo se tipo=date)
   const isDateField = field.type === 'date' || /^(birth_?date|data_?nascimento|data_de_nascimento|nascimento)$/i.test(field.key);
   const isCpfField = field.mask === 'cpf' || /^cpf$/i.test(field.key);
@@ -213,7 +275,12 @@ function FieldRenderer({ field, value, onChange }) {
       <label className="text-xs font-semibold text-txt-primary mb-1 block">
         {field.label}{field.required && ' *'}
       </label>
-      <input type={inputType} {...common} />
+      <div className="relative">
+        <input type={inputType} {...common} />
+        {loading && (
+          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-brand-main" aria-label="Buscando endereço" />
+        )}
+      </div>
       {field.help && <div className="text-xs text-txt-secondary mt-1">{field.help}</div>}
     </div>
   );

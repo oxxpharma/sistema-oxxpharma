@@ -4,6 +4,12 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 63 (Fev/2026) — Autocomplete de CEP no formulário "Aderir ao Programa"
+- `ReferralEnrollmentForm.jsx` agora detecta o campo CEP (por `mask='cep'` ou key regex `cep|zip|postal_?code`) e, quando o usuário digita 8 dígitos, chama **ViaCEP** (`https://viacep.com.br/ws/{cep}/json/`) e preenche automaticamente os campos de endereço (`rua/logradouro`, `bairro`, `cidade/localidade`, `uf/estado`, `complemento`).
+- Ícone de loading (spinner) aparece no input do CEP durante a busca.
+- Fallback: se ViaCEP retornar erro ou CEP inválido, mostra toast sem travar o form. Usuário pode preencher manualmente.
+- Zero mudança no backend — os aliases já eram reconhecidos pelo normalizador de endereço (`street/endereco/logradouro`, etc).
+
 ## Iter 62 (Fev/2026) — Página de cadastro dedicada + SEO categorias/subcategorias + combo dura em dias
 
 **Cadastro do produto: modal → página dedicada**
