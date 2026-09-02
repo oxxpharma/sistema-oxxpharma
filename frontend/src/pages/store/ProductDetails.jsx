@@ -11,6 +11,7 @@ import { useSiteSettings } from '../../hooks/useSiteSettings';
 import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 import { evaluateFreeShipping } from '../../lib/freeShipping';
 import FreeShippingProgress from '../../components/store/FreeShippingProgress';
+import SEOHead from '../../components/SEOHead';
 import { ShoppingCart, Truck, ShieldCheck, Minus, Plus, Loader2, ArrowLeft, Award, Check, Clock, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -78,6 +79,29 @@ export default function ProductDetails() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6" data-testid="product-details">
+      <SEOHead
+        title={`${product.name}${product.brand ? ' - ' + product.brand : ''} | OxxPharma`}
+        description={(product.description || product.name || '').slice(0, 160)}
+        canonical={`/produto/${product.product_id}`}
+        image={img}
+        type="product"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "Product",
+          "name": product.name,
+          "description": (product.description || '').slice(0, 500),
+          "image": product.images || [],
+          "sku": product.sku || product.product_id,
+          "brand": product.brand ? { "@type": "Brand", "name": product.brand } : undefined,
+          "offers": {
+            "@type": "Offer",
+            "priceCurrency": "BRL",
+            "price": price,
+            "availability": product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+            "url": typeof window !== 'undefined' ? window.location.href : undefined,
+          },
+        }}
+      />
       <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-txt-secondary hover:text-brand-main mb-4">
         <ArrowLeft className="w-4 h-4" /> Voltar
       </Link>
@@ -167,8 +191,8 @@ export default function ProductDetails() {
           {/* Iter 61: combo pricing selector */}
           {Array.isArray(product.combo_pricing) && product.combo_pricing.length > 0 && (
             <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-2" data-testid="combo-selector">
-              {[{ qty: 1, price: price * 1, label: '1 un.', off: 0, unit: price }, ...product.combo_pricing.map(c => ({
-                qty: c.qty, price: c.price, label: `${c.qty} un.`, off: c.discount_pct || 0, unit: (c.price / c.qty),
+              {[{ qty: 1, price: price * 1, label: '1 un.', off: 0, unit: price, days: product.consumption_days || null }, ...product.combo_pricing.map(c => ({
+                qty: c.qty, price: c.price, label: `${c.qty} un.`, off: c.discount_pct || 0, unit: (c.price / c.qty), days: c.days || null,
               }))].map((opt, idx) => {
                 const active = qty === opt.qty;
                 return (
@@ -180,7 +204,10 @@ export default function ProductDetails() {
                     data-testid={`combo-opt-${opt.qty}`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-bold text-txt-primary">{opt.label}</div>
+                      <div className="text-sm font-bold text-txt-primary">
+                        {opt.label}
+                        {opt.days ? <span className="ml-1 text-xs text-txt-secondary font-normal">({opt.days} dias)</span> : null}
+                      </div>
                       {opt.off > 0 && <Badge variant="danger" className="text-[10px]">-{opt.off}%</Badge>}
                     </div>
                     <div className="text-xs text-txt-secondary mt-0.5">{formatCurrency(opt.unit)} / un.</div>

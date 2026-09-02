@@ -16,6 +16,8 @@ import BackofficeLayout from './layouts/BackofficeLayout';
 // Store pages (publicas)
 import StoreHome from './pages/store/StoreHome';
 import ProductDetails from './pages/store/ProductDetails';
+import CategoryPage from './pages/store/CategoryPage';
+import SubcategoryPage from './pages/store/SubcategoryPage';
 import CartPage from './pages/store/CartPage';
 import CheckoutPage from './pages/store/CheckoutPage';
 import OrderDetails from './pages/store/OrderDetails';
@@ -36,6 +38,7 @@ import RegisterPage from './pages/auth/RegisterPage';
 // Backoffice
 import AdminDashboard from './pages/backoffice/AdminDashboard';
 import AdminProducts from './pages/backoffice/AdminProducts';
+import AdminProductForm from './pages/backoffice/AdminProductForm';
 import AdminCategories from './pages/backoffice/AdminCategories';
 import AdminOrders from './pages/backoffice/AdminOrders';
 import AdminUsers from './pages/backoffice/AdminUsers';
@@ -101,6 +104,8 @@ function AppRoutes() {
       <Route element={<StoreLayout />}>
         <Route path="/" element={<StoreHome />} />
         <Route path="/produto/:id" element={<ProductDetails />} />
+        <Route path="/categoria/:slug" element={<CategoryPage />} />
+        <Route path="/subcategoria/:slug" element={<SubcategoryPage />} />
         <Route path="/buscar" element={<SearchPage />} />
         <Route path="/carrinho" element={<CartPage />} />
         <Route path="/checkout" element={<Guard requireAuth><CheckoutPage /></Guard>} />
@@ -130,6 +135,8 @@ function AppRoutes() {
       <Route path="/backoffice" element={<Guard requireAuth requireAdmin><BackofficeLayout /></Guard>}>
         <Route index element={<DashboardOrPedidos />} />
         <Route path="produtos" element={<AdminProducts />} />
+        <Route path="produtos/novo" element={<AdminProductForm />} />
+        <Route path="produtos/:productId" element={<AdminProductForm />} />
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
         <Route path="pdv" element={<AdminPDV />} />

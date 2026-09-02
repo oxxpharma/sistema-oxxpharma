@@ -4,6 +4,33 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 62 (Fev/2026) — Página de cadastro dedicada + SEO categorias/subcategorias + combo dura em dias
+
+**Cadastro do produto: modal → página dedicada**
+- Nova rota `/backoffice/produtos/novo` e `/backoffice/produtos/:id` renderizando `AdminProductForm.jsx` como página completa (sem risco de fechar modal e perder dados).
+- Header fixo com 3 botões: **Cancelar**, **Salvar e adicionar novo** (limpa form e mantém na página, só no fluxo "Novo"), **Salvar** (volta pra lista).
+- Endpoint admin `GET /api/admin/products/{id}` para carregar produto em edição (inclui inativos, diferente do público).
+- `AdminProducts.jsx` enxugado ~250 linhas — só lista e navegação.
+
+**Combo pricing: campo "days"**
+- Cada linha do combo aceita `days` (opcional) — exibido como "(60 dias)" no seletor da PDP ao lado da qty. Ajuda cliente a entender quanto tempo o combo dura.
+
+**SEO — categorias e subcategorias indexáveis:**
+- Campos novos em `Category` e `Subcategory`: `slug`, `seo_title`, `seo_description`.
+- Slug auto-gerado a partir do nome (`slugify` + `_ensure_unique_slug`) na criação/edição. **Backfill automático no startup** para categorias legadas sem slug.
+- Endpoints públicos: `GET /api/categories/by-slug/{slug}`, `GET /api/subcategories/by-slug/{slug}` — retorna categoria/subcategoria + produtos + subcategorias filhas.
+- Páginas SPA novas: **`/categoria/:slug`** e **`/subcategoria/:slug`** com breadcrumbs, título, descrição, grid de produtos.
+- Componente `SEOHead.jsx` — manipula `<title>`, `<meta description>`, `<link canonical>`, Open Graph, Twitter Card e JSON-LD (`CollectionPage` + `ItemList`).
+- PDP (`ProductDetails`) também recebeu `SEOHead` com JSON-LD `Product` (nome, marca, preço, disponibilidade, imagens) — Google Rich Results.
+- **`GET /api/sitemap.xml`** — sitemap dinâmico com home, /produtos, todas as categorias/subcategorias (com slug) e produtos ativos.
+- **`/robots.txt` estático** (`frontend/public/robots.txt`) libera indexação e aponta `Sitemap: /api/sitemap.xml`. `Disallow` protege /backoffice, /login, /checkout, /minha-conta, /minha-rede.
+- Admin de Categorias/Subcategorias: campos SEO (slug, título, descrição) editáveis no formulário.
+
+**Validado:**
+- Sitemap.xml retorna todas as URLs esperadas (categorias com slug já backfilled).
+- Endpoint `by-slug` funciona com produtos + subcategorias vinculadas.
+- Slug auto-gerado: `"Cuidados com a Pele"` → `cuidados-com-a-pele`.
+
 ## Iter 61 (Fev/2026) — Overhaul do cadastro de produtos + PDP
 **Cadastro do produto:**
 - **Descrição rica** via editor TipTap (bold/itálico/sublinhado/listas/citação/link/H1-3/limpar). Componente `RichTextEditor` reutilizável.

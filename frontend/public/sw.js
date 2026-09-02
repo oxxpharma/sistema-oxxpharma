@@ -1,5 +1,4 @@
 // Service Worker for OxxPharma PWA
-/* global clients */
 const CACHE_NAME = 'oxxpharma-v3-icons-1777854900';
 const STATIC_CACHE = 'oxxpharma-static-v3-icons-1777854900';
 
@@ -117,7 +116,7 @@ self.addEventListener('notificationclick', (event) => {
   const urlToOpen = event.notification.data?.url || '/dashboard';
   
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true })
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
         // Focus existing window if available
         for (const client of clientList) {
@@ -127,8 +126,8 @@ self.addEventListener('notificationclick', (event) => {
           }
         }
         // Open new window
-        if (clients.openWindow) {
-          return clients.openWindow(urlToOpen);
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(urlToOpen);
         }
       })
   );

@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /backoffice
+Disallow: /login
+Disallow: /checkout
+Disallow: /minha-conta
+Disallow: /minha-rede
+
+Sitemap: /api/sitemap.xml

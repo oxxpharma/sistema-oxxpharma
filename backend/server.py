@@ -316,6 +316,10 @@ class CategoryCreate(BaseModel):
     parent: Optional[str] = None
     order: int = 0
     active: bool = True
+    # Iter 62 (SEO)
+    slug: Optional[str] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
 
 class CartItemAdd(BaseModel):
     product_id: str
@@ -459,6 +463,18 @@ async def lifespan(app: FastAPI):
     await app.db.users.create_index("cpf_digits", sparse=True)
     await igvd_service.ensure_indexes(app.db)
     await network_suppression_service.ensure_indexes(app.db)
+    # Iter 62 (SEO): backfill de slugs em categorias/subcategorias que ainda nao tem
+    try:
+        async for c in app.db.categories.find({"$or": [{"slug": None}, {"slug": {"$exists": False}}, {"slug": ""}]}, {"_id": 0, "category_id": 1, "name": 1}):
+            base = _slugify(c.get("name") or "categoria")
+            unique = await _ensure_unique_slug(app.db, "categories", base, exclude_id_field="category_id", exclude_id=c.get("category_id"))
+            await app.db.categories.update_one({"category_id": c["category_id"]}, {"$set": {"slug": unique}})
+        async for sc in app.db.subcategories.find({"$or": [{"slug": None}, {"slug": {"$exists": False}}, {"slug": ""}]}, {"_id": 0, "subcategory_id": 1, "name": 1}):
+            base = _slugify(sc.get("name") or "subcategoria")
+            unique = await _ensure_unique_slug(app.db, "subcategories", base, exclude_id_field="subcategory_id", exclude_id=sc.get("subcategory_id"))
+            await app.db.subcategories.update_one({"subcategory_id": sc["subcategory_id"]}, {"$set": {"slug": unique}})
+    except Exception as e:
+        logger.warning(f"Slug backfill falhou (nao critico): {e}")
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
@@ -931,23 +947,141 @@ async def delete_address(request: Request, address_id: str, user: dict = Depends
 
 # ==================== CATEGORIES ====================
 
+def _slugify(text: str) -> str:
+    """Iter 62: normaliza string para slug url-friendly."""
+    import unicodedata as _u
+    s = (text or "").strip().lower()
+    s = _u.normalize("NFD", s)
+    s = "".join(c for c in s if _u.category(c) != "Mn")
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-") or "categoria"
+
+
+async def _ensure_unique_slug(db, collection: str, base_slug: str, exclude_id_field: Optional[str] = None, exclude_id: Optional[str] = None) -> str:
+    """Retorna slug unico na colecao (categorias/subcategorias)."""
+    coll = getattr(db, collection)
+    candidate = base_slug
+    i = 1
+    while True:
+        q = {"slug": candidate}
+        if exclude_id_field and exclude_id:
+            q[exclude_id_field] = {"$ne": exclude_id}
+        exists = await coll.find_one(q)
+        if not exists:
+            return candidate
+        i += 1
+        candidate = f"{base_slug}-{i}"
+
+
 @app.get("/api/categories")
 async def list_categories(request: Request):
     db = request.app.db
     cats = await db.categories.find({"active": True}, {"_id": 0}).sort("order", 1).to_list(100)
     return {"categories": cats}
 
+
+@app.get("/api/categories/by-slug/{slug}")
+async def get_category_by_slug(request: Request, slug: str):
+    """Iter 62 (SEO): pagina publica de categoria — retorna categoria + produtos
+    (compat com produtos legado sem `categories[]`) + subcategorias vinculadas."""
+    db = request.app.db
+    cat = await db.categories.find_one({"slug": slug, "active": True}, {"_id": 0})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Categoria nao encontrada")
+    subs = await db.subcategories.find({"active": True, "category_ids": cat["category_id"]}, {"_id": 0}).sort("order", 1).to_list(200)
+    products = await db.products.find(
+        {"active": True, "$or": [{"categories": cat["category_id"]}, {"category": {"$regex": f"^{re.escape(cat['name'])}$", "$options": "i"}}]},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(200).to_list(200)
+    user = await get_optional_user(request)
+    _tenant = tenant_service.get_tenant(request)
+    products = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in products]
+    return {"category": cat, "subcategories": subs, "products": products}
+
+
+@app.get("/api/subcategories/by-slug/{slug}")
+async def get_subcategory_by_slug(request: Request, slug: str):
+    """Iter 62 (SEO): pagina publica de subcategoria."""
+    db = request.app.db
+    sc = await db.subcategories.find_one({"slug": slug, "active": True}, {"_id": 0})
+    if not sc:
+        raise HTTPException(status_code=404, detail="Subcategoria nao encontrada")
+    parents = []
+    if sc.get("category_ids"):
+        parents = await db.categories.find({"category_id": {"$in": sc["category_ids"]}, "active": True}, {"_id": 0}).to_list(50)
+    products = await db.products.find(
+        {"active": True, "$or": [{"subcategories": sc["subcategory_id"]}, {"subcategory": sc["subcategory_id"]}]},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(200).to_list(200)
+    user = await get_optional_user(request)
+    _tenant = tenant_service.get_tenant(request)
+    products = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in products]
+    return {"subcategory": sc, "parents": parents, "products": products}
+
+
+@app.get("/api/sitemap.xml", include_in_schema=False)
+async def public_sitemap_xml(request: Request):
+    """Iter 62 (SEO): sitemap.xml publico com categorias, subcategorias e produtos.
+    Google/Bing usam esse arquivo para descobrir todas as URLs indexaveis."""
+    db = request.app.db
+    origin = str(request.base_url).rstrip("/")
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/0.9">']
+
+    def _url(loc, lastmod=None, changefreq=None, priority=None):
+        parts = [f"<loc>{loc}</loc>"]
+        if lastmod: parts.append(f"<lastmod>{lastmod}</lastmod>")
+        if changefreq: parts.append(f"<changefreq>{changefreq}</changefreq>")
+        if priority: parts.append(f"<priority>{priority}</priority>")
+        return f"<url>{''.join(parts)}</url>"
+
+    lines.append(_url(f"{origin}/", changefreq="daily", priority="1.0"))
+    lines.append(_url(f"{origin}/produtos", changefreq="daily", priority="0.9"))
+    async for c in db.categories.find({"active": True, "slug": {"$ne": None}}, {"_id": 0, "slug": 1, "updated_at": 1}):
+        if c.get("slug"):
+            lines.append(_url(f"{origin}/categoria/{c['slug']}", lastmod=c.get("updated_at"), changefreq="weekly", priority="0.8"))
+    async for sc in db.subcategories.find({"active": True, "slug": {"$ne": None}}, {"_id": 0, "slug": 1, "updated_at": 1}):
+        if sc.get("slug"):
+            lines.append(_url(f"{origin}/subcategoria/{sc['slug']}", lastmod=sc.get("updated_at"), changefreq="weekly", priority="0.7"))
+    async for p in db.products.find({"active": True}, {"_id": 0, "product_id": 1, "updated_at": 1}).limit(5000):
+        lines.append(_url(f"{origin}/produto/{p['product_id']}", lastmod=p.get("updated_at"), changefreq="weekly", priority="0.6"))
+    lines.append("</urlset>")
+    return Response(content="\n".join(lines), media_type="application/xml")
+
+
+@app.get("/api/robots.txt", include_in_schema=False)
+async def public_robots_txt(request: Request):
+    """Iter 62 (SEO): robots.txt aponta pro sitemap e libera indexacao."""
+    origin = str(request.base_url).rstrip("/")
+    txt = f"""User-agent: *
+Allow: /
+Disallow: /backoffice
+Disallow: /login
+Disallow: /checkout
+Disallow: /minha-conta
+
+Sitemap: {origin}/sitemap.xml
+"""
+    return Response(content=txt, media_type="text/plain")
+
+
 @app.post("/api/admin/categories")
 async def create_category(request: Request, data: CategoryCreate, user: dict = Depends(require_admin())):
     db = request.app.db
-    cat = {"category_id": gen_id("cat_"), **data.model_dump(), "created_at": now_iso()}
+    payload = data.model_dump()
+    base = _slugify(payload.get("slug") or payload["name"])
+    payload["slug"] = await _ensure_unique_slug(db, "categories", base)
+    cat = {"category_id": gen_id("cat_"), **payload, "created_at": now_iso()}
     await db.categories.insert_one(cat)
     return await db.categories.find_one({"category_id": cat["category_id"]}, {"_id": 0})
+
 
 @app.put("/api/admin/categories/{category_id}")
 async def update_category(request: Request, category_id: str, data: CategoryCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     update = data.model_dump()
+    base = _slugify(update.get("slug") or update["name"])
+    update["slug"] = await _ensure_unique_slug(db, "categories", base, exclude_id_field="category_id", exclude_id=category_id)
     update["updated_at"] = now_iso()
     r = await db.categories.update_one({"category_id": category_id}, {"$set": update})
     if r.matched_count == 0:
@@ -971,6 +1105,10 @@ class SubcategoryCreate(BaseModel):
     category_ids: List[str] = []  # muitos-para-muitos com categorias
     order: int = 0
     active: bool = True
+    # Iter 62 (SEO)
+    slug: Optional[str] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
 
 
 @app.get("/api/subcategories")
@@ -994,7 +1132,10 @@ async def admin_list_subcategories(request: Request, user: dict = Depends(requir
 @app.post("/api/admin/subcategories")
 async def admin_create_subcategory(request: Request, data: SubcategoryCreate, user: dict = Depends(require_admin())):
     db = request.app.db
-    doc = {"subcategory_id": gen_id("subcat_"), **data.model_dump(), "created_at": now_iso()}
+    payload = data.model_dump()
+    base = _slugify(payload.get("slug") or payload["name"])
+    payload["slug"] = await _ensure_unique_slug(db, "subcategories", base)
+    doc = {"subcategory_id": gen_id("subcat_"), **payload, "created_at": now_iso()}
     await db.subcategories.insert_one(doc)
     return await db.subcategories.find_one({"subcategory_id": doc["subcategory_id"]}, {"_id": 0})
 
@@ -1003,6 +1144,8 @@ async def admin_create_subcategory(request: Request, data: SubcategoryCreate, us
 async def admin_update_subcategory(request: Request, subcategory_id: str, data: SubcategoryCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     upd = data.model_dump()
+    base = _slugify(upd.get("slug") or upd["name"])
+    upd["slug"] = await _ensure_unique_slug(db, "subcategories", base, exclude_id_field="subcategory_id", exclude_id=subcategory_id)
     upd["updated_at"] = now_iso()
     r = await db.subcategories.update_one({"subcategory_id": subcategory_id}, {"$set": upd})
     if r.matched_count == 0:
@@ -1110,6 +1253,16 @@ async def get_product(request: Request, product_id: str):
     return {"product": p, "related": related}
 
 # ==================== PRODUCTS (ADMIN) ====================
+
+@app.get("/api/admin/products/{product_id}")
+async def admin_get_product(request: Request, product_id: str, user: dict = Depends(require_admin())):
+    """Iter 62: retorna produto por ID para edicao no admin (inclui inativos)."""
+    db = request.app.db
+    p = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Produto nao encontrado")
+    return p
+
 
 @app.get("/api/admin/products")
 async def admin_list_products(request: Request, category: Optional[str] = None, search: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
