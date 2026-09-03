@@ -4051,26 +4051,48 @@ async def validate_referral_code(request: Request, code: str):
     """Valida codigo de indicacao publico - usado pela loja antes do checkout.
     Iter 39: tambem registra um click na collection `referral_clicks` para
     estatisticas do indicador na pagina /indique-ganhe.
+    Iter 65: retorna `is_self` (usuario logado tentando usar o proprio link) e
+    `already_sponsored` (usuario ja tem sponsor_id fixado) para o frontend
+    ignorar o link e nao sobrescrever o cache de indicacao.
     """
     db = request.app.db
     code_norm = code.strip().upper()
     u = await db.users.find_one({"referral_code": code_norm, "status": "active"}, {"_id": 0, "password_hash": 0})
     if not u:
         return {"valid": False}
-    # Registra clique (best-effort, nao bloqueia resposta)
+    # Iter 65: checagens contextuais para o usuario logado (se houver)
+    is_self = False
+    already_sponsored = False
     try:
-        await db.referral_clicks.insert_one({
-            "click_id": gen_id("clk_"),
-            "code": code_norm,
-            "owner_user_id": u.get("user_id"),
-            "ip": (request.client.host if request.client else None),
-            "user_agent": request.headers.get("user-agent", "")[:300],
-            "referer": request.headers.get("referer", "")[:300],
-            "created_at": now_iso(),
-        })
-    except Exception as e:
-        logger.debug(f"referral_clicks insert error: {e}")
-    return {"valid": True, "code": code_norm, "affiliate_name": u.get("name")}
+        current = await get_optional_user(request)
+    except Exception:
+        current = None
+    if current:
+        if current.get("user_id") == u.get("user_id"):
+            is_self = True
+        if current.get("sponsor_id") and current.get("sponsor_id") != u.get("user_id"):
+            already_sponsored = True
+    # Registra clique (best-effort, nao bloqueia resposta) — ignora self-referral
+    if not is_self:
+        try:
+            await db.referral_clicks.insert_one({
+                "click_id": gen_id("clk_"),
+                "code": code_norm,
+                "owner_user_id": u.get("user_id"),
+                "ip": (request.client.host if request.client else None),
+                "user_agent": request.headers.get("user-agent", "")[:300],
+                "referer": request.headers.get("referer", "")[:300],
+                "created_at": now_iso(),
+            })
+        except Exception as e:
+            logger.debug(f"referral_clicks insert error: {e}")
+    return {
+        "valid": True,
+        "code": code_norm,
+        "affiliate_name": u.get("name"),
+        "is_self": is_self,
+        "already_sponsored": already_sponsored,
+    }
 
 @app.get("/api/users/me/referrals")
 async def my_referrals_list(request: Request, page: int = 1, limit: int = 20, user: dict = Depends(get_current_user)):

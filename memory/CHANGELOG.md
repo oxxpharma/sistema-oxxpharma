@@ -4,6 +4,16 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 65 (Fev/2026) — Indicação: TTL 24h, anti-self-referral e sticky no frontend
+- **RefContext (`/app/frontend/src/contexts/RefContext.js`) reescrito:**
+  - Cache do indicador agora tem **TTL de 24h** (`oxx_ref = { code, name, savedAt }`). Após 24h, é limpo automaticamente (checagem a cada minuto enquanto a aba está aberta e na próxima abertura).
+  - Migração automática das chaves legadas `oxx_ref_code` / `oxx_ref_name` (que persistiam sem expirar) — são removidas na 1ª abertura.
+  - **Auto-indicação bloqueada:** ao entrar com `?ref=<próprio_código>` estando logado, o link é ignorado (banner não aparece).
+  - **Sticky no frontend:** se o usuário logado já tem `sponsor_id` diferente, um novo `?ref=` **não sobrescreve** o cache — o indicador original é preservado. Backend já era sticky (linha ~1618 do `server.py`), mas agora o banner também respeita.
+  - Quando o usuário loga e o cache aponta pra ele mesmo ou pra outro sponsor diferente do que já está fixado, o cache é limpo automaticamente.
+- **Backend (`GET /api/referrals/validate/{code}`):** passou a aceitar auth opcional e retornar `is_self` (`true` se o usuário logado tenta usar o próprio link) e `already_sponsored` (`true` se ele já tem outro `sponsor_id`). Clique não é registrado quando `is_self=true`. Testado via curl (self=true, already_sponsored=true nos cenários certos).
+- **Regra de troca de indicador:** só via admin no `/backoffice/usuarios` (via `sponsor_id`/`sponsor_code`). Cliente deve solicitar via suporte.
+
 ## Iter 64.2 (Fev/2026) — Admin Categorias: modal responsivo + inativas visíveis
 - **Backend:** novo endpoint `GET /api/admin/categories` que retorna TODAS as categorias (ativas + inativas). `GET /api/categories` (público) continua filtrando `active=true`. `GET /api/admin/subcategories` já retornava todas.
 - **Frontend (`AdminCategories.jsx`):** passa a consumir `/api/admin/categories` no painel — categorias/subcategorias desativadas continuam listadas com badge "Inativa" (fundo vermelho claro) e opacidade reduzida. Editar/desativar/excluir seguem funcionando normalmente.
