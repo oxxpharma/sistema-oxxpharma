@@ -4,6 +4,11 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 64.2 (Fev/2026) — Admin Categorias: modal responsivo + inativas visíveis
+- **Backend:** novo endpoint `GET /api/admin/categories` que retorna TODAS as categorias (ativas + inativas). `GET /api/categories` (público) continua filtrando `active=true`. `GET /api/admin/subcategories` já retornava todas.
+- **Frontend (`AdminCategories.jsx`):** passa a consumir `/api/admin/categories` no painel — categorias/subcategorias desativadas continuam listadas com badge "Inativa" (fundo vermelho claro) e opacidade reduzida. Editar/desativar/excluir seguem funcionando normalmente.
+- **UX modais:** ambos os modais (Nova/Editar categoria e Nova/Editar subcategoria) agora têm `max-h-[90vh]`, header e footer sticky com scroll interno no formulário — não corta mais em telas menores nem quando o form fica longo (SEO expandido, muitos vínculos etc.).
+
 ## Iter 64.1 (Fev/2026) — Reenvio para Maxx sempre visível
 - **Correção:** os checkboxes e o botão "Reenviar para a Maxx" só apareciam quando `sent_to_maxx=false`. Isso escondia o botão exatamente no caso em que o admin mais precisa: quando a Maxx respondeu HTTP 200 sem external_id (marcando `sent_to_maxx=true` no nosso DB) mas na verdade não efetivou lá.
 - Agora QUALQUER lançamento com `log_id` pode ser marcado e reenviado. A coluna passou a se chamar **"Enviado à Maxx"** (Sim + data / Não) — deixa claro o estado real.

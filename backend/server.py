@@ -1065,6 +1065,14 @@ Sitemap: {origin}/sitemap.xml
     return Response(content=txt, media_type="text/plain")
 
 
+@app.get("/api/admin/categories")
+async def admin_list_categories(request: Request, user: dict = Depends(require_admin())):
+    """Lista admin: retorna TODAS as categorias (ativas + inativas)."""
+    db = request.app.db
+    cats = await db.categories.find({}, {"_id": 0}).sort("order", 1).to_list(500)
+    return {"categories": cats}
+
+
 @app.post("/api/admin/categories")
 async def create_category(request: Request, data: CategoryCreate, user: dict = Depends(require_admin())):
     db = request.app.db

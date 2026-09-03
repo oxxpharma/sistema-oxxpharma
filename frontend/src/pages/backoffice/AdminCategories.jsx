@@ -23,7 +23,7 @@ export default function AdminCategories() {
     setLoading(true);
     try {
       const [c, s] = await Promise.all([
-        api.get('/api/categories'),
+        api.get('/api/admin/categories').catch(() => api.get('/api/categories')),
         api.get('/api/admin/subcategories').catch(() => ({ subcategories: [] })),
       ]);
       setCats(c.categories || []);
@@ -80,9 +80,12 @@ export default function AdminCategories() {
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
           {cats.map(c => (
-            <div key={c.category_id} className="bg-white rounded-xl border border-border p-4 flex items-start justify-between">
+            <div key={c.category_id} className={`bg-white rounded-xl border border-border p-4 flex items-start justify-between ${!c.active ? 'opacity-70' : ''}`}>
               <div>
-                <div className="font-heading font-black">{c.name}</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="font-heading font-black">{c.name}</div>
+                  {!c.active && <span className="text-[10px] font-bold uppercase bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Inativa</span>}
+                </div>
                 <div className="text-xs text-txt-secondary mt-0.5">Ordem: {c.order} · {c.active ? 'Ativa' : 'Inativa'}</div>
                 {c.description && <p className="text-xs text-txt-secondary mt-2">{c.description}</p>}
               </div>
@@ -104,9 +107,12 @@ export default function AdminCategories() {
       <p className="text-xs text-txt-secondary mb-4">Uma subcategoria pode ser vinculada a uma ou mais categorias. Produtos aceitam múltiplas subcategorias.</p>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
         {subs.map(sc => (
-          <div key={sc.subcategory_id} className="bg-white rounded-xl border border-border p-4 flex items-start justify-between" data-testid={`subcat-card-${sc.subcategory_id}`}>
+          <div key={sc.subcategory_id} className={`bg-white rounded-xl border border-border p-4 flex items-start justify-between ${!sc.active ? 'opacity-70' : ''}`} data-testid={`subcat-card-${sc.subcategory_id}`}>
             <div>
-              <div className="font-heading font-black">{sc.name}</div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="font-heading font-black">{sc.name}</div>
+                {!sc.active && <span className="text-[10px] font-bold uppercase bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Inativa</span>}
+              </div>
               <div className="text-xs text-txt-secondary mt-0.5">Ordem: {sc.order} · {sc.active ? 'Ativa' : 'Inativa'}</div>
               <div className="text-xs mt-1">
                 {(sc.category_ids || []).length === 0 ? (
@@ -127,23 +133,25 @@ export default function AdminCategories() {
 
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-white rounded-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
-            <div className="border-b border-border p-5 flex items-center justify-between">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="border-b border-border p-5 flex items-center justify-between shrink-0">
               <h2 className="font-heading font-black text-lg">{editing ? 'Editar categoria' : 'Nova categoria'}</h2>
               <button onClick={() => setShowForm(false)} className="p-1 hover:bg-bg-secondary rounded"><X className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={submit} className="p-5 space-y-3">
-              <Input label="Nome*" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-              <Textarea label="Descrição" rows={2} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} />
-              <Input label="Ordem" type="number" value={form.order} onChange={e => setForm({ ...form, order: e.target.value })} />
-              <div className="border-t border-border pt-3 mt-2">
-                <div className="text-xs font-bold text-txt-secondary uppercase mb-2">SEO (Google)</div>
-                <Input label="Slug (URL)" value={form.slug || ''} onChange={e => setForm({ ...form, slug: e.target.value })} placeholder="deixe em branco para gerar automaticamente" hint="Ex: cuidados-com-a-pele → /categoria/cuidados-com-a-pele" data-testid="cat-slug" />
-                <Input label="Título SEO" value={form.seo_title || ''} onChange={e => setForm({ ...form, seo_title: e.target.value })} placeholder="Título mostrado no Google (até 60 caracteres)" className="mt-2" />
-                <Textarea label="Descrição SEO" rows={2} value={form.seo_description || ''} onChange={e => setForm({ ...form, seo_description: e.target.value })} placeholder="Descrição mostrada no Google (até 160 caracteres)" className="mt-2" />
+            <form onSubmit={submit} className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                <Input label="Nome*" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+                <Textarea label="Descrição" rows={2} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} />
+                <Input label="Ordem" type="number" value={form.order} onChange={e => setForm({ ...form, order: e.target.value })} />
+                <div className="border-t border-border pt-3 mt-2">
+                  <div className="text-xs font-bold text-txt-secondary uppercase mb-2">SEO (Google)</div>
+                  <Input label="Slug (URL)" value={form.slug || ''} onChange={e => setForm({ ...form, slug: e.target.value })} placeholder="deixe em branco para gerar automaticamente" hint="Ex: cuidados-com-a-pele → /categoria/cuidados-com-a-pele" data-testid="cat-slug" />
+                  <Input label="Título SEO" value={form.seo_title || ''} onChange={e => setForm({ ...form, seo_title: e.target.value })} placeholder="Título mostrado no Google (até 60 caracteres)" className="mt-2" />
+                  <Textarea label="Descrição SEO" rows={2} value={form.seo_description || ''} onChange={e => setForm({ ...form, seo_description: e.target.value })} placeholder="Descrição mostrada no Google (até 160 caracteres)" className="mt-2" />
+                </div>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Ativa</label>
               </div>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Ativa</label>
-              <div className="flex gap-2 pt-2 border-t border-border">
+              <div className="flex gap-2 p-5 border-t border-border shrink-0 bg-white">
                 <Button type="submit">Salvar</Button>
                 <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
               </div>
@@ -154,45 +162,47 @@ export default function AdminCategories() {
 
       {showSubForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSubForm(false)}>
-          <div className="bg-white rounded-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
-            <div className="border-b border-border p-5 flex items-center justify-between">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="border-b border-border p-5 flex items-center justify-between shrink-0">
               <h2 className="font-heading font-black text-lg">{editingSub ? 'Editar subcategoria' : 'Nova subcategoria'}</h2>
               <button onClick={() => setShowSubForm(false)} className="p-1 hover:bg-bg-secondary rounded"><X className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={submitSub} className="p-5 space-y-3">
-              <Input label="Nome*" required value={subForm.name} onChange={e => setSubForm({ ...subForm, name: e.target.value })} data-testid="subcat-name" />
-              <Textarea label="Descrição" rows={2} value={subForm.description || ''} onChange={e => setSubForm({ ...subForm, description: e.target.value })} />
-              <div>
-                <label className="text-sm font-bold text-txt-secondary block mb-1">Vincular às categorias</label>
-                <div className="max-h-40 overflow-y-auto border border-border rounded-lg p-2 space-y-1">
-                  {cats.map(c => {
-                    const checked = (subForm.category_ids || []).includes(c.category_id);
-                    return (
-                      <label key={c.category_id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-bg-secondary/50 rounded px-1 py-0.5">
-                        <input
-                          type="checkbox" checked={checked}
-                          onChange={() => {
-                            const cur = subForm.category_ids || [];
-                            const next = checked ? cur.filter(x => x !== c.category_id) : [...cur, c.category_id];
-                            setSubForm({ ...subForm, category_ids: next });
-                          }}
-                          data-testid={`subcat-cat-check-${c.category_id}`}
-                        />
-                        <span>{c.name}</span>
-                      </label>
-                    );
-                  })}
+            <form onSubmit={submitSub} className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                <Input label="Nome*" required value={subForm.name} onChange={e => setSubForm({ ...subForm, name: e.target.value })} data-testid="subcat-name" />
+                <Textarea label="Descrição" rows={2} value={subForm.description || ''} onChange={e => setSubForm({ ...subForm, description: e.target.value })} />
+                <div>
+                  <label className="text-sm font-bold text-txt-secondary block mb-1">Vincular às categorias</label>
+                  <div className="max-h-40 overflow-y-auto border border-border rounded-lg p-2 space-y-1">
+                    {cats.map(c => {
+                      const checked = (subForm.category_ids || []).includes(c.category_id);
+                      return (
+                        <label key={c.category_id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-bg-secondary/50 rounded px-1 py-0.5">
+                          <input
+                            type="checkbox" checked={checked}
+                            onChange={() => {
+                              const cur = subForm.category_ids || [];
+                              const next = checked ? cur.filter(x => x !== c.category_id) : [...cur, c.category_id];
+                              setSubForm({ ...subForm, category_ids: next });
+                            }}
+                            data-testid={`subcat-cat-check-${c.category_id}`}
+                          />
+                          <span>{c.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
+                <Input label="Ordem" type="number" value={subForm.order} onChange={e => setSubForm({ ...subForm, order: e.target.value })} />
+                <div className="border-t border-border pt-3 mt-2">
+                  <div className="text-xs font-bold text-txt-secondary uppercase mb-2">SEO (Google)</div>
+                  <Input label="Slug (URL)" value={subForm.slug || ''} onChange={e => setSubForm({ ...subForm, slug: e.target.value })} placeholder="deixe em branco para gerar automaticamente" hint="Ex: hidratantes → /subcategoria/hidratantes" data-testid="subcat-slug" />
+                  <Input label="Título SEO" value={subForm.seo_title || ''} onChange={e => setSubForm({ ...subForm, seo_title: e.target.value })} placeholder="Título no Google" className="mt-2" />
+                  <Textarea label="Descrição SEO" rows={2} value={subForm.seo_description || ''} onChange={e => setSubForm({ ...subForm, seo_description: e.target.value })} placeholder="Descrição no Google" className="mt-2" />
+                </div>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={subForm.active} onChange={e => setSubForm({ ...subForm, active: e.target.checked })} /> Ativa</label>
               </div>
-              <Input label="Ordem" type="number" value={subForm.order} onChange={e => setSubForm({ ...subForm, order: e.target.value })} />
-              <div className="border-t border-border pt-3 mt-2">
-                <div className="text-xs font-bold text-txt-secondary uppercase mb-2">SEO (Google)</div>
-                <Input label="Slug (URL)" value={subForm.slug || ''} onChange={e => setSubForm({ ...subForm, slug: e.target.value })} placeholder="deixe em branco para gerar automaticamente" hint="Ex: hidratantes → /subcategoria/hidratantes" data-testid="subcat-slug" />
-                <Input label="Título SEO" value={subForm.seo_title || ''} onChange={e => setSubForm({ ...subForm, seo_title: e.target.value })} placeholder="Título no Google" className="mt-2" />
-                <Textarea label="Descrição SEO" rows={2} value={subForm.seo_description || ''} onChange={e => setSubForm({ ...subForm, seo_description: e.target.value })} placeholder="Descrição no Google" className="mt-2" />
-              </div>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={subForm.active} onChange={e => setSubForm({ ...subForm, active: e.target.checked })} /> Ativa</label>
-              <div className="flex gap-2 pt-2 border-t border-border">
+              <div className="flex gap-2 p-5 border-t border-border shrink-0 bg-white">
                 <Button type="submit" data-testid="save-subcat">Salvar</Button>
                 <Button type="button" variant="ghost" onClick={() => setShowSubForm(false)}>Cancelar</Button>
               </div>
