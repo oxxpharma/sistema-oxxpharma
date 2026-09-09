@@ -4959,6 +4959,10 @@ async def admin_ns_upload(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Iter 66.5: log com stacktrace para diagnosticar em producao
+        logger.exception(f"[network-suppression] falha ao processar upload: {e}")
+        raise HTTPException(status_code=500, detail=f"Falha ao processar planilha: {type(e).__name__}: {e}")
     return result
 
 

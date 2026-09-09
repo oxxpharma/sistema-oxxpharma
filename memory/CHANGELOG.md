@@ -4,6 +4,22 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66.5 (Fev/2026) — Fix: Supressão de Rede quebrando em produção
+
+**Root cause identificado:** `_find_users_by_emails` construía um regex gigante `^(email1|email2|...|emailN)$` com `re.escape`. Em produção com milhares de usuários, MongoDB retornava erro no compile/execute do regex (500). Em preview, com poucos emails, funcionava.
+
+**Correção (`network_suppression_service.py`):**
+- Substituído regex gigante por `$in` com emails lowercase, em batches de 500 (BSON-safe)
+- Fallback case-insensitive individual apenas para emails que não bateram no `$in` (max 200 iterações)
+- Emails no `users` collection já são armazenados em lowercase no `register`/`login`, então o `$in` é O(1) por email com índice
+
+**Extras:**
+- Fallback para conversão de `.xls` via `xlrd + openpyxl` quando `soffice` não está instalado (comum em produção sem LibreOffice)
+- `xlrd<2` adicionado ao `requirements.txt` para garantir suporte a `.xls` legado (BIFF5/BIFF8)
+- `/api/admin/network-suppression/upload` agora captura `Exception` genérico e loga stacktrace + retorna 500 com `type(e).__name__` para diagnosticar futuros erros
+
+**Testado:** upload `.xlsx` com 3 emails → 200 OK, matched=2, not_found=1.
+
 ## Iter 66.4 (Fev/2026) — 2FA obrigatório + Notificação de Bônus por Email
 
 ### 2FA por email (`twofa_routes.py`)

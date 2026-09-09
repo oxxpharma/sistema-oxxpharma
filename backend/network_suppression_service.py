@@ -98,22 +98,49 @@ def _entry_id() -> str:
 def _convert_xls_to_xlsx(xls_bytes: bytes) -> bytes:
     """Converte .xls (BIFF/OLE) para .xlsx via LibreOffice CLI.
     Pandas 2+ + xlrd 2.0.1 nao le mais .xls binario; conversao offline eh o caminho seguro.
+    Iter 66.5: se `soffice` nao esta instalado (comum em prod sem libreoffice),
+    tenta fallback via `xlrd` + `openpyxl`.
     """
+    # Tentativa 1: soffice (mais robusto para formatos legados/complexos)
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "input.xls")
         with open(src, "wb") as f:
             f.write(xls_bytes)
-        proc = subprocess.run(
-            ["soffice", "--headless", "--convert-to", "xlsx", "--outdir", tmp, src],
-            capture_output=True, timeout=60,
-        )
-        if proc.returncode != 0:
-            raise ValueError(f"Falha ao converter .xls: {proc.stderr.decode('utf-8', errors='replace')[:200]}")
-        out = os.path.join(tmp, "input.xlsx")
-        if not os.path.exists(out):
-            raise ValueError("Conversao .xls -> .xlsx nao produziu arquivo esperado.")
-        with open(out, "rb") as f:
-            return f.read()
+        try:
+            proc = subprocess.run(
+                ["soffice", "--headless", "--convert-to", "xlsx", "--outdir", tmp, src],
+                capture_output=True, timeout=60,
+            )
+            if proc.returncode == 0:
+                out = os.path.join(tmp, "input.xlsx")
+                if os.path.exists(out):
+                    with open(out, "rb") as f:
+                        return f.read()
+        except (FileNotFoundError, PermissionError) as e:
+            logger.warning(f"soffice indisponivel ({e}); tentando fallback xlrd")
+        except subprocess.TimeoutExpired:
+            logger.warning("soffice timeout; tentando fallback xlrd")
+        # Fallback: xlrd + openpyxl (funciona para .xls simples BIFF5/BIFF8)
+        try:
+            import xlrd
+            from openpyxl import Workbook
+            book = xlrd.open_workbook(file_contents=xls_bytes)
+            wb = Workbook()
+            wb.remove(wb.active)
+            for sheet_name in book.sheet_names():
+                sheet = book.sheet_by_name(sheet_name)
+                ws = wb.create_sheet(title=sheet_name[:31] or "Sheet1")
+                for r in range(sheet.nrows):
+                    for c in range(sheet.ncols):
+                        val = sheet.cell_value(r, c)
+                        ws.cell(row=r + 1, column=c + 1, value=val)
+            buf = io.BytesIO()
+            wb.save(buf)
+            return buf.getvalue()
+        except Exception as e2:
+            raise ValueError(
+                f"Nao consegui converter .xls (nem via soffice nem via xlrd). Salve como .xlsx no Excel/LibreOffice e reenvie. Detalhe: {e2}"
+            )
 
 
 def parse_workbook(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
@@ -184,21 +211,34 @@ async def ensure_indexes(db) -> None:
 # --------------------------------------------------------------------------- #
 
 async def _find_users_by_emails(db, emails: List[str]) -> Dict[str, List[Dict]]:
-    """Retorna { email_lower: [users...] } — pode ter mais de um user por email."""
+    """Retorna { email_lower: [users...] } — pode ter mais de um user por email.
+    Iter 66.5: emails ja sao lowercase no cadastro (server.py line 850/865/929), entao
+    usamos `$in` direto — evita regex gigante que quebra em producao (>1000 emails)."""
     if not emails:
         return {}
-    # Case-insensitive match via $in de regex ancorados nao escala para 1000 emails,
-    # entao guardamos email lowercase na busca (users.email eh armazenado no formato original
-    # cadastrado; a comparacao deve ser case-insensitive)
     result: Dict[str, List[Dict]] = {e: [] for e in emails}
-    cursor = db.users.find(
-        {"email": {"$regex": "^(" + "|".join(re.escape(e) for e in emails) + ")$", "$options": "i"}},
-        {"_id": 0, "password_hash": 0},
-    )
-    async for u in cursor:
-        key = (u.get("email") or "").strip().lower()
-        if key in result:
-            result[key].append(u)
+    # Batching pra evitar queries gigantes (BSON limit 16MB, mas ate 5000 e OK)
+    BATCH = 500
+    for i in range(0, len(emails), BATCH):
+        chunk = emails[i:i + BATCH]
+        cursor = db.users.find(
+            {"email": {"$in": chunk}},
+            {"_id": 0, "password_hash": 0},
+        )
+        async for u in cursor:
+            key = (u.get("email") or "").strip().lower()
+            if key in result:
+                result[key].append(u)
+    # Fallback: para os que nao bateram, tenta case-insensitive individual (poucos, seguro)
+    unmatched = [e for e, us in result.items() if not us]
+    if unmatched and len(unmatched) < 200:
+        for e in unmatched:
+            u = await db.users.find_one(
+                {"email": {"$regex": f"^{re.escape(e)}$", "$options": "i"}},
+                {"_id": 0, "password_hash": 0},
+            )
+            if u:
+                result[e].append(u)
     return result
 
 
