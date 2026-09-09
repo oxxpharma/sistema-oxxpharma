@@ -4,6 +4,32 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66.2 (Fev/2026) — Convênio: FASE 3 (Checkout Payroll) + FASE 4 (Propagandista + Fechamento)
+
+### FASE 3 — Pagamento "Desconto em Folha" & Regras
+- **Novo método `payroll`** no checkout (`CheckoutData.payment_method`) só visível para funcionários de empresas com `payroll_enabled=true`.
+- **Aceite digital obrigatório:** `payroll_accepted=true` + `payroll_terms_version` no payload; sem aceite retorna 400. Registro completo em `db.payroll_acceptances` (ip, user_agent, terms_version, timestamp).
+- **Validação legal:** pedido não pode exceder `available_limit` (salário × payroll_limit_percent − open_charges) — bloqueio no backend e no frontend.
+- **Fluxo:** ordem entra direto como `payment_status=paid`, `paid_via=payroll`, dispara comissões, pontos, Maxx e email. Cria `PayrollCharge` (open) linkada.
+- **Desconto do convênio** (`discount_percent`) agora aplica automático no cart pricing (linha 1527 do server.py) — funcionário paga o preço com desconto mesmo em PIX/cartão.
+- **Novos endpoints:** `GET /api/me/employee-context` (retorna limite + saldo em tempo real) e `POST /api/checkout/payroll-eligibility` (preview).
+- **Frontend:** `CheckoutPage` detecta funcionário, mostra novo card "Desconto em folha" com todos os valores (salário, limite, aberto, disponível, pedido), checkbox de aceite obrigatório, e bloqueio visual quando excede.
+
+### FASE 4 — Propagandista + Comissões + Fechamento Mensal + Faturamento
+- **Nova role `propagandista`** aceita em `POST /api/admin/users/{id}/set-role`. Redirect no login vai direto para `/propagandista`.
+- **Comissões automáticas** em `mark_order_paid()` (novo hook `create_propagandista_commissions_for_order`):
+  - **1ª geração:** compra de funcionário → propagandista da empresa recebe % (default 8%).
+  - **2ª geração:** compra de indicação do funcionário → 3% (default).
+  - **Split empresa:** `commission_company_percent` sai da % do propagandista (limitado ao próprio rate). Ex: 8% - 2% split = 6% pro propagandista + 2% pra empresa.
+  - Coleção `propagandista_commissions` (idempotente por order_id).
+- **Fechamento mensal:** `process_monthly_closing(db, period)` agrupa `payroll_charges` open do período por empresa → cria `company_billings` (issued) → marca charges como `billed`.
+- **Cron dia 1 às 00:15 BR:** roda fechamento do mês anterior + envia email HTML para o `company_email` de cada empresa fechada (tabela por funcionário).
+- **Faturamento consolidado:** `company_billings` guarda total + charges + payment_method (pix default). Admin marca como `paid` via `POST /api/admin/company-billings/{id}/mark-paid` (propaga status para charges).
+- **Endpoints admin:** `POST /api/admin/convenio/run-monthly-closing` (manual), `GET /api/admin/company-billings`.
+- **Endpoints propagandista:** `GET /api/propagandista/me`, `GET /api/propagandista/commissions?month=YYYY-MM`.
+- **Frontend:** `PropagandistaLayout` + `PropagandistaDashboard` (stats + tabela de comissões por mês + gen1/gen2 separados).
+- **Testado end-to-end** via curl: compra R$39.90 (com 10% off) → payroll_charge criada → fechamento gerou billing R$115.71 (2 pedidos consolidados) → comissão propagandista R$2.15 (6%) + empresa R$0.72 (2%).
+
 ## Iter 66 (Fev/2026) — FASE 1 (produto/templates) + FASE 2 (Convênio: Base)
 
 ### FASE 1 — Produto & Templates

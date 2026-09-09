@@ -10,7 +10,7 @@ Sistema de Empresa Credenciada:
 import io
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query, Response
@@ -512,6 +512,349 @@ async def convenio_dashboard(request: Request, user: dict = Depends(_admin_user_
         "employees": {"total": total_employees, "active": active_employees},
         "open_charges": open_charges,
     }
+
+
+# ==================== EMPLOYEE CONTEXT & CHECKOUT HELPERS ====================
+
+async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
+    """Retorna contexto de funcionario para o usuario logado, ou None se nao for.
+    Estrutura: { employee_id, employee_name, company_id, company_name, salary,
+                 discount_percent, payroll_enabled, payroll_limit_percent,
+                 payroll_limit_amount, open_charges_total, available_limit }
+    """
+    if not user:
+        return None
+    emp = await db.company_employees.find_one(
+        {"$or": [
+            {"user_id": user.get("user_id")},
+            {"email": (user.get("email") or "").lower()},
+        ], "active": True},
+        {"_id": 0},
+    )
+    if not emp:
+        return None
+    company = await db.companies.find_one({"company_id": emp["company_id"], "active": True}, {"_id": 0})
+    if not company:
+        return None
+    # link automatico do user_id se ainda nao setado
+    if not emp.get("user_id") and user.get("user_id"):
+        await db.company_employees.update_one(
+            {"employee_id": emp["employee_id"]},
+            {"$set": {"user_id": user["user_id"]}},
+        )
+        emp["user_id"] = user["user_id"]
+    salary = float(emp.get("salary") or 0)
+    limit_pct = float(company.get("payroll_limit_percent") or 35.0)
+    limit_amount = round(salary * limit_pct / 100, 2)
+    # soma cobrancas em aberto (status: open, billed)
+    charges = await db.payroll_charges.find(
+        {"employee_id": emp["employee_id"], "status": {"$in": ["open", "billed"]}},
+        {"_id": 0, "amount": 1},
+    ).to_list(1000)
+    open_total = round(sum(float(c.get("amount", 0)) for c in charges), 2)
+    return {
+        "employee_id": emp["employee_id"],
+        "employee_name": emp.get("name"),
+        "company_id": company["company_id"],
+        "company_name": company.get("name"),
+        "salary": salary,
+        "position": emp.get("position"),
+        "discount_percent": float(company.get("discount_percent") or 0.0),
+        "payroll_enabled": bool(company.get("payroll_enabled")),
+        "payroll_limit_percent": limit_pct,
+        "payroll_limit_amount": limit_amount,
+        "open_charges_total": open_total,
+        "available_limit": round(max(0.0, limit_amount - open_total), 2),
+    }
+
+
+@router.get("/me/employee-context")
+async def me_employee_context(request: Request, user: dict = Depends(_current_user_lazy)):
+    """Retorna contexto de funcionario do usuario logado (ou 404 se nao for)."""
+    db = request.app.db
+    ctx = await get_employee_context(db, user)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="Usuario nao vinculado a nenhuma empresa credenciada")
+    return ctx
+
+
+class PayrollEligibilityIn(BaseModel):
+    amount: float
+
+
+@router.post("/checkout/payroll-eligibility")
+async def checkout_payroll_eligibility(request: Request, data: PayrollEligibilityIn, user: dict = Depends(_current_user_lazy)):
+    """Verifica se o usuario pode pagar `amount` via desconto em folha.
+    Retorna: {eligible, reason?, limit, open_charges, available, amount, company_name}."""
+    db = request.app.db
+    ctx = await get_employee_context(db, user)
+    if not ctx:
+        return {"eligible": False, "reason": "not_employee"}
+    if not ctx["payroll_enabled"]:
+        return {"eligible": False, "reason": "payroll_disabled", **{k: ctx[k] for k in ["company_name", "payroll_limit_amount", "available_limit"]}}
+    amt = float(data.amount or 0)
+    if amt <= 0:
+        return {"eligible": False, "reason": "invalid_amount"}
+    if amt > ctx["available_limit"]:
+        return {
+            "eligible": False,
+            "reason": "over_limit",
+            "amount": amt,
+            "limit": ctx["payroll_limit_amount"],
+            "open_charges": ctx["open_charges_total"],
+            "available": ctx["available_limit"],
+            "company_name": ctx["company_name"],
+        }
+    return {
+        "eligible": True,
+        "amount": amt,
+        "limit": ctx["payroll_limit_amount"],
+        "open_charges": ctx["open_charges_total"],
+        "available": ctx["available_limit"],
+        "company_name": ctx["company_name"],
+        "employee_id": ctx["employee_id"],
+    }
+
+
+async def create_payroll_charge(db, order: Dict, employee_ctx: Dict, acceptance: Dict) -> Dict:
+    """Cria uma cobranca payroll (desconto em folha) para uma order.
+    Registra o aceite digital (IP, UA, timestamp) para conformidade legal."""
+    now = _now_iso()
+    period = now[:7]  # YYYY-MM
+    charge = {
+        "charge_id": _gen_id("payr_"),
+        "order_id": order["order_id"],
+        "company_id": employee_ctx["company_id"],
+        "employee_id": employee_ctx["employee_id"],
+        "employee_name": employee_ctx["employee_name"],
+        "user_id": order.get("user_id"),
+        "amount": float(order.get("total", 0)),
+        "status": "open",  # open -> billed -> paid
+        "period_month": period,
+        "created_at": now,
+    }
+    await db.payroll_charges.insert_one(charge)
+    # Aceite digital (log separado para auditoria)
+    await db.payroll_acceptances.insert_one({
+        "acceptance_id": _gen_id("acpt_"),
+        "order_id": order["order_id"],
+        "employee_id": employee_ctx["employee_id"],
+        "user_id": order.get("user_id"),
+        "amount": charge["amount"],
+        "ip": acceptance.get("ip"),
+        "user_agent": acceptance.get("user_agent"),
+        "terms_version": acceptance.get("terms_version") or "v1",
+        "accepted_at": now,
+    })
+    return charge
+
+
+# ==================== PROPAGANDISTA (Iter 66 - FASE 4) ====================
+# Rede paralela: propagandista -> empresas -> funcionarios (gen1) -> indicacoes (gen2)
+# Comissoes: sobre compras pagas (payment_status=paid) dos funcionarios (1a gen)
+# e das indicacoes deles (2a gen). Empresa pode receber uma parcela que sai da comissao do propagandista.
+
+
+class PropagandistaCommissionQuery(BaseModel):
+    start_date: Optional[str] = None  # YYYY-MM-DD
+    end_date: Optional[str] = None
+
+
+@router.get("/propagandista/me")
+async def propagandista_me(request: Request, user: dict = Depends(_current_user_lazy)):
+    """Retorna dados do propagandista logado + empresas vinculadas."""
+    if user.get("role") not in ("propagandista", "admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Acesso restrito a Propagandistas")
+    db = request.app.db
+    companies = await db.companies.find({"propagandista_id": user["user_id"]}, {"_id": 0}).to_list(500)
+    # totais rapidos
+    total_employees = 0
+    for c in companies:
+        c["employees_count"] = await db.company_employees.count_documents({"company_id": c["company_id"], "active": True})
+        total_employees += c["employees_count"]
+    return {"user": {"user_id": user["user_id"], "name": user.get("name"), "email": user.get("email")},
+            "companies": companies, "total_companies": len(companies), "total_employees": total_employees}
+
+
+@router.get("/propagandista/commissions")
+async def propagandista_commissions(request: Request, month: Optional[str] = None,
+                                    user: dict = Depends(_current_user_lazy)):
+    """Lista comissoes do propagandista (gen1 + gen2) para um mes YYYY-MM (default: atual)."""
+    if user.get("role") not in ("propagandista", "admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Acesso restrito a Propagandistas")
+    db = request.app.db
+    if not month:
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+    q = {"propagandista_id": user["user_id"], "period_month": month}
+    items = await db.propagandista_commissions.find(q, {"_id": 0}).to_list(5000)
+    gen1_total = sum(float(x["amount"]) for x in items if x.get("generation") == 1)
+    gen2_total = sum(float(x["amount"]) for x in items if x.get("generation") == 2)
+    return {"period": month, "commissions": items, "gen1_total": round(gen1_total, 2), "gen2_total": round(gen2_total, 2), "grand_total": round(gen1_total + gen2_total, 2)}
+
+
+async def create_propagandista_commissions_for_order(db, order: Dict):
+    """Cria comissoes de propagandista (gen1 e gen2) para uma order paga.
+    Chamado a partir de mark_order_paid. Idempotente (sem duplicar por order_id)."""
+    order_id = order.get("order_id")
+    user_id = order.get("user_id")
+    if not order_id or not user_id:
+        return
+    # idempotencia
+    exists = await db.propagandista_commissions.count_documents({"order_id": order_id})
+    if exists:
+        return
+    # 1) usuario e funcionario de alguma empresa?
+    emp = await db.company_employees.find_one({"user_id": user_id, "active": True}, {"_id": 0})
+    if not emp:
+        # 2) o sponsor dele e funcionario? (gen2 — indicacao do funcionario)
+        sponsor_id = order.get("sponsor_id") or order.get("affiliate_id")
+        if not sponsor_id:
+            return
+        sponsor_emp = await db.company_employees.find_one({"user_id": sponsor_id, "active": True}, {"_id": 0})
+        if not sponsor_emp:
+            return
+        company = await db.companies.find_one({"company_id": sponsor_emp["company_id"], "active": True}, {"_id": 0})
+        if not company or not company.get("propagandista_id"):
+            return
+        # gen2
+        _emit_commission(db, order, company, generation=2, employee_id=sponsor_emp["employee_id"])
+    else:
+        company = await db.companies.find_one({"company_id": emp["company_id"], "active": True}, {"_id": 0})
+        if not company or not company.get("propagandista_id"):
+            return
+        # gen1
+        await _emit_commission(db, order, company, generation=1, employee_id=emp["employee_id"])
+
+
+async def _emit_commission(db, order: Dict, company: Dict, generation: int, employee_id: str):
+    # base: subtotal (sem frete)
+    base = float(order.get("subtotal") or 0)
+    if base <= 0:
+        return
+    # Taxa por geracao — usa comissao configurada globalmente do propagandista (default 8% gen1, 3% gen2)
+    settings = await db.settings.find_one({}, {"_id": 0}) or {}
+    prop_rates = settings.get("propagandista_rates") or {}
+    rate_gen = float(prop_rates.get(f"gen{generation}") or (8.0 if generation == 1 else 3.0))
+    # empresa recebe split — sai da comissao do propagandista, limitado ao proprio rate
+    company_pct = min(float(company.get("commission_company_percent") or 0), rate_gen)
+    prop_pct = rate_gen - company_pct
+    prop_amount = round(base * prop_pct / 100, 2)
+    company_amount = round(base * company_pct / 100, 2)
+    now = _now_iso()
+    doc = {
+        "commission_id": _gen_id("comm_"),
+        "order_id": order["order_id"],
+        "user_id": order.get("user_id"),
+        "generation": generation,
+        "company_id": company["company_id"],
+        "company_name": company.get("name"),
+        "employee_id": employee_id,
+        "propagandista_id": company.get("propagandista_id"),
+        "base_amount": base,
+        "rate_percent": rate_gen,
+        "company_split_percent": company_pct,
+        "amount": prop_amount,               # o que vai para o propagandista
+        "company_amount": company_amount,    # o que vai para a empresa
+        "status": "pending",                 # pending -> paid
+        "period_month": (order.get("paid_at") or now)[:7],
+        "created_at": now,
+    }
+    await db.propagandista_commissions.insert_one(doc)
+
+
+# ==================== FECHAMENTO MENSAL + FATURAMENTO CONSOLIDADO ====================
+
+async def process_monthly_closing(db, period: str) -> Dict:
+    """Fecha o periodo YYYY-MM para todas as empresas ativas:
+    - Agrupa payroll_charges do periodo com status=open
+    - Marca charges como 'billed'
+    - Cria/atualiza documento consolidado por empresa (company_billings)
+    Retorna: {closed_companies, total_amount}"""
+    now = _now_iso()
+    companies = await db.companies.find({"active": True}, {"_id": 0}).to_list(1000)
+    result = {"closed_companies": 0, "total_amount": 0.0, "billings": []}
+    for c in companies:
+        charges = await db.payroll_charges.find(
+            {"company_id": c["company_id"], "period_month": period, "status": "open"},
+            {"_id": 0},
+        ).to_list(5000)
+        if not charges:
+            continue
+        total = round(sum(float(x.get("amount", 0)) for x in charges), 2)
+        billing = {
+            "billing_id": _gen_id("bill_"),
+            "company_id": c["company_id"],
+            "company_name": c.get("name"),
+            "company_email": c.get("email"),
+            "period_month": period,
+            "total_amount": total,
+            "charges_count": len(charges),
+            "employees": _group_charges_by_employee(charges),
+            "status": "issued",       # issued -> paid
+            "payment_method": "pix",  # sugerido; ajustavel via /api/admin/company-billings/{id}
+            "created_at": now,
+        }
+        await db.company_billings.insert_one(billing)
+        # marca charges como billed
+        charge_ids = [x["charge_id"] for x in charges]
+        await db.payroll_charges.update_many(
+            {"charge_id": {"$in": charge_ids}},
+            {"$set": {"status": "billed", "billing_id": billing["billing_id"], "billed_at": now}},
+        )
+        result["closed_companies"] += 1
+        result["total_amount"] += total
+        result["billings"].append({"company_id": c["company_id"], "total": total, "billing_id": billing["billing_id"]})
+    result["total_amount"] = round(result["total_amount"], 2)
+    return result
+
+
+def _group_charges_by_employee(charges: List[Dict]) -> List[Dict]:
+    by = {}
+    for ch in charges:
+        eid = ch.get("employee_id")
+        if eid not in by:
+            by[eid] = {"employee_id": eid, "employee_name": ch.get("employee_name"), "total": 0.0, "orders": []}
+        by[eid]["total"] += float(ch.get("amount", 0))
+        by[eid]["orders"].append({"order_id": ch.get("order_id"), "amount": ch.get("amount")})
+    for v in by.values():
+        v["total"] = round(v["total"], 2)
+    return list(by.values())
+
+
+@router.post("/admin/convenio/run-monthly-closing")
+async def admin_run_closing(request: Request, body: Optional[Dict] = None, user: dict = Depends(_admin_user_lazy)):
+    """Fecha manualmente um periodo. Body: {period: 'YYYY-MM'} (default: mes anterior)."""
+    db = request.app.db
+    period = (body or {}).get("period")
+    if not period:
+        # mes anterior
+        now = datetime.now(timezone.utc)
+        prev = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        period = prev
+    result = await process_monthly_closing(db, period)
+    return {"period": period, **result}
+
+
+@router.get("/admin/company-billings")
+async def admin_list_billings(request: Request, period: Optional[str] = None, company_id: Optional[str] = None,
+                              user: dict = Depends(_admin_user_lazy)):
+    db = request.app.db
+    q = {}
+    if period: q["period_month"] = period
+    if company_id: q["company_id"] = company_id
+    items = await db.company_billings.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"billings": items}
+
+
+@router.post("/admin/company-billings/{billing_id}/mark-paid")
+async def admin_mark_billing_paid(request: Request, billing_id: str, user: dict = Depends(_admin_user_lazy)):
+    db = request.app.db
+    b = await db.company_billings.find_one({"billing_id": billing_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Faturamento nao encontrado")
+    await db.company_billings.update_one({"billing_id": billing_id}, {"$set": {"status": "paid", "paid_at": _now_iso()}})
+    await db.payroll_charges.update_many({"billing_id": billing_id}, {"$set": {"status": "paid", "paid_at": _now_iso()}})
+    return {"ok": True}
 
 
 # ==================== WIRE-UP ====================

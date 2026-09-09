@@ -32,9 +32,10 @@
 - pedro@rede1.com.br / oxx@pharma (gen2 de João, EXT003)
 
 ## Convênio (Iter 66) — Teste
-- **Empresa:** `Convenio Test SA` (CNPJ 11.222.333/0001-44, payroll_enabled=true, 10% desconto, limite 30%)
+- **Empresa:** `Convenio Test SA` (CNPJ 11.222.333/0001-44, payroll_enabled=true, 10% desconto, limite 30%, propagandista=admin, split_empresa=2%)
 - **RH (company_admin):** rh@convtest.com / rh12345 → login redireciona para `/empresa`
-- **Funcionário exemplo:** pedro@convtest.com (salario 4500)
+- **Funcionário (customer):** pedro@convtest.com / pedro123 (salario 4500) → vê "Desconto em folha" no checkout com limite R$ 1350
+- **Propagandista:** admin@oxxpharma.com (também é super_admin) → acesso via `/propagandista` (redirect só ativo p/ role=propagandista puro)
 
 ## Observações importantes
 - Admin seedado automaticamente no startup

@@ -21,10 +21,11 @@ export default function LoginPage() {
     try {
       const u = await login(form.email, form.password);
       toast.success(`Olá, ${u.name.split(' ')[0]}!`);
-      // Iter 66: redireciona company_admin para painel /empresa
+      // Iter 66: redireciona por role
       let dest = redirect;
       if (redirect === '/') {
         if (u.role === 'company_admin') dest = '/empresa';
+        else if (u.role === 'propagandista') dest = '/propagandista';
         else if (u.role === 'admin' || u.role === 'super_admin' || u.access_level <= 1) dest = '/backoffice';
       }
       navigate(dest);

@@ -40,6 +40,19 @@ export default function CheckoutPage() {
   // Iter 38: Voucher pre-pago vindo da Maxx
   const [voucherBalance, setVoucherBalance] = useState(0);
   const [useVoucher, setUseVoucher] = useState(false);
+  // Iter 66 (Convenio): contexto de funcionario + aceite digital do desconto em folha
+  const [employeeCtx, setEmployeeCtx] = useState(null);
+  const [payrollAccepted, setPayrollAccepted] = useState(false);
+  const [payrollEligibility, setPayrollEligibility] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const ec = await api.get('/api/me/employee-context');
+        setEmployeeCtx(ec);
+      } catch { setEmployeeCtx(null); }
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -88,6 +101,10 @@ export default function CheckoutPage() {
 
   const submit = async () => {
     if (!pickup && !selectedAddr) { toast.error('Selecione um endereço'); return; }
+    if (paymentMethod === 'payroll' && !payrollAccepted) {
+      toast.error('É necessário aceitar os termos do desconto em folha');
+      return;
+    }
     setSubmitting(true);
     try {
       let couponCode;
@@ -107,7 +124,19 @@ export default function CheckoutPage() {
         shipping_carrier: pickup ? 'Local' : selectedShipping?.carrier,
         shipping_service_id: pickup ? 'pickup' : selectedShipping?.id,
         shipping_delivery_days: pickup ? 0 : selectedShipping?.delivery_days,
+        payroll_accepted: paymentMethod === 'payroll' ? payrollAccepted : undefined,
+        payroll_terms_version: paymentMethod === 'payroll' ? 'v1' : undefined,
       });
+      // Iter 66: Desconto em folha ja fica pago no backend
+      if (paymentMethod === 'payroll') {
+        clear();
+        clearRef();
+        try { localStorage.removeItem('oxx_coupon_v1'); } catch { /* noop */ }
+        try { saveSelectedShipping(null); } catch { /* noop */ }
+        toast.success('Pedido registrado! Será descontado na próxima folha de pagamento.');
+        navigate(`/pedido/${order.order_id}`);
+        return;
+      }
       // Cria preferencia de pagamento (ou marca pago direto se voucher cobriu tudo)
       const pay = await api.post(`/api/payments/create/${order.order_id}`);
       clear();
@@ -356,9 +385,14 @@ export default function CheckoutPage() {
                 { id: 'pix', icon: QrCode, name: 'PIX', desc: 'Pagamento instantâneo' },
                 { id: 'credit_card', icon: CreditCard, name: 'Cartão de crédito', desc: 'Parcele em até 6x' },
                 { id: 'boleto', icon: FileText, name: 'Boleto bancário', desc: 'Vence em 3 dias úteis' },
+                ...(employeeCtx?.payroll_enabled ? [{
+                  id: 'payroll', icon: Wallet, name: 'Desconto em folha',
+                  desc: `Convênio · ${employeeCtx.company_name} · limite disponível: ${formatCurrency(employeeCtx.available_limit)}`
+                }] : []),
               ].map(pm => (
                 <button
                   key={pm.id}
+                  type="button"
                   onClick={() => setPaymentMethod(pm.id)}
                   className={`w-full text-left p-4 rounded-lg border transition flex items-center gap-3 ${paymentMethod === pm.id ? 'border-brand-main bg-brand-light/50' : 'border-border hover:border-brand-main/40'}`}
                   data-testid={`pm-${pm.id}`}
@@ -371,6 +405,32 @@ export default function CheckoutPage() {
                   {paymentMethod === pm.id && <Check className="w-5 h-5 text-brand-main" />}
                 </button>
               ))}
+
+              {/* Iter 66 (Convenio): aceite digital exigido por lei */}
+              {paymentMethod === 'payroll' && employeeCtx && (
+                <div className={`mt-3 rounded-xl border p-4 ${total > employeeCtx.available_limit ? 'border-red-400 bg-red-50' : 'border-emerald-300 bg-emerald-50'}`} data-testid="payroll-consent-box">
+                  <div className="text-sm font-bold mb-1">Desconto em folha — {employeeCtx.company_name}</div>
+                  <div className="text-xs text-txt-secondary space-y-1 mb-3">
+                    <div className="flex justify-between"><span>Seu salário:</span><span className="font-semibold">{formatCurrency(employeeCtx.salary)}</span></div>
+                    <div className="flex justify-between"><span>Limite consignado ({employeeCtx.payroll_limit_percent}%):</span><span className="font-semibold">{formatCurrency(employeeCtx.payroll_limit_amount)}</span></div>
+                    <div className="flex justify-between"><span>Compras em aberto:</span><span className="font-semibold">{formatCurrency(employeeCtx.open_charges_total)}</span></div>
+                    <div className="flex justify-between"><span>Disponível para uso:</span><span className="font-semibold text-emerald-700">{formatCurrency(employeeCtx.available_limit)}</span></div>
+                    <div className="flex justify-between border-t border-emerald-200 pt-1 mt-1"><span>Este pedido:</span><span className={`font-bold ${total > employeeCtx.available_limit ? 'text-red-600' : 'text-brand-main'}`}>{formatCurrency(total)}</span></div>
+                  </div>
+                  {total > employeeCtx.available_limit ? (
+                    <div className="text-xs text-red-700 font-semibold">
+                      ⚠️ Este pedido excede o limite disponível. Escolha outro método de pagamento ou reduza os itens.
+                    </div>
+                  ) : (
+                    <label className="flex items-start gap-2 text-xs cursor-pointer select-none" data-testid="payroll-accept-label">
+                      <input type="checkbox" checked={payrollAccepted} onChange={e => setPayrollAccepted(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-500" data-testid="payroll-accept" />
+                      <span>
+                        Autorizo o desconto de <b>{formatCurrency(total)}</b> em minha folha de pagamento pela empresa <b>{employeeCtx.company_name}</b>, referente ao pedido a ser gerado, conforme regras do convênio e respeitando o limite legal de {employeeCtx.payroll_limit_percent}% do salário bruto. Confirmo a leitura e concordância dos termos.
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
             )}
             <p className="text-xs text-txt-secondary mt-3 bg-bg-secondary p-3 rounded-lg">

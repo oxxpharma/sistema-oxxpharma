@@ -328,7 +328,7 @@ class CartItemAdd(BaseModel):
 
 class CheckoutData(BaseModel):
     address_id: str
-    payment_method: str = "pix"  # pix | credit_card | boleto (MVP: mock)
+    payment_method: str = "pix"  # pix | credit_card | boleto | payroll (Iter 66: desconto em folha)
     notes: Optional[str] = None
     ref_code: Optional[str] = None  # Codigo de indicacao do afiliado (URL ?ref=XXX)
     coupon_code: Optional[str] = None  # Cupom aplicado no checkout
@@ -339,6 +339,9 @@ class CheckoutData(BaseModel):
     shipping_delivery_days: Optional[int] = None
     voucher_amount: Optional[float] = None  # Iter 36: usa saldo de voucher pre-pago (parcial ou total)
     pickup: Optional[bool] = False  # Iter 47: cliente quer retirar no local (zera frete, usa endereco da loja)
+    # Iter 66 (Convenio): aceite digital exigido por lei para desconto em folha
+    payroll_accepted: Optional[bool] = False
+    payroll_terms_version: Optional[str] = "v1"
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -537,6 +540,39 @@ async def lifespan(app: FastAPI):
                     logger.exception(f"[multiplier-cron] falhou: {e}")
             _sch.add_job(_multiplier_cron, _CT(day=1, hour=0, minute=5, timezone=multiplier_campaign.TZ_BR), id="multiplier_monthly_eval", replace_existing=True)
             logger.info("Scheduler campanha do multiplicador registrado (dia 1 00:05 BR)")
+            # Iter 66 (Convenio): fechamento mensal + envio de emails para RH (dia 1 00:15 BR)
+            async def _convenio_closing_cron():
+                try:
+                    from datetime import timedelta as _td
+                    now_br = datetime.now(tz=multiplier_campaign.TZ_BR)
+                    prev_month = (now_br.replace(day=1) - _td(days=1)).strftime("%Y-%m")
+                    res = await convenio_routes.process_monthly_closing(app.db, prev_month)
+                    logger.info(f"[convenio-closing-cron] {prev_month}: {res['closed_companies']} empresas, R$ {res['total_amount']:.2f}")
+                    # Envia emails para cada empresa fechada
+                    for b_info in res.get("billings", []):
+                        billing = await app.db.company_billings.find_one({"billing_id": b_info["billing_id"]}, {"_id": 0})
+                        if not billing or not billing.get("company_email"):
+                            continue
+                        subject = f"Fechamento mensal Convenio · {billing['period_month']} · R$ {billing['total_amount']:.2f}"
+                        rows = "".join(
+                            f"<tr><td>{e['employee_name']}</td><td>{len(e.get('orders', []))}</td><td style='text-align:right'>R$ {e['total']:.2f}</td></tr>"
+                            for e in billing.get("employees", [])
+                        )
+                        html = f"""<h2>Fechamento mensal — {billing['period_month']}</h2>
+<p>Empresa: <b>{billing['company_name']}</b></p>
+<p>Total: <b>R$ {billing['total_amount']:.2f}</b> em {billing['charges_count']} cobranças.</p>
+<table border='1' cellpadding='8' style='border-collapse:collapse'>
+<thead><tr><th>Funcionário</th><th>Nº pedidos</th><th>Total</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<p style='margin-top:16px'>Consulte o painel <a href='{get_app_url()}/empresa/fechamento'>/empresa/fechamento</a> para o detalhamento completo.</p>"""
+                        try:
+                            await email_service.send_email(app.db, billing["company_email"], subject, html)
+                        except Exception as e:
+                            logger.error(f"[convenio-closing-cron] email {billing['company_email']} falhou: {e}")
+                except Exception as e:
+                    logger.exception(f"[convenio-closing-cron] falhou: {e}")
+            _sch.add_job(_convenio_closing_cron, _CT(day=1, hour=0, minute=15, timezone=multiplier_campaign.TZ_BR), id="convenio_monthly_closing", replace_existing=True)
+            logger.info("Scheduler fechamento mensal do Convenio registrado (dia 1 00:15 BR)")
     except Exception as e:
         logger.warning(f"Falha ao registrar cron da campanha do multiplicador: {e}")
     # indice unico para multiplier_status
@@ -1242,7 +1278,32 @@ async def list_products(request: Request, category: Optional[str] = None, subcat
     user = await get_optional_user(request)
     _tenant = tenant_service.get_tenant(request)
     products = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in products]
+    # Iter 66 (Convenio): aplica desconto configurado pela empresa credenciada
+    emp_ctx = await convenio_routes.get_employee_context(db, user) if user else None
+    if emp_ctx and emp_ctx.get("discount_percent", 0) > 0:
+        products = [_apply_convenio_discount(p, emp_ctx) for p in products]
     return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+
+
+def _apply_convenio_discount(product: Dict, emp_ctx: Dict) -> Dict:
+    """Aplica desconto % da empresa credenciada sobre o effective_price ja calculado.
+    Nao stacka com combo (que sobrepoe qualquer preco). Adiciona metadata `convenio_discount`."""
+    pct = float(emp_ctx.get("discount_percent") or 0)
+    if pct <= 0:
+        return product
+    base = float(product.get("effective_price") or product.get("price") or 0)
+    if base <= 0:
+        return product
+    disc = round(base * pct / 100, 2)
+    product["convenio_original_price"] = base
+    product["convenio_discount_percent"] = pct
+    product["convenio_discount_amount"] = disc
+    product["convenio_company"] = emp_ctx.get("company_name")
+    product["effective_price"] = round(base - disc, 2)
+    if not product.get("original_price") or product["original_price"] < base:
+        product["original_price"] = base
+    return product
+
 
 @app.get("/api/products/featured")
 async def featured_products(request: Request, limit: int = 8):
@@ -1254,6 +1315,9 @@ async def featured_products(request: Request, limit: int = 8):
     user = await get_optional_user(request)
     _tenant = tenant_service.get_tenant(request)
     prods = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in prods]
+    emp_ctx = await convenio_routes.get_employee_context(db, user) if user else None
+    if emp_ctx and emp_ctx.get("discount_percent", 0) > 0:
+        prods = [_apply_convenio_discount(p, emp_ctx) for p in prods]
     return {"products": prods}
 
 @app.get("/api/products/{product_id}")
@@ -1267,6 +1331,10 @@ async def get_product(request: Request, product_id: str):
     _tenant = tenant_service.get_tenant(request)
     p = store_extras.apply_pricing_to_product(p, user, tenant=_tenant)
     related = [store_extras.apply_pricing_to_product(r, user, tenant=_tenant) for r in related]
+    emp_ctx = await convenio_routes.get_employee_context(db, user) if user else None
+    if emp_ctx and emp_ctx.get("discount_percent", 0) > 0:
+        p = _apply_convenio_discount(p, emp_ctx)
+        related = [_apply_convenio_discount(r, emp_ctx) for r in related]
     return {"product": p, "related": related}
 
 # ==================== PRODUCTS (ADMIN) ====================
@@ -1489,6 +1557,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     _tenant = tenant_service.get_tenant(request)
     # Iter 61: combo pricing so eh aplicado se cliente NAO usar cupom e NAO usar voucher/pontos.
     combo_allowed = not bool(getattr(data, "coupon_code", None)) and float(getattr(data, "voucher_amount", 0) or 0) <= 0
+    # Iter 66 (Convenio): pre-carrega contexto de funcionario para desconto automatico
+    _employee_ctx_pricing = await convenio_routes.get_employee_context(db, user)
+    _company_disc_pct = float((_employee_ctx_pricing or {}).get("discount_percent") or 0)
     for ci in cart["items"]:
         prod = await db.products.find_one({"product_id": ci["product_id"], "active": True}, {"_id": 0})
         if not prod:
@@ -1498,6 +1569,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         # preco efetivo considerando pricing_tiers do usuario E override por tenant
         price_info = store_extras.effective_price(prod, user, tenant=_tenant)
         price = float(price_info["price"])
+        # Iter 66: desconto da empresa credenciada — aplica APENAS quando o funcionario paga
+        # com desconto em folha (payroll) OU sempre? Regra: sempre aplica (beneficio do convenio).
+        if _company_disc_pct > 0:
+            price = round(price * (1 - _company_disc_pct / 100), 2)
         combo = store_extras.combo_line_total(prod, ci["quantity"], price, allowed=combo_allowed)
         if combo["applied"]:
             total = combo["line_total"]
@@ -1645,6 +1720,24 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             voucher_used = 0.0
     final_total = round(grand_total - voucher_used, 2)
 
+    # Iter 66 (Convenio): Desconto em folha
+    payroll_charge_pending = None
+    employee_ctx_for_order = None
+    if data.payment_method == "payroll":
+        if not data.payroll_accepted:
+            raise HTTPException(status_code=400, detail="Aceite digital do desconto em folha e obrigatorio")
+        employee_ctx_for_order = await convenio_routes.get_employee_context(db, user)
+        if not employee_ctx_for_order:
+            raise HTTPException(status_code=400, detail="Usuario nao e funcionario de empresa credenciada")
+        if not employee_ctx_for_order["payroll_enabled"]:
+            raise HTTPException(status_code=400, detail="Empresa nao permite desconto em folha")
+        if final_total > employee_ctx_for_order["available_limit"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Valor R$ {final_total:.2f} excede o limite disponivel R$ {employee_ctx_for_order['available_limit']:.2f} (limite consignado {employee_ctx_for_order['payroll_limit_percent']}% do salario)",
+            )
+        payroll_charge_pending = employee_ctx_for_order
+
     order = {
         "order_id": gen_id("ord_"), "user_id": user["user_id"],
         "customer_name": user.get("name"), "customer_email": user.get("email"),
@@ -1680,6 +1773,23 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+
+    # Iter 66 (Convenio): pedido pago via desconto em folha
+    # -> marca pago imediatamente, roda hooks (comissoes, pontos, emails, nota fiscal)
+    # -> cria PayrollCharge (open) que vira parte do fechamento mensal da empresa
+    # -> registra aceite digital com IP + user_agent para conformidade legal
+    if payroll_charge_pending:
+        await mark_order_paid(db, order["order_id"], payment_id=None, source="payroll")
+        acceptance = {
+            "ip": (request.client.host if request.client else None),
+            "user_agent": request.headers.get("user-agent", "")[:300],
+            "terms_version": data.payroll_terms_version or "v1",
+        }
+        try:
+            fresh_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
+            await convenio_routes.create_payroll_charge(db, fresh_order or order, payroll_charge_pending, acceptance)
+        except Exception as e:
+            logger.error(f"Falha ao criar payroll charge: {e}")
 
     # Iter 36: Debita o voucher do user agora (lock-in para evitar consumir 2x)
     if voucher_used > 0:
@@ -4437,6 +4547,11 @@ async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, s
     # Iter 42c: comissoes NAO transitam mais para "paid" automaticamente.
     # Iter 42d: cria as comissoes (status pending|pending_enrollment) ao confirmar pagamento.
     await _create_commissions_for_paid_order(db, order_id)
+    # Iter 66 (Convenio): comissoes de propagandista (gen1 funcionarios + gen2 indicacoes)
+    try:
+        await convenio_routes.create_propagandista_commissions_for_order(db, await db.orders.find_one({"order_id": order_id}, {"_id": 0}) or {})
+    except Exception as e:
+        logger.error(f"Falha ao criar propagandista commissions: {e}")
     # Pontos
     await register_points_from_order(db, order_id)
     # Email

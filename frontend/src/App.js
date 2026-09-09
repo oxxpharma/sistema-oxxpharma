@@ -72,6 +72,8 @@ import CompanyEmployees from './pages/company/CompanyEmployees';
 import CompanyContract from './pages/company/CompanyContract';
 import CompanyReports from './pages/company/CompanyReports';
 import CompanyMonthlyClosing from './pages/company/CompanyMonthlyClosing';
+import PropagandistaLayout from './layouts/PropagandistaLayout';
+import PropagandistaDashboard from './pages/propagandista/PropagandistaDashboard';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
@@ -198,6 +200,13 @@ function AppRoutes() {
         <Route path="relatorios" element={<CompanyReports />} />
         <Route path="fechamento" element={<CompanyMonthlyClosing />} />
         <Route path="contrato" element={<CompanyContract />} />
+      </Route>
+
+      {/* PAINEL PROPAGANDISTA — role: propagandista */}
+      <Route path="/propagandista" element={<Guard requireAuth><PropagandistaLayout /></Guard>}>
+        <Route index element={<PropagandistaDashboard />} />
+        <Route path="comissoes" element={<PropagandistaDashboard />} />
+        <Route path="empresas" element={<PropagandistaDashboard />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
