@@ -35,6 +35,7 @@ import multiplier_campaign
 import melhorenvio_service
 import store_extras
 import network_suppression_service
+import convenio_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -601,6 +602,14 @@ async def detect_tenant_middleware(request: Request, call_next):
     except Exception:
         pass
     return response
+
+
+# ==================== CONVENIO (Iter 66) ====================
+# Registra o router de Convenio (Empresa Credenciada) com deps injetadas
+convenio_routes.register_convenio_routes(app, {
+    "require_admin": require_admin,
+    "get_current_user": get_current_user,
+})
 
 
 # ==================== TENANTS - PUBLIC + ADMIN ====================
@@ -8091,7 +8100,7 @@ async def admin_set_user_role(request: Request, user_id: str, payload: dict, use
     """
     db = request.app.db
     new_role = (payload.get("role") or "").strip()
-    if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
+    if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin", "company_admin", "propagandista"):
         raise HTTPException(status_code=400, detail="Role invalida")
     target = await db.users.find_one({"user_id": user_id})
     if not target:

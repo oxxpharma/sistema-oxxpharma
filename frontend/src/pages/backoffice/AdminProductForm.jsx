@@ -31,6 +31,7 @@ export default function AdminProductForm() {
   const [subcategories, setSubcategories] = useState([]);
   const [userCats, setUserCats] = useState([]);
   const [fieldTemplates, setFieldTemplates] = useState([]);
+  const [showTplManage, setShowTplManage] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -256,8 +257,10 @@ export default function AdminProductForm() {
                 onChange={(e) => {
                   const tpl = fieldTemplates.find(t => t.template_id === e.target.value);
                   if (tpl) {
-                    setForm({ ...form, custom_fields: [...(form.custom_fields || []), ...(tpl.fields || [])] });
-                    toast.success(`Template "${tpl.name}" aplicado`);
+                    // Iter 66: aplica APENAS os titulos — nao copia o texto do produto anterior
+                    const titlesOnly = (tpl.fields || []).map(f => ({ title: f.title || '', text: '' }));
+                    setForm({ ...form, custom_fields: [...(form.custom_fields || []), ...titlesOnly] });
+                    toast.success(`Template "${tpl.name}" aplicado (só títulos)`);
                   }
                   e.target.value = '';
                 }} data-testid="apply-tpl-select">
@@ -276,6 +279,9 @@ export default function AdminProductForm() {
                 } catch (err) { toast.error(err.message); }
               }} data-testid="save-tpl-btn">
                 <Save className="w-3 h-3" /> Salvar template
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowTplManage(true)} data-testid="manage-tpl-btn" disabled={!fieldTemplates.length}>
+                Gerenciar
               </Button>
               <Button type="button" size="sm" variant="outline" onClick={() => setForm({ ...form, custom_fields: [...(form.custom_fields || []), { title: '', text: '' }] })} data-testid="add-custom-field-btn">
                 <Plus className="w-3 h-3" /> Campo
@@ -516,6 +522,43 @@ export default function AdminProductForm() {
           <Button type="button" variant="ghost" onClick={() => nav('/backoffice/produtos')}>Cancelar</Button>
         </div>
       </form>
+
+      {showTplManage && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowTplManage(false)}>
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="border-b border-border p-5 flex items-center justify-between shrink-0">
+              <h2 className="font-heading font-black text-lg">Gerenciar templates</h2>
+              <button onClick={() => setShowTplManage(false)} className="p-1 hover:bg-bg-secondary rounded text-xl leading-none">×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-2">
+              {fieldTemplates.length === 0 && <div className="text-sm text-txt-secondary text-center py-6">Nenhum template salvo.</div>}
+              {fieldTemplates.map(t => (
+                <div key={t.template_id} className="flex items-center justify-between border border-border rounded-lg p-3 gap-2">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm truncate">{t.name}</div>
+                    <div className="text-xs text-txt-secondary">{(t.fields || []).length} campo(s)</div>
+                  </div>
+                  <button type="button" className="p-2 text-red-600 hover:bg-red-50 rounded" data-testid={`del-tpl-${t.template_id}`}
+                    onClick={async () => {
+                      if (!window.confirm(`Excluir o template "${t.name}"?`)) return;
+                      try {
+                        await api.del(`/api/admin/product-field-templates/${t.template_id}`);
+                        toast.success('Template excluído');
+                        const r = await api.get('/api/admin/product-field-templates');
+                        setFieldTemplates(r.templates || []);
+                      } catch (err) { toast.error(err.message); }
+                    }}>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="p-5 border-t border-border shrink-0">
+              <Button type="button" variant="outline" onClick={() => setShowTplManage(false)}>Fechar</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -106,8 +106,8 @@ export default function ProductDetails() {
         <ArrowLeft className="w-4 h-4" /> Voltar
       </Link>
 
-      <div className="grid md:grid-cols-2 gap-8 bg-white rounded-xl border border-border p-4 md:p-8">
-        <div className="bg-bg-secondary rounded-xl overflow-hidden aspect-square">
+      <div className="grid md:grid-cols-2 gap-8 bg-white rounded-xl border border-border p-4 md:p-8 items-start">
+        <div className="bg-bg-secondary rounded-xl overflow-hidden aspect-square md:sticky md:top-24 md:self-start" data-testid="product-image-wrap">
           <img src={img} alt={product.name} className="w-full h-full object-cover" onError={(e) => { e.target.src = PLACEHOLDER; }} />
         </div>
 

@@ -21,7 +21,13 @@ export default function LoginPage() {
     try {
       const u = await login(form.email, form.password);
       toast.success(`Olá, ${u.name.split(' ')[0]}!`);
-      navigate(u.role === 'admin' || u.access_level <= 1 ? (redirect === '/' ? '/backoffice' : redirect) : redirect);
+      // Iter 66: redireciona company_admin para painel /empresa
+      let dest = redirect;
+      if (redirect === '/') {
+        if (u.role === 'company_admin') dest = '/empresa';
+        else if (u.role === 'admin' || u.role === 'super_admin' || u.access_level <= 1) dest = '/backoffice';
+      }
+      navigate(dest);
     } catch (err) {
       toast.error(err.message);
     } finally {

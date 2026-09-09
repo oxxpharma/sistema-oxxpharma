@@ -64,6 +64,14 @@ import AdminIgvd from './pages/backoffice/AdminIgvd';
 import AdminPDV from './pages/backoffice/AdminPDV';
 import AdminMultiplierCampaign from './pages/backoffice/AdminMultiplierCampaign';
 import AdminNetworkSuppression from './pages/backoffice/AdminNetworkSuppression';
+import AdminCompanies from './pages/backoffice/AdminCompanies';
+import AdminCompanyForm from './pages/backoffice/AdminCompanyForm';
+import CompanyLayout from './layouts/CompanyLayout';
+import CompanyDashboard from './pages/company/CompanyDashboard';
+import CompanyEmployees from './pages/company/CompanyEmployees';
+import CompanyContract from './pages/company/CompanyContract';
+import CompanyReports from './pages/company/CompanyReports';
+import CompanyMonthlyClosing from './pages/company/CompanyMonthlyClosing';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
@@ -78,8 +86,8 @@ import AdminMergeUsers from './pages/backoffice/AdminMergeUsers';
 import AdminRecalcCommissions from './pages/backoffice/AdminRecalcCommissions';
 import AdminRoles from './pages/backoffice/AdminRoles';
 
-function Guard({ children, requireAuth = false, requireAdmin = false }) {
-  const { isAuthenticated, isAdmin, loading } = useAuth();
+function Guard({ children, requireAuth = false, requireAdmin = false, requireCompanyAdmin = false }) {
+  const { isAuthenticated, isAdmin, loading, user } = useAuth();
   const location = useLocation();
   if (loading) {
     return (
@@ -93,6 +101,11 @@ function Guard({ children, requireAuth = false, requireAdmin = false }) {
   }
   if (requireAdmin && !isAdmin) {
     return <Navigate to="/" replace />;
+  }
+  if (requireCompanyAdmin) {
+    const r = user?.role;
+    if (!isAuthenticated) return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+    if (r !== 'company_admin' && r !== 'admin' && r !== 'super_admin') return <Navigate to="/" replace />;
   }
   return children;
 }
@@ -159,6 +172,9 @@ function AppRoutes() {
         <Route path="maxx" element={<AdminMaxx />} />
         <Route path="maxx-pendentes" element={<AdminMaxxPending />} />
         <Route path="supressao-rede" element={<AdminNetworkSuppression />} />
+        <Route path="convenio" element={<AdminCompanies />} />
+        <Route path="convenio/nova" element={<AdminCompanyForm />} />
+        <Route path="convenio/:companyId" element={<AdminCompanyForm />} />
         <Route path="igvd" element={<AdminIgvd />} />
         <Route path="melhor-envio" element={<AdminMelhorEnvio />} />
         <Route path="programa-aprovados" element={<AdminReferralApproved />} />
@@ -173,6 +189,15 @@ function AppRoutes() {
         <Route path="page-builder" element={<AdminPageBuilder />} />
         <Route path="webhook" element={<AdminWebhook />} />
         <Route path="configuracoes" element={<AdminSettings />} />
+      </Route>
+
+      {/* PAINEL DA EMPRESA (RH) — role: company_admin */}
+      <Route path="/empresa" element={<Guard requireCompanyAdmin><CompanyLayout /></Guard>}>
+        <Route index element={<CompanyDashboard />} />
+        <Route path="funcionarios" element={<CompanyEmployees />} />
+        <Route path="relatorios" element={<CompanyReports />} />
+        <Route path="fechamento" element={<CompanyMonthlyClosing />} />
+        <Route path="contrato" element={<CompanyContract />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

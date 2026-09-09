@@ -31,6 +31,11 @@
 - maria@rede1.com.br / oxx@pharma (gen1 de João, EXT002)
 - pedro@rede1.com.br / oxx@pharma (gen2 de João, EXT003)
 
+## Convênio (Iter 66) — Teste
+- **Empresa:** `Convenio Test SA` (CNPJ 11.222.333/0001-44, payroll_enabled=true, 10% desconto, limite 30%)
+- **RH (company_admin):** rh@convtest.com / rh12345 → login redireciona para `/empresa`
+- **Funcionário exemplo:** pedro@convtest.com (salario 4500)
+
 ## Observações importantes
 - Admin seedado automaticamente no startup
 - Cadastro público via /cadastrar cria usuário `network_type='customer'` **SEM** `referral_code` (novo fluxo de cartão de benefícios)

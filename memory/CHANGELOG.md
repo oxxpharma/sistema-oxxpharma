@@ -4,6 +4,28 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66 (Fev/2026) — FASE 1 (produto/templates) + FASE 2 (Convênio: Base)
+
+### FASE 1 — Produto & Templates
+- **Foto sticky no ProductDetails** (`.jsx`): a imagem do produto agora fica fixa no scroll (md:sticky top-24) enquanto o conteúdo textual rola — igual Wepink/Sephora.
+- **Templates aplicam só títulos** (`AdminProductForm.jsx`): ao aplicar um template salvo, o backend copia apenas o campo `title` de cada item — o `text` fica vazio. Evita "vazar" texto de outro produto.
+- **Deletar templates** (`AdminProductForm.jsx`): botão "Gerenciar" abre modal listando todos os templates salvos com botão de excluir. Backend já expunha `DELETE /api/admin/product-field-templates/{id}`.
+
+### FASE 2 — Convênio (Base)
+- **Novo módulo `convenio_routes.py`** (APIRouter, ~500 linhas) — evita bloat em `server.py`. Registrado via `app.include_router()` com deps injetadas (`require_admin`, `get_current_user`).
+- **Modelos:** `Company` (name, cnpj, email, discount_percent, payroll_enabled, payroll_limit_percent, commission_company_percent, propagandista_id, contract_url, active), `Employee` (name, email, cpf, phone, salary, position, company_id, user_id, active).
+- **Nova role `company_admin`** com campo `company_admin_of` no user, incluída na validação de `POST /api/admin/users/{id}/set-role`. Novo endpoint `POST /api/admin/companies/{id}/assign-admin` para vincular RH.
+- **Endpoints admin:** CRUD `/api/admin/companies`, dashboard `/api/admin/convenio/dashboard`.
+- **Endpoints da empresa (`role=company_admin`):** `/api/company/me`, CRUD `/api/company/employees`, `/api/company/reports/open-charges`, `/api/company/reports/monthly?month=YYYY-MM`, `/api/company/contract`.
+- **Importação XLSX:** `POST /api/company/employees/import-xlsx` com preview (dry_run) e commit. Aliases de coluna (nome/name, email/e-mail, cpf, telefone/phone/celular, cargo/position/funcao, salario/salary). Modelo XLSX download em `GET /api/company/employees/template.xlsx`.
+- **Frontend admin:** menu "Convênio (Empresas)" em `BackofficeLayout`, páginas `AdminCompanies.jsx` (dashboard + lista) e `AdminCompanyForm.jsx` (edit com abas Dados/Funcionários/Importar XLSX + preview).
+- **Frontend RH:** novo layout `CompanyLayout.jsx` + páginas `CompanyDashboard`, `CompanyEmployees` (CRUD + XLSX), `CompanyReports` (cobranças em aberto), `CompanyMonthlyClosing` (por mês), `CompanyContract`.
+- **Redirect no LoginPage:** `company_admin` vai direto para `/empresa`, sem passar pelo backoffice.
+
+**Próximas fases** (a implementar):
+- FASE 3: Pagamento "Desconto em folha" no checkout + aceite digital + validação de limite consignado.
+- FASE 4: Propagandistas + comissões 1ª/2ª geração + fechamento mensal automático (cron) + faturamento consolidado (PIX/boleto) + envio de email.
+
 ## Iter 65 (Fev/2026) — Indicação: TTL 24h, anti-self-referral e sticky no frontend
 - **RefContext (`/app/frontend/src/contexts/RefContext.js`) reescrito:**
   - Cache do indicador agora tem **TTL de 24h** (`oxx_ref = { code, name, savedAt }`). Após 24h, é limpo automaticamente (checagem a cada minuto enquanto a aba está aberta e na próxima abertura).
