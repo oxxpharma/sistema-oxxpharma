@@ -75,15 +75,74 @@ async def get_config(db) -> Dict:
 async def claim_bonuses_for_user(db, user: Dict) -> int:
     """Chamado quando um user se cadastra ou atualiza CPF.
     Marca todos os warranty_bonuses pendentes com o mesmo CPF como claimed p/ este user.
-    Retorna quantos foram vinculados."""
+    Envia email de notificacao com o total ganho. Retorna quantos foram vinculados."""
     cpf_dig = _digits(user.get("cpf") or user.get("cpf_digits"))
     if not cpf_dig:
         return 0
+    # busca antes de atualizar para saber quais vao ser claimados
+    pending = await db.warranty_bonuses.find(
+        {"cpf_digits": cpf_dig, "status": "pending"},
+        {"_id": 0},
+    ).to_list(200)
+    if not pending:
+        return 0
+    now = _now_iso()
     r = await db.warranty_bonuses.update_many(
         {"cpf_digits": cpf_dig, "status": "pending"},
-        {"$set": {"status": "claimed", "user_id": user["user_id"], "claimed_at": _now_iso()}},
+        {"$set": {"status": "claimed", "user_id": user["user_id"], "claimed_at": now}},
     )
+    # dispara notificacao (best-effort)
+    try:
+        cfg = await get_config(db)
+        n = len(pending)
+        amt_per = float(cfg.get("amount_per_unit") or DEFAULT_CFG["amount_per_unit"])
+        min_per = float(cfg.get("min_order_per_unit") or DEFAULT_CFG["min_order_per_unit"])
+        total_available = round(n * amt_per, 2)
+        first_tier = round(min_per, 2)
+        target_email = (user.get("email") or "").strip().lower() or None
+        # se algum item da planilha trouxe email diferente, tambem inclui na notificacao
+        planilha_emails = {(b.get("email") or "").strip().lower() for b in pending if b.get("email")}
+        planilha_emails.discard("")
+        emails_to_notify = {target_email, *planilha_emails} - {None, ""}
+        await _send_bonus_notification(db, list(emails_to_notify), user.get("name") or "", n, total_available, first_tier, amt_per, min_per)
+    except Exception as e:
+        logger.warning(f"warranty_bonus notify falhou: {e}")
     return r.modified_count
+
+
+async def _send_bonus_notification(db, emails: List[str], client_name: str, units: int,
+                                    total_available: float, first_tier_min: float,
+                                    amount_per_unit: float, min_order_per_unit: float):
+    """Envia email HTML com o bonus recebido."""
+    if not emails: return
+    try:
+        import email_service
+    except Exception:
+        return
+    subject = f"Voce ganhou R$ {total_available:.2f} em bonus de garantia!"
+    html = f"""
+<div style='font-family:Inter,Arial,sans-serif;max-width:560px;margin:auto;padding:20px;background:#fff;border:1px solid #eee;border-radius:12px'>
+  <div style='text-align:center;margin-bottom:16px'>
+    <div style='font-size:40px'>🎁</div>
+    <h1 style='color:#ea580c;margin:8px 0 0'>Bonus de Garantia disponivel!</h1>
+  </div>
+  <p>Ola{f', <b>{client_name.split()[0]}</b>' if client_name else ''}!</p>
+  <p>Voce registrou <b>{units} aparelho{'s' if units != 1 else ''}</b> Ozoxx e por isso ganhou <b style='color:#059669'>R$ {total_available:.2f}</b> em bonus para suas proximas compras na OxxPharma.</p>
+  <div style='background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:12px;margin:16px 0'>
+    <b>Como usar:</b><br/>
+    Para cada aparelho, voce ganha <b>R$ {amount_per_unit:.2f}</b> em compras acima de <b>R$ {min_order_per_unit:.2f}</b>.<br/>
+    Comece agora: compre por R$ {first_tier_min:.2f} ou mais e ative o primeiro bonus.
+  </div>
+  <div style='text-align:center;margin:20px 0'>
+    <a href='{os.environ.get("APP_URL", "")}/produtos' style='background:#ea580c;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold'>Ver produtos</a>
+  </div>
+  <p style='color:#6b7280;font-size:12px;text-align:center;margin-top:24px'>Se voce nao reconhece esse bonus, ignore este email. As unidades sao vinculadas por CPF cadastrado na garantia do produto.</p>
+</div>"""
+    for to in emails:
+        try:
+            await email_service.send_email(db, to, subject, html)
+        except Exception as e:
+            logger.warning(f"send bonus email {to} falhou: {e}")
 
 
 async def get_available_bonus_count(db, user_id: str) -> int:
@@ -173,8 +232,8 @@ async def update_bonus_config(request: Request, body: Dict, user: dict = Depends
 async def bonus_template_xlsx(request: Request, user: dict = Depends(_admin_user_lazy)):
     output = io.BytesIO()
     df = pd.DataFrame([
-        {"nome": "Joao Silva", "cpf": "12345678900", "serie": "SN-000123"},
-        {"nome": "Maria Souza", "cpf": "98765432100", "serie": "SN-000124"},
+        {"nome": "Joao Silva", "cpf": "12345678900", "email": "joao@email.com", "serie": "SN-000123"},
+        {"nome": "Maria Souza", "cpf": "98765432100", "email": "maria@email.com", "serie": "SN-000124"},
     ])
     with pd.ExcelWriter(output, engine="openpyxl") as w:
         df.to_excel(w, sheet_name="Aparelhos", index=False)
@@ -198,7 +257,7 @@ async def bonus_upload(request: Request, file: UploadFile = File(...),
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Falha ao ler XLSX: {e}")
     df.columns = [str(c).strip().lower() for c in df.columns]
-    aliases = {"nome": "name", "name": "name", "cpf": "cpf", "serie": "serial", "série": "serial", "serial": "serial", "numero_serie": "serial"}
+    aliases = {"nome": "name", "name": "name", "cpf": "cpf", "serie": "serial", "série": "serial", "serial": "serial", "numero_serie": "serial", "email": "email", "e-mail": "email"}
     df = df.rename(columns={c: aliases.get(c, c) for c in df.columns})
     required = {"name", "cpf", "serial"}
     missing = required - set(df.columns)
@@ -211,25 +270,29 @@ async def bonus_upload(request: Request, file: UploadFile = File(...),
     linked = 0
     errors: List[str] = []
     preview: List[Dict] = []
+    # coleta claims imediatos para notificacao em batch por user
+    claimed_by_user: Dict[str, List[Dict]] = {}
+    pending_by_email: Dict[str, List[Dict]] = {}
 
     for idx, row in df.iterrows():
         try:
             name = str(row.get("name") or "").strip()
             cpf_dig = _digits(row.get("cpf"))
             serial = str(row.get("serial") or "").strip()
+            email = (str(row.get("email") or "").strip().lower() or None) if "email" in df.columns else None
             if not (name and cpf_dig and serial):
                 continue
             # dedupe: mesmo (cpf+serial) so 1 vez
             dup = await db.warranty_bonuses.find_one({"cpf_digits": cpf_dig, "serial": serial}, {"_id": 0, "bonus_id": 1})
             status_row = "duplicate" if dup else "new"
-            row_prev = {"name": name, "cpf": cpf_dig, "serial": serial, "status": status_row}
+            row_prev = {"name": name, "cpf": cpf_dig, "serial": serial, "email": email, "status": status_row}
             preview.append(row_prev)
             if status_row == "duplicate" or dry_run:
                 if status_row == "duplicate":
                     duplicates += 1
                 continue
             # busca user existente por CPF pra claimar imediato
-            existing_user = await db.users.find_one({"cpf_digits": cpf_dig}, {"_id": 0, "user_id": 1})
+            existing_user = await db.users.find_one({"cpf_digits": cpf_dig}, {"_id": 0, "user_id": 1, "name": 1, "email": 1})
             doc = {
                 "bonus_id": _gen_id("wbon_"),
                 "upload_id": upload_id,
@@ -237,6 +300,7 @@ async def bonus_upload(request: Request, file: UploadFile = File(...),
                 "cpf": cpf_dig,
                 "cpf_digits": cpf_dig,
                 "serial": serial,
+                "email": email,
                 "user_id": existing_user["user_id"] if existing_user else None,
                 "status": "claimed" if existing_user else "pending",
                 "created_at": _now_iso(),
@@ -246,10 +310,40 @@ async def bonus_upload(request: Request, file: UploadFile = File(...),
             inserted += 1
             if existing_user:
                 linked += 1
+                claimed_by_user.setdefault(existing_user["user_id"], []).append({"user": existing_user, "email_planilha": email})
+            elif email:
+                # ainda nao tem cadastro — guarda pra avisar por email
+                pending_by_email.setdefault(email, []).append({"name": name})
         except Exception as e:
             errors.append(f"linha {int(idx) + 2}: {e}")
 
     if not dry_run:
+        # Envia notificacoes em batch (best-effort)
+        try:
+            cfg = await get_config(db)
+            amt_per = float(cfg.get("amount_per_unit") or DEFAULT_CFG["amount_per_unit"])
+            min_per = float(cfg.get("min_order_per_unit") or DEFAULT_CFG["min_order_per_unit"])
+            # 1) Users existentes que ganharam bonus agora
+            for uid, entries in claimed_by_user.items():
+                total_units = await db.warranty_bonuses.count_documents({"user_id": uid, "status": "claimed"})
+                emails = {(e["user"].get("email") or "").strip().lower() for e in entries}
+                emails |= {(e.get("email_planilha") or "").strip().lower() for e in entries}
+                emails.discard("")
+                await _send_bonus_notification(
+                    db, list(emails), entries[0]["user"].get("name") or "",
+                    len(entries), round(len(entries) * amt_per, 2),
+                    round(min_per, 2), amt_per, min_per,
+                )
+            # 2) Bonus pendentes por email (cliente ainda nao cadastrado)
+            for email_addr, entries in pending_by_email.items():
+                await _send_bonus_notification(
+                    db, [email_addr], entries[0].get("name", ""),
+                    len(entries), round(len(entries) * amt_per, 2),
+                    round(min_per, 2), amt_per, min_per,
+                )
+        except Exception as e:
+            logger.warning(f"warranty_bonus upload notifications falharam: {e}")
+
         await db.warranty_bonus_uploads.insert_one({
             "upload_id": upload_id,
             "filename": file.filename,

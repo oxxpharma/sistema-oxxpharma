@@ -37,6 +37,7 @@ import store_extras
 import network_suppression_service
 import convenio_routes
 import warranty_bonus_routes
+import twofa_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -655,6 +656,11 @@ warranty_bonus_routes.register_warranty_bonus_routes(app, {
     "get_current_user": get_current_user,
 })
 
+# ==================== 2FA por email (Iter 66.4) ====================
+twofa_routes.register_2fa_routes(app, {
+    "create_token": create_token,
+})
+
 
 # ==================== TENANTS - PUBLIC + ADMIN ====================
 
@@ -928,6 +934,13 @@ async def login(request: Request, response: Response, data: AuthLogin):
     role = user.get("role", "customer")
     if user.get("access_level", 99) <= 1 and role not in ADMIN_ROLES:
         role = "super_admin"
+    # Iter 66.4: 2FA obrigatorio para roles sensiveis (company_admin, propagandista)
+    if role in twofa_routes.TWO_FA_ROLES:
+        trusted = request.headers.get("x-trusted-device") or request.cookies.get("trusted_device")
+        if not twofa_routes.verify_trusted_token(trusted, user["user_id"]):
+            user.pop("password_hash", None)
+            challenge = await twofa_routes.start_challenge(db, user)
+            return {"requires_2fa": True, **challenge, "role": role}
     token = create_token(user["user_id"], user["email"], role)
     set_cookie(response, token)
     user.pop("password_hash", None)

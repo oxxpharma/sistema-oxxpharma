@@ -4,6 +4,27 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66.4 (Fev/2026) — 2FA obrigatório + Notificação de Bônus por Email
+
+### 2FA por email (`twofa_routes.py`)
+- **Obrigatório** para roles `company_admin` e `propagandista` (dados sensíveis de folha e comissões).
+- **Fluxo:**
+  1. `POST /api/auth/login` normal → se role sensível, backend gera código 6 dígitos + envia email HTML e retorna `{requires_2fa: true, pending_token, email_masked, role}` em vez do JWT.
+  2. `POST /api/auth/2fa/verify` com `{email, code, pending_token}` → valida (compare_digest, 5 tentativas, TTL 10min) → retorna JWT + `trusted_device_token` (JWT `kind: trusted_device`, expira em 7 dias).
+  3. Frontend guarda o `trusted_device_token` em `localStorage.oxx_trusted_device` e envia via header `X-Trusted-Device` em TODAS as chamadas (`api.js`).
+  4. Próximos logins pela mesma máquina pulam o 2FA por 7 dias (verificado via `twofa_routes.verify_trusted_token`).
+- **Reenvio:** `POST /api/auth/2fa/resend` — apaga challenge anterior, gera novo código com cooldown de 30s no front.
+- **Logout NÃO limpa** o `oxx_trusted_device` — é do dispositivo, não da sessão.
+- **UI:** `LoginPage.jsx` reformulada com dois estados (email/senha → código). Campo dedicado com `inputMode="numeric"`, `autoComplete="one-time-code"`, letter-spacing largo. Botões: Verificar, Reenviar (com contador), Voltar.
+
+### Notificação de Bônus de Garantia por email
+- **Coluna `email`** adicionada ao template XLSX e ao parser de upload (aliases: `email`, `e-mail`).
+- **Armazenamento:** cada `warranty_bonuses` doc guarda o email da planilha (opcional).
+- **Envio automático** de email HTML `_send_bonus_notification()` em 2 cenários:
+  1. **Upload da planilha:** para cada user existente que ganhou bônus (email do cadastro + email da planilha se diferentes) e para cada CPF ainda sem cadastro (email da planilha).
+  2. **Auto-claim** no `POST /api/auth/register` e `PUT /api/users/me` (quando CPF é setado) — pega o email do usuário + emails da planilha e envia notificação com o total ganho.
+- **Template** com valor total, quantidade de aparelhos, primeiro tier de compra mínima, CTA "Ver produtos" e disclaimer legal.
+
 ## Iter 66.3 (Fev/2026) — Convênio refinos + Bônus de Garantia Ozoxx
 
 ### Convênio · Ajustes

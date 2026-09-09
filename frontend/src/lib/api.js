@@ -40,6 +40,9 @@ async function request(path, { method = 'GET', body, headers = {}, ...rest } = {
 
   const adminTenant = previewTenant || localStorage.getItem('admin_tenant');
   const tenantHeader = adminTenant && adminTenant !== 'all' ? { 'X-Tenant': adminTenant } : {};
+  // Iter 66.4: X-Trusted-Device pra 2FA nao pedir codigo novamente por 7 dias
+  const trustedDev = localStorage.getItem('oxx_trusted_device');
+  const trustedHeader = trustedDev ? { 'X-Trusted-Device': trustedDev } : {};
   // Iter 59: se body for FormData, NAO serializa nem seta Content-Type
   // (o browser injeta o boundary correto sozinho).
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -49,6 +52,7 @@ async function request(path, { method = 'GET', body, headers = {}, ...rest } = {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...tenantHeader,
+      ...trustedHeader,
       ...headers,
     },
     credentials: 'include',

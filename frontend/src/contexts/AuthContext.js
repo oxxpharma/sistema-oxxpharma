@@ -51,12 +51,30 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const data = await api.post('/api/auth/login', { email, password });
+    // Iter 66.4: 2FA obrigatorio para roles sensiveis
+    if (data.requires_2fa) {
+      return { requires_2fa: true, pending_token: data.pending_token, email_masked: data.email_masked, role: data.role, email };
+    }
     localStorage.setItem('token', data.token);
     sessionStorage.removeItem(IMPERSONATE_KEY);
     setImpersonating(false);
     setImpersonator(null);
     setUser(data.user);
     return data.user;
+  };
+
+  const verify2FA = async ({ email, code, pending_token }) => {
+    const data = await api.post('/api/auth/2fa/verify', { email, code, pending_token });
+    localStorage.setItem('token', data.token);
+    if (data.trusted_device_token) {
+      localStorage.setItem('oxx_trusted_device', data.trusted_device_token);
+    }
+    setUser(data.user);
+    return data.user;
+  };
+
+  const resend2FA = async ({ email, pending_token }) => {
+    return api.post('/api/auth/2fa/resend', { email, pending_token });
   };
 
   const register = async (payload) => {
@@ -69,6 +87,8 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try { await api.post('/api/auth/logout'); } catch {}
     localStorage.removeItem('token');
+    // NOTA: NAO removemos oxx_trusted_device — ele identifica o dispositivo, nao a sessao.
+    // O usuario mantem "dispositivo confiavel" por 7 dias mesmo apos logout.
     sessionStorage.removeItem(IMPERSONATE_KEY);
     setImpersonating(false);
     setImpersonator(null);
@@ -126,6 +146,7 @@ export function AuthProvider({ children }) {
       isAuthenticated: !!user, isAdmin, isSuperAdmin, can,
       impersonating, impersonator,
       login, register, logout, refresh, setUser,
+      verify2FA, resend2FA,
       startImpersonation, stopImpersonation,
     }}>
       {children}
