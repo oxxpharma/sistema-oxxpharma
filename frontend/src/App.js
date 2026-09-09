@@ -66,6 +66,8 @@ import AdminMultiplierCampaign from './pages/backoffice/AdminMultiplierCampaign'
 import AdminNetworkSuppression from './pages/backoffice/AdminNetworkSuppression';
 import AdminCompanies from './pages/backoffice/AdminCompanies';
 import AdminCompanyForm from './pages/backoffice/AdminCompanyForm';
+import AdminCompanyBillings from './pages/backoffice/AdminCompanyBillings';
+import AdminWarrantyBonus from './pages/backoffice/AdminWarrantyBonus';
 import CompanyLayout from './layouts/CompanyLayout';
 import CompanyDashboard from './pages/company/CompanyDashboard';
 import CompanyEmployees from './pages/company/CompanyEmployees';
@@ -176,7 +178,9 @@ function AppRoutes() {
         <Route path="supressao-rede" element={<AdminNetworkSuppression />} />
         <Route path="convenio" element={<AdminCompanies />} />
         <Route path="convenio/nova" element={<AdminCompanyForm />} />
+        <Route path="convenio/faturamento" element={<AdminCompanyBillings />} />
         <Route path="convenio/:companyId" element={<AdminCompanyForm />} />
+        <Route path="bonus-garantia" element={<AdminWarrantyBonus />} />
         <Route path="igvd" element={<AdminIgvd />} />
         <Route path="melhor-envio" element={<AdminMelhorEnvio />} />
         <Route path="programa-aprovados" element={<AdminReferralApproved />} />

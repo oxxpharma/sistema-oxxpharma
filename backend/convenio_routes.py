@@ -8,6 +8,7 @@ Sistema de Empresa Credenciada:
 """
 
 import io
+import os
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
@@ -44,6 +45,7 @@ class CompanyCreate(BaseModel):
     address: Optional[Dict] = None  # {street, number, complement, neighborhood, city, state, zip}
     # Regras comerciais
     discount_percent: float = 0.0        # 0-100 - desconto aplicado nos produtos p/ funcionarios
+    discount_max_units: Optional[int] = None  # Iter 66.3: max unidades por pedido com desconto (opcional)
     payroll_enabled: bool = False        # habilita metodo "desconto em folha"
     payroll_limit_percent: float = 35.0  # % max do salario (lei brasileira: 35% incluindo consignados)
     # Comissoes
@@ -63,6 +65,7 @@ class CompanyUpdate(BaseModel):
     contact_phone: Optional[str] = None
     address: Optional[Dict] = None
     discount_percent: Optional[float] = None
+    discount_max_units: Optional[int] = None
     payroll_enabled: Optional[bool] = None
     payroll_limit_percent: Optional[float] = None
     propagandista_id: Optional[str] = None
@@ -79,6 +82,7 @@ class EmployeeCreate(BaseModel):
     phone: Optional[str] = None
     position: Optional[str] = None
     salary: float = 0.0
+    payroll_limit_override: Optional[float] = None  # Iter 66.3: override manual do limite consignado
     active: bool = True
 
 
@@ -89,6 +93,7 @@ class EmployeeUpdate(BaseModel):
     phone: Optional[str] = None
     position: Optional[str] = None
     salary: Optional[float] = None
+    payroll_limit_override: Optional[float] = None
     active: Optional[bool] = None
 
 
@@ -229,6 +234,79 @@ async def assign_company_admin(request: Request, company_id: str, body: Dict, us
         {"$set": {"role": "company_admin", "company_admin_of": company_id, "updated_at": _now_iso()}},
     )
     return {"message": "Usuario vinculado como admin da empresa"}
+
+
+@router.post("/admin/companies/{company_id}/contract")
+async def upload_company_contract(request: Request, company_id: str, file: UploadFile = File(...),
+                                  user: dict = Depends(_admin_user_lazy)):
+    """Upload de contrato PDF via Emergent Object Storage.
+    Aceita apenas application/pdf, max 10MB."""
+    import storage_service
+    db = request.app.db
+    await _get_company_or_404(db, company_id)
+    fname = (file.filename or "").lower()
+    ct = (file.content_type or "").lower()
+    if "pdf" not in ct and not fname.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Arquivo deve ser PDF")
+    data = await file.read()
+    if not data or len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Arquivo vazio ou maior que 10 MB")
+    path = f"{storage_service.APP_NAME}/contracts/{company_id}.pdf"
+    try:
+        result = storage_service.put_object(path, data, "application/pdf")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha no storage: {e}")
+    url = f"/api/company-contracts/{company_id}.pdf"
+    await db.companies.update_one(
+        {"company_id": company_id},
+        {"$set": {
+            "contract_url": url,
+            "contract_storage_path": result["path"],
+            "contract_size_bytes": result.get("size", len(data)),
+            "contract_uploaded_at": _now_iso(),
+        }},
+    )
+    return {"contract_url": url, "size_bytes": len(data)}
+
+
+@router.get("/company-contracts/{company_id}.pdf")
+async def download_company_contract(request: Request, company_id: str,
+                                     auth: Optional[str] = None,
+                                     authorization: Optional[str] = None):
+    """Baixa o PDF via storage. Aceita auth via header OU query ?auth=<token> (para <a href>)."""
+    import storage_service
+    db = request.app.db
+    # resolucao manual do usuario (aceita ?auth= como fallback)
+    if auth and "Authorization" not in request.headers:
+        # simula o header pra reutilizar get_current_user
+        get_user = _deps.get("get_current_user")
+        if not get_user:
+            raise HTTPException(status_code=500, detail="deps")
+        # trick: monkey-patch headers via scope? Nao — chamamos direto:
+        import jwt as _jwt
+        secret = os.environ.get("JWT_SECRET")
+        try:
+            payload = _jwt.decode(auth, secret, algorithms=["HS256"])
+            uid = payload.get("sub")
+        except Exception:
+            raise HTTPException(status_code=401, detail="Token invalido")
+        user = await db.users.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="Usuario nao encontrado")
+    else:
+        user = await _current_user_lazy(request)
+    r = user.get("role")
+    if r not in ("admin", "super_admin"):
+        if r != "company_admin" or user.get("company_admin_of") != company_id:
+            raise HTTPException(status_code=403, detail="Acesso negado")
+    company = await _get_company_or_404(db, company_id)
+    path = company.get("contract_storage_path") or f"{storage_service.APP_NAME}/contracts/{company_id}.pdf"
+    try:
+        content, ct = storage_service.get_object(path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Contrato nao encontrado")
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={company_id}.pdf"})
 
 
 # ==================== ADMIN + COMPANY: FUNCIONARIOS ====================
@@ -545,7 +623,12 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
         emp["user_id"] = user["user_id"]
     salary = float(emp.get("salary") or 0)
     limit_pct = float(company.get("payroll_limit_percent") or 35.0)
-    limit_amount = round(salary * limit_pct / 100, 2)
+    # Iter 66.3: override manual do limite (por funcionario) — se setado, ignora salario
+    override = emp.get("payroll_limit_override")
+    if override is not None and float(override) > 0:
+        limit_amount = round(float(override), 2)
+    else:
+        limit_amount = round(salary * limit_pct / 100, 2)
     # soma cobrancas em aberto (status: open, billed)
     charges = await db.payroll_charges.find(
         {"employee_id": emp["employee_id"], "status": {"$in": ["open", "billed"]}},
@@ -557,12 +640,14 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
         "employee_name": emp.get("name"),
         "company_id": company["company_id"],
         "company_name": company.get("name"),
-        "salary": salary,
+        # Iter 66.3: NAO exponho o salario ao frontend (privacidade). Fica so no admin.
         "position": emp.get("position"),
         "discount_percent": float(company.get("discount_percent") or 0.0),
+        "discount_max_units": company.get("discount_max_units"),
         "payroll_enabled": bool(company.get("payroll_enabled")),
         "payroll_limit_percent": limit_pct,
         "payroll_limit_amount": limit_amount,
+        "payroll_limit_override": override,   # so exposto para admin/company_admin usar
         "open_charges_total": open_total,
         "available_limit": round(max(0.0, limit_amount - open_total), 2),
     }
@@ -855,6 +940,90 @@ async def admin_mark_billing_paid(request: Request, billing_id: str, user: dict 
     await db.company_billings.update_one({"billing_id": billing_id}, {"$set": {"status": "paid", "paid_at": _now_iso()}})
     await db.payroll_charges.update_many({"billing_id": billing_id}, {"$set": {"status": "paid", "paid_at": _now_iso()}})
     return {"ok": True}
+
+
+@router.post("/admin/company-billings/{billing_id}/create-payment")
+async def admin_billing_create_payment(request: Request, billing_id: str, user: dict = Depends(_admin_user_lazy)):
+    """Gera preferencia MP para faturamento consolidado (PIX/boleto/cartao).
+    Retorna init_point/sandbox_init_point que a empresa acessa para pagar."""
+    import payments_service
+    db = request.app.db
+    billing = await db.company_billings.find_one({"billing_id": billing_id}, {"_id": 0})
+    if not billing:
+        raise HTTPException(status_code=404, detail="Faturamento nao encontrado")
+    if billing.get("status") == "paid":
+        raise HTTPException(status_code=400, detail="Faturamento ja foi pago")
+    frontend = os.environ.get("FRONTEND_URL") or os.environ.get("APP_URL") or ""
+    backend = os.environ.get("BACKEND_URL") or ""
+    # fallback: usa origin do request
+    if not frontend:
+        frontend = str(request.base_url).rstrip("/").replace("/api", "")
+    if not backend:
+        backend = str(request.base_url).rstrip("/")
+    try:
+        pref = await payments_service.create_billing_preference(db, billing, frontend, backend)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha MP: {e}")
+    init_point = pref.get("init_point") if pref.get("environment") == "prod" else (pref.get("sandbox_init_point") or pref.get("init_point"))
+    await db.company_billings.update_one(
+        {"billing_id": billing_id},
+        {"$set": {"payment_preference_id": pref["preference_id"], "payment_url": init_point, "status": "awaiting_payment"}},
+    )
+    return {"preference_id": pref["preference_id"], "payment_url": init_point, "environment": pref["environment"]}
+
+
+@router.post("/admin/company-billings/{billing_id}/resend-email")
+async def admin_billing_resend_email(request: Request, billing_id: str, user: dict = Depends(_admin_user_lazy)):
+    """Reenvia email de fechamento com detalhamento por funcionario e link de pagamento."""
+    import email_service
+    db = request.app.db
+    b = await db.company_billings.find_one({"billing_id": billing_id}, {"_id": 0})
+    if not b or not b.get("company_email"):
+        raise HTTPException(status_code=404, detail="Faturamento ou email nao encontrado")
+    rows = "".join(
+        f"<tr><td style='padding:6px;border:1px solid #ddd'>{e['employee_name']}</td>"
+        f"<td style='padding:6px;border:1px solid #ddd'>{len(e.get('orders', []))}</td>"
+        f"<td style='padding:6px;border:1px solid #ddd;text-align:right'>R$ {e['total']:.2f}</td></tr>"
+        for e in b.get("employees", [])
+    )
+    pay_link = b.get("payment_url")
+    pay_html = f"<p><a href='{pay_link}' style='background:#ea580c;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px'>Pagar via Mercado Pago</a></p>" if pay_link else ""
+    subject = f"Fechamento Convenio {b['period_month']} · R$ {b['total_amount']:.2f}"
+    html = f"""<h2>Fechamento mensal — {b['period_month']}</h2>
+<p>Empresa: <b>{b['company_name']}</b></p>
+<p>Total: <b>R$ {b['total_amount']:.2f}</b> em {b['charges_count']} cobranças.</p>
+{pay_html}
+<table style='border-collapse:collapse;margin-top:8px'>
+<thead><tr><th style='padding:6px;background:#f4f4f5;border:1px solid #ddd'>Funcionário</th><th style='padding:6px;background:#f4f4f5;border:1px solid #ddd'>Pedidos</th><th style='padding:6px;background:#f4f4f5;border:1px solid #ddd'>Total</th></tr></thead>
+<tbody>{rows}</tbody></table>"""
+    await email_service.send_email(db, b["company_email"], subject, html)
+    return {"ok": True, "to": b["company_email"]}
+
+
+@router.put("/company/employees/{employee_id}/limit")
+async def company_update_employee_limit(request: Request, employee_id: str, body: Dict,
+                                       user: dict = Depends(_company_admin_lazy)):
+    """Iter 66.3: empresa altera limite consignado manual do funcionario.
+    body: {payroll_limit_override: float|null} — null remove o override (volta ao calculo por salario)."""
+    db = request.app.db
+    emp = await db.company_employees.find_one({"employee_id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Funcionario nao encontrado")
+    if user.get("role") == "company_admin" and user.get("company_admin_of") != emp["company_id"]:
+        raise HTTPException(status_code=403, detail="Fora do escopo da sua empresa")
+    override = body.get("payroll_limit_override")
+    if override is not None:
+        try:
+            override = float(override)
+            if override < 0:
+                raise ValueError("Limite nao pode ser negativo")
+        except Exception:
+            raise HTTPException(status_code=400, detail="payroll_limit_override invalido")
+    await db.company_employees.update_one(
+        {"employee_id": employee_id},
+        {"$set": {"payroll_limit_override": override, "updated_at": _now_iso()}},
+    )
+    return await db.company_employees.find_one({"employee_id": employee_id}, {"_id": 0})
 
 
 # ==================== WIRE-UP ====================

@@ -36,6 +36,7 @@ import melhorenvio_service
 import store_extras
 import network_suppression_service
 import convenio_routes
+import warranty_bonus_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -342,6 +343,8 @@ class CheckoutData(BaseModel):
     # Iter 66 (Convenio): aceite digital exigido por lei para desconto em folha
     payroll_accepted: Optional[bool] = False
     payroll_terms_version: Optional[str] = "v1"
+    # Iter 66.3: usar bonus de garantia (Ozoxx) — quantidade de unidades a consumir
+    warranty_bonus_units: Optional[int] = 0
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -647,6 +650,11 @@ convenio_routes.register_convenio_routes(app, {
     "get_current_user": get_current_user,
 })
 
+# ==================== BONUS DE GARANTIA (Iter 66.3) ====================
+warranty_bonus_routes.register_warranty_bonus_routes(app, {
+    "get_current_user": get_current_user,
+})
+
 
 # ==================== TENANTS - PUBLIC + ADMIN ====================
 
@@ -874,6 +882,11 @@ async def register(request: Request, response: Response, data: AuthRegister):
             await _post_igvd_order_created(db, oid)
     except Exception as e:
         logger.warning(f"Falha aplicando voucher IGVD pendente no register: {e}")
+    # Iter 66.3: claim bonus de garantia pelo CPF
+    try:
+        await warranty_bonus_routes.claim_bonuses_for_user(db, user)
+    except Exception as e:
+        logger.warning(f"warranty_bonus claim no register falhou: {e}")
     token = create_token(user["user_id"], user["email"], "customer")
     set_cookie(response, token)
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
@@ -941,9 +954,17 @@ async def update_profile(request: Request, user: dict = Depends(get_current_user
     for field in ["name", "phone", "cpf", "pix_key", "pix_key_type"]:
         if field in body:
             update[field] = body[field]
+    if "cpf" in update:
+        update["cpf_digits"] = re.sub(r"\D", "", update["cpf"] or "")
     if update:
         await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    # Iter 66.3: se CPF foi atualizado, tenta claimar bonus de garantia pendentes
+    if "cpf" in update and update.get("cpf_digits"):
+        try:
+            await warranty_bonus_routes.claim_bonuses_for_user(db, u)
+        except Exception as e:
+            logger.warning(f"warranty_bonus claim falhou: {e}")
     return u
 
 @app.get("/api/users/me/addresses")
@@ -1560,6 +1581,11 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     # Iter 66 (Convenio): pre-carrega contexto de funcionario para desconto automatico
     _employee_ctx_pricing = await convenio_routes.get_employee_context(db, user)
     _company_disc_pct = float((_employee_ctx_pricing or {}).get("discount_percent") or 0)
+    # Iter 66.3: desconto de convenio NAO acumula com cupom — se ha cupom aplicado, ignora convenio
+    if getattr(data, "coupon_code", None):
+        _company_disc_pct = 0.0
+    _max_units_with_disc = (_employee_ctx_pricing or {}).get("discount_max_units")
+    _units_with_disc_used = 0
     for ci in cart["items"]:
         prod = await db.products.find_one({"product_id": ci["product_id"], "active": True}, {"_id": 0})
         if not prod:
@@ -1569,10 +1595,24 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         # preco efetivo considerando pricing_tiers do usuario E override por tenant
         price_info = store_extras.effective_price(prod, user, tenant=_tenant)
         price = float(price_info["price"])
-        # Iter 66: desconto da empresa credenciada — aplica APENAS quando o funcionario paga
-        # com desconto em folha (payroll) OU sempre? Regra: sempre aplica (beneficio do convenio).
+        # Iter 66: desconto da empresa credenciada — respeitando max_units por pedido
         if _company_disc_pct > 0:
-            price = round(price * (1 - _company_disc_pct / 100), 2)
+            qty = int(ci["quantity"])
+            if _max_units_with_disc is not None and _max_units_with_disc > 0:
+                remaining = max(0, int(_max_units_with_disc) - _units_with_disc_used)
+                qty_with_disc = min(qty, remaining)
+                qty_without_disc = qty - qty_with_disc
+                _units_with_disc_used += qty_with_disc
+            else:
+                qty_with_disc = qty
+                qty_without_disc = 0
+            if qty_with_disc > 0 and qty_without_disc == 0:
+                price = round(price * (1 - _company_disc_pct / 100), 2)
+            elif qty_with_disc > 0 and qty_without_disc > 0:
+                # mistura: guarda o "unit medio" para exibir
+                p_disc = price * (1 - _company_disc_pct / 100)
+                mixed = (qty_with_disc * p_disc + qty_without_disc * price) / qty
+                price = round(mixed, 2)
         combo = store_extras.combo_line_total(prod, ci["quantity"], price, allowed=combo_allowed)
         if combo["applied"]:
             total = combo["line_total"]
@@ -1720,6 +1760,19 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             voucher_used = 0.0
     final_total = round(grand_total - voucher_used, 2)
 
+    # Iter 66.3: Bonus de garantia (Ozoxx)
+    warranty_bonus_amount = 0.0
+    warranty_bonus_units_used = 0
+    if int(data.warranty_bonus_units or 0) > 0:
+        bonus_state = await warranty_bonus_routes.compute_usable_bonus(db, user["user_id"], subtotal)
+        max_usable = int(bonus_state.get("usable_units") or 0)
+        req = min(int(data.warranty_bonus_units), max_usable)
+        if req > 0:
+            warranty_bonus_units_used = req
+            warranty_bonus_amount = round(req * float(bonus_state.get("amount_per_unit") or 0), 2)
+            warranty_bonus_amount = min(warranty_bonus_amount, final_total)
+            final_total = round(final_total - warranty_bonus_amount, 2)
+
     # Iter 66 (Convenio): Desconto em folha
     payroll_charge_pending = None
     employee_ctx_for_order = None
@@ -1753,6 +1806,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "coupon_code": coupon_code_applied,
         "voucher_used": voucher_used,
         "voucher_balance_before": round(user_voucher, 2),
+        "warranty_bonus_units_used": warranty_bonus_units_used,
+        "warranty_bonus_amount": warranty_bonus_amount,
         "total": final_total,
         "total_before_voucher": grand_total,
         "shipping_address": addr, "payment_method": data.payment_method,
@@ -1773,6 +1828,13 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+
+    # Iter 66.3: consome bonus de garantia (marca como usados)
+    if warranty_bonus_units_used > 0:
+        try:
+            await warranty_bonus_routes.consume_bonuses(db, user["user_id"], warranty_bonus_units_used, order["order_id"])
+        except Exception as e:
+            logger.error(f"Falha consumindo warranty_bonuses: {e}")
 
     # Iter 66 (Convenio): pedido pago via desconto em folha
     # -> marca pago imediatamente, roda hooks (comissoes, pontos, emails, nota fiscal)
@@ -5148,7 +5210,19 @@ async def mp_webhook(request: Request):
         if details:
             order_id = details.get("external_reference")
             status_mp = details.get("status")
-            if order_id and status_mp == "approved":
+            # Iter 66.3 (Convenio): faturamento consolidado da empresa
+            if order_id and order_id.startswith("billing:") and status_mp == "approved":
+                billing_id = order_id.split(":", 1)[1]
+                await db.company_billings.update_one(
+                    {"billing_id": billing_id},
+                    {"$set": {"status": "paid", "paid_at": now_iso(), "mp_payment_id": str(details.get("id"))}},
+                )
+                await db.payroll_charges.update_many(
+                    {"billing_id": billing_id},
+                    {"$set": {"status": "paid", "paid_at": now_iso()}},
+                )
+                log_entry["action"] = "billing_marked_paid"
+            elif order_id and status_mp == "approved":
                 await mark_order_paid(db, order_id, payment_id=str(details.get("id")), source="mercadopago")
                 log_entry["action"] = "marked_paid"
             elif order_id and status_mp in ("rejected", "cancelled"):

@@ -159,6 +159,48 @@ async def create_preference(db, order: Dict, user: Dict, items_full: List[Dict],
     }
 
 
+async def create_billing_preference(db, billing: Dict, frontend_url: str, backend_url: str) -> Dict:
+    """Iter 66.3 (Convenio): cria preferencia MP para faturamento consolidado da EMPRESA.
+    O 'payer' aqui e a empresa (email + CNPJ). O external_reference e o billing_id."""
+    env = await get_mp_environment(db)
+    _, token = await _get_tokens(db, env)
+    if not token:
+        raise RuntimeError(f"MercadoPago token not configured for {env}")
+    sdk = mercadopago.SDK(token)
+    body = {
+        "items": [{
+            "id": billing["billing_id"],
+            "title": f"Convenio {billing.get('company_name', 'Empresa')} - {billing.get('period_month')}",
+            "quantity": 1,
+            "unit_price": float(billing["total_amount"]),
+            "currency_id": "BRL",
+        }],
+        "payer": {"email": billing.get("company_email"), "name": (billing.get("company_name") or "")[:30]},
+        "back_urls": {
+            "success": f"{frontend_url}/backoffice/convenio/faturamento?bill={billing['billing_id']}&mp=success",
+            "failure": f"{frontend_url}/backoffice/convenio/faturamento?bill={billing['billing_id']}&mp=failure",
+            "pending": f"{frontend_url}/backoffice/convenio/faturamento?bill={billing['billing_id']}&mp=pending",
+        },
+        "auto_return": "approved",
+        "notification_url": f"{backend_url}/api/payments/webhook/mercadopago",
+        "external_reference": f"billing:{billing['billing_id']}",
+        "statement_descriptor": "OXX CONVENIO",
+        "metadata": {"kind": "convenio_billing", "billing_id": billing["billing_id"], "company_id": billing.get("company_id")},
+    }
+    request_options = mercadopago.config.RequestOptions()
+    request_options.custom_headers = {"x-idempotency-key": str(uuid.uuid4())}
+    result = sdk.preference().create(body, request_options)
+    resp = result.get("response", {})
+    if not resp.get("id"):
+        raise RuntimeError(f"MP error: {result}")
+    return {
+        "preference_id": resp["id"],
+        "init_point": resp.get("init_point"),
+        "sandbox_init_point": resp.get("sandbox_init_point"),
+        "environment": env,
+    }
+
+
 async def get_payment_details(db, payment_id: str) -> Optional[Dict]:
     env = await get_mp_environment(db)
     _, token = await _get_tokens(db, env)

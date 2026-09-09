@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { Plus, Trash2, Upload, Download, Loader2, Search, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 
-const emptyEmp = { name: '', email: '', cpf: '', phone: '', position: '', salary: 0, active: true };
+const emptyEmp = { name: '', email: '', cpf: '', phone: '', position: '', salary: 0, payroll_limit_override: '', active: true };
 
 export default function CompanyEmployees() {
   const [employees, setEmployees] = useState([]);
@@ -35,7 +35,10 @@ export default function CompanyEmployees() {
   const submit = async (e) => {
     e.preventDefault();
     try {
-      const payload = { ...form, salary: parseFloat(form.salary) || 0 };
+      const payload = { ...form,
+        salary: parseFloat(form.salary) || 0,
+        payroll_limit_override: form.payroll_limit_override === '' || form.payroll_limit_override === null ? null : parseFloat(form.payroll_limit_override),
+      };
       if (editing) await api.put(`/api/company/employees/${editing}`, payload);
       else await api.post('/api/company/employees', payload);
       toast.success('Salvo');
@@ -168,7 +171,8 @@ export default function CompanyEmployees() {
                 <Input label="CPF" value={form.cpf} onChange={e => setForm({ ...form, cpf: e.target.value })} />
                 <Input label="Telefone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                 <Input label="Cargo" value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} />
-                <Input label="Salário bruto (R$)" type="number" step="0.01" value={form.salary} onChange={e => setForm({ ...form, salary: e.target.value })} />
+                <Input label="Salário bruto (R$)" type="number" step="0.01" value={form.salary} onChange={e => setForm({ ...form, salary: e.target.value })} hint="Usado internamente para calcular limite consignado" />
+                <Input label="Limite consignado manual (R$)" type="number" step="0.01" value={form.payroll_limit_override || ''} onChange={e => setForm({ ...form, payroll_limit_override: e.target.value })} placeholder="deixe vazio para usar % do salário" hint="Override manual — se preenchido, ignora o cálculo pelo salário" />
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Ativo</label>
               </div>
               <div className="p-5 border-t border-border flex gap-2 shrink-0">

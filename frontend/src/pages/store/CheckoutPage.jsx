@@ -44,6 +44,11 @@ export default function CheckoutPage() {
   const [employeeCtx, setEmployeeCtx] = useState(null);
   const [payrollAccepted, setPayrollAccepted] = useState(false);
   const [payrollEligibility, setPayrollEligibility] = useState(null);
+  // Iter 66.3: bonus de garantia Ozoxx
+  const [bonusInfo, setBonusInfo] = useState(null);
+  const [bonusUnitsToUse, setBonusUnitsToUse] = useState(0);
+  // Iter 66.3: cupom aplicado (para avisar sobre incompatibilidade com desconto convenio)
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -52,6 +57,11 @@ export default function CheckoutPage() {
         setEmployeeCtx(ec);
       } catch { setEmployeeCtx(null); }
     })();
+    // detecta cupom aplicado no localStorage
+    try {
+      const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
+      setAppliedCoupon(c);
+    } catch { /* noop */ }
   }, []);
 
   useEffect(() => {
@@ -126,6 +136,7 @@ export default function CheckoutPage() {
         shipping_delivery_days: pickup ? 0 : selectedShipping?.delivery_days,
         payroll_accepted: paymentMethod === 'payroll' ? payrollAccepted : undefined,
         payroll_terms_version: paymentMethod === 'payroll' ? 'v1' : undefined,
+        warranty_bonus_units: bonusUnitsToUse > 0 ? bonusUnitsToUse : undefined,
       });
       // Iter 66: Desconto em folha ja fica pago no backend
       if (paymentMethod === 'payroll') {
@@ -184,8 +195,26 @@ export default function CheckoutPage() {
   const grandBeforeVoucher = Math.max(0, subtotal + shipping - couponDiscount);
   // Iter 38: Voucher abate ate o valor total. Se cobrir tudo, total = 0 e nao vai ao MP.
   const voucherToUse = useVoucher ? Math.min(voucherBalance, grandBeforeVoucher) : 0;
-  const total = Math.max(0, grandBeforeVoucher - voucherToUse);
+  // Iter 66.3: bonus de garantia
+  const bonusAmountUsed = bonusUnitsToUse > 0 && bonusInfo?.amount_per_unit
+    ? Math.min(bonusUnitsToUse * bonusInfo.amount_per_unit, Math.max(0, grandBeforeVoucher - voucherToUse))
+    : 0;
+  const total = Math.max(0, grandBeforeVoucher - voucherToUse - bonusAmountUsed);
   const fullyCoveredByVoucher = useVoucher && voucherToUse >= grandBeforeVoucher && grandBeforeVoucher > 0;
+
+  // Iter 66.3: recarrega bonus quando subtotal muda
+  useEffect(() => {
+    (async () => {
+      if (subtotal <= 0) { setBonusInfo(null); return; }
+      try {
+        const b = await api.get(`/api/me/warranty-bonus?subtotal=${subtotal}`);
+        setBonusInfo(b);
+        // reset se ficou acima do disponivel
+        if (bonusUnitsToUse > b.usable_units) setBonusUnitsToUse(0);
+      } catch { setBonusInfo(null); }
+    })();
+    // eslint-disable-next-line
+  }, [subtotal]);
 
   // CEP do endereço selecionado (para auto-cotação ao entrar no checkout / trocar endereço)
   const selectedAddrObj = addresses.find(a => a.address_id === selectedAddr);
@@ -411,9 +440,8 @@ export default function CheckoutPage() {
                 <div className={`mt-3 rounded-xl border p-4 ${total > employeeCtx.available_limit ? 'border-red-400 bg-red-50' : 'border-emerald-300 bg-emerald-50'}`} data-testid="payroll-consent-box">
                   <div className="text-sm font-bold mb-1">Desconto em folha — {employeeCtx.company_name}</div>
                   <div className="text-xs text-txt-secondary space-y-1 mb-3">
-                    <div className="flex justify-between"><span>Seu salário:</span><span className="font-semibold">{formatCurrency(employeeCtx.salary)}</span></div>
-                    <div className="flex justify-between"><span>Limite consignado ({employeeCtx.payroll_limit_percent}%):</span><span className="font-semibold">{formatCurrency(employeeCtx.payroll_limit_amount)}</span></div>
-                    <div className="flex justify-between"><span>Compras em aberto:</span><span className="font-semibold">{formatCurrency(employeeCtx.open_charges_total)}</span></div>
+                    <div className="flex justify-between"><span>Limite consignado do mês:</span><span className="font-semibold">{formatCurrency(employeeCtx.payroll_limit_amount)}</span></div>
+                    <div className="flex justify-between"><span>Já utilizado no mês:</span><span className="font-semibold">{formatCurrency(employeeCtx.open_charges_total)}</span></div>
                     <div className="flex justify-between"><span>Disponível para uso:</span><span className="font-semibold text-emerald-700">{formatCurrency(employeeCtx.available_limit)}</span></div>
                     <div className="flex justify-between border-t border-emerald-200 pt-1 mt-1"><span>Este pedido:</span><span className={`font-bold ${total > employeeCtx.available_limit ? 'text-red-600' : 'text-brand-main'}`}>{formatCurrency(total)}</span></div>
                   </div>
@@ -425,10 +453,47 @@ export default function CheckoutPage() {
                     <label className="flex items-start gap-2 text-xs cursor-pointer select-none" data-testid="payroll-accept-label">
                       <input type="checkbox" checked={payrollAccepted} onChange={e => setPayrollAccepted(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-500" data-testid="payroll-accept" />
                       <span>
-                        Autorizo o desconto de <b>{formatCurrency(total)}</b> em minha folha de pagamento pela empresa <b>{employeeCtx.company_name}</b>, referente ao pedido a ser gerado, conforme regras do convênio e respeitando o limite legal de {employeeCtx.payroll_limit_percent}% do salário bruto. Confirmo a leitura e concordância dos termos.
+                        Autorizo o desconto de <b>{formatCurrency(total)}</b> em minha folha de pagamento pela empresa <b>{employeeCtx.company_name}</b>, referente ao pedido a ser gerado, conforme regras do convênio e respeitando o limite legal. Confirmo a leitura e concordância dos termos.
                       </span>
                     </label>
                   )}
+                </div>
+              )}
+
+              {/* Iter 66.3: aviso Convenio + Cupom incompativel */}
+              {employeeCtx && employeeCtx.discount_percent > 0 && appliedCoupon?.code && (
+                <div className="mt-3 rounded-xl border border-orange-300 bg-orange-50 p-3 text-xs text-orange-800" data-testid="convenio-coupon-warning">
+                  ⚠️ <b>Cupom {appliedCoupon.code} aplicado:</b> o desconto do convênio ({employeeCtx.discount_percent}% de <b>{employeeCtx.company_name}</b>) foi pausado. Remova o cupom no carrinho para reativar o desconto do convênio.
+                </div>
+              )}
+              {employeeCtx && employeeCtx.discount_percent > 0 && !appliedCoupon?.code && (
+                <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800" data-testid="convenio-discount-info">
+                  ✓ Desconto do convênio <b>{employeeCtx.company_name}</b> ({employeeCtx.discount_percent}%) aplicado
+                  {employeeCtx.discount_max_units ? ` em até ${employeeCtx.discount_max_units} unidade(s) por pedido` : ''}. Cupom desabilita o desconto do convênio.
+                </div>
+              )}
+
+              {/* Iter 66.3: Bonus de Garantia Ozoxx */}
+              {bonusInfo && bonusInfo.available_units > 0 && (
+                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4" data-testid="warranty-bonus-box">
+                  <div className="flex items-center gap-2 mb-1"><span className="text-amber-600 text-lg">🎁</span><b className="text-sm">Bônus de Garantia Ozoxx</b></div>
+                  <div className="text-xs text-txt-secondary mb-2">
+                    Você tem <b>{bonusInfo.available_units}</b> aparelho(s) registrado(s) — bônus de R$ {bonusInfo.amount_per_unit.toFixed(2)} em compras a cada R$ {bonusInfo.min_order_per_unit.toFixed(2)}.
+                  </div>
+                  <div className="text-xs mb-2">
+                    Nesta compra você pode usar até <b className="text-emerald-700">{bonusInfo.usable_units} bônus (R$ {bonusInfo.amount.toFixed(2)})</b>.
+                    {bonusInfo.min_next_tier && (
+                      <div className="text-amber-700">Adicione mais R$ {bonusInfo.remaining_for_next.toFixed(2)} para desbloquear +1 bônus.</div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="text-xs">Usar bônus:</label>
+                    <select className="text-xs border border-border rounded px-2 py-1" value={bonusUnitsToUse} onChange={e => setBonusUnitsToUse(parseInt(e.target.value, 10))} data-testid="bonus-select">
+                      {Array.from({ length: bonusInfo.usable_units + 1 }, (_, i) => i).map(n => (
+                        <option key={n} value={n}>{n === 0 ? 'Não usar' : `${n} bônus (R$ ${(n * bonusInfo.amount_per_unit).toFixed(2)})`}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )}
             </div>
@@ -509,6 +574,12 @@ export default function CheckoutPage() {
                 <div className="flex justify-between text-emerald-600" data-testid="summary-voucher-line">
                   <span>Voucher aplicado</span>
                   <span className="font-semibold">−{formatCurrency(voucherToUse)}</span>
+                </div>
+              )}
+              {bonusAmountUsed > 0 && (
+                <div className="flex justify-between text-amber-700" data-testid="summary-bonus-line">
+                  <span>Bônus garantia ({bonusUnitsToUse}×)</span>
+                  <span className="font-semibold">−{formatCurrency(bonusAmountUsed)}</span>
                 </div>
               )}
             </div>

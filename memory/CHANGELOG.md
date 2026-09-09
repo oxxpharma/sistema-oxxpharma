@@ -4,6 +4,29 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66.3 (Fev/2026) — Convênio refinos + Bônus de Garantia Ozoxx
+
+### Convênio · Ajustes
+- **Contrato PDF Upload** via Emergent Object Storage (`storage_service.py` + `POST /api/admin/companies/{id}/contract` + `GET /api/company-contracts/{id}.pdf` com auth via header OU `?auth=<token>` para `<a href>`).
+- **Faturamento admin** (`/backoffice/convenio/faturamento` + `AdminCompanyBillings.jsx`): lista fechamentos, rodar fechamento manual, gerar cobrança MP, reenviar email, marcar pago manual.
+- **PIX/Boleto real MP**: `payments_service.create_billing_preference()` gera preferência com `external_reference=billing:<id>`. Webhook `/api/payments/webhook/mercadopago` detecta prefixo `billing:` → marca `company_billings.status=paid` + propaga para `payroll_charges`.
+- **Privacidade**: `/api/me/employee-context` NÃO retorna mais `salary`. Frontend do checkout mostra apenas "limite disponível". Salário fica só no admin da empresa e no cálculo interno do limite.
+- **Override manual de limite** (`payroll_limit_override` no Employee): empresa pode setar valor fixo por funcionário via `PUT /api/company/employees/{id}` ou `PUT /api/company/employees/{id}/limit`. Se preenchido, ignora o cálculo por salário.
+- **Edição de dados de funcionário**: `PUT /api/company/employees/{id}` já existente + UI atualizada em `CompanyEmployees.jsx` com botão Editar.
+- **Limite de unidades com desconto**: `Company.discount_max_units` (int opcional). Na hora do checkout, só as N primeiras unidades ganham desconto; as demais pagam preço cheio (média ponderada por linha).
+- **Desconto convênio × Cupom não acumula**: se cupom aplicado, desconto do convênio é ignorado no cart pricing e no checkout backend. Frontend mostra aviso laranja no checkout.
+
+### Bônus de Garantia (Ozoxx) — Nova feature
+- **Módulo novo:** `warranty_bonus_routes.py` (APIRouter).
+- **Config global** em `settings.warranty_bonus_config` = `{enabled, amount_per_unit, min_order_per_unit}` (defaults R$100 / R$300).
+- **Upload de planilha** (`POST /api/admin/warranty-bonus/upload`) com colunas `nome, cpf, serie`. Aceita `dry_run`. Dedupe por (cpf+serie). Se o CPF já tem user cadastrado → claim automático (status=claimed); senão fica `pending`.
+- **Auto-claim** no cadastro (`POST /api/auth/register`) e na atualização de CPF do perfil (`PUT /api/users/me`): busca todos os bônus pendentes do mesmo CPF e vincula.
+- **Regra de uso:** N aparelhos = N tiers de bônus. Tier N ativa quando `subtotal >= N * min_order`. Só 1 uso por pedido (unidades somam). Ex: 2 aparelhos, subtotal R$350 → 1 tier ativo (R$100). Subtotal R$700 → 2 tiers (R$200).
+- **Endpoints usuario:** `GET /api/me/warranty-bonus?subtotal=X` retorna `{available_units, usable_units, amount, min_next_tier, remaining_for_next}`.
+- **Endpoints admin:** config get/put, template.xlsx, upload, list, uploads.
+- **Consumo no checkout:** `CheckoutData.warranty_bonus_units` → deduz do total + marca bônus como `used` linkados à order.
+- **Frontend:** `AdminWarrantyBonus.jsx` (config + upload preview + lista + uploads históricos) e card no `CheckoutPage` com dropdown para escolher quantos bônus usar + linha no resumo.
+
 ## Iter 66.2 (Fev/2026) — Convênio: FASE 3 (Checkout Payroll) + FASE 4 (Propagandista + Fechamento)
 
 ### FASE 3 — Pagamento "Desconto em Folha" & Regras

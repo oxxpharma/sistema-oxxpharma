@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 const empty = {
   name: '', cnpj: '', email: '', contact_name: '', contact_phone: '',
-  discount_percent: 0, payroll_enabled: false, payroll_limit_percent: 35,
+  discount_percent: 0, discount_max_units: '', payroll_enabled: false, payroll_limit_percent: 35,
   commission_company_percent: 0, propagandista_id: '', contract_url: '', notes: '', active: true,
 };
 
@@ -52,6 +52,7 @@ export default function AdminCompanyForm() {
       const payload = {
         ...form,
         discount_percent: parseFloat(form.discount_percent) || 0,
+        discount_max_units: form.discount_max_units === '' || form.discount_max_units === null ? null : parseInt(form.discount_max_units, 10),
         payroll_limit_percent: parseFloat(form.payroll_limit_percent) || 0,
         commission_company_percent: parseFloat(form.commission_company_percent) || 0,
       };
@@ -164,14 +165,55 @@ export default function AdminCompanyForm() {
             <Input label="Email para relatórios*" type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} hint="Recebe o fechamento mensal" />
             <Input label="Responsável (RH)" value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} />
             <Input label="Telefone" value={form.contact_phone} onChange={e => setForm({ ...form, contact_phone: e.target.value })} />
-            <Input label="URL do contrato PDF" value={form.contract_url} onChange={e => setForm({ ...form, contract_url: e.target.value })} placeholder="https://..." />
+            <div className="md:col-span-2">
+              <label className="text-sm font-bold text-txt-secondary block mb-1">Contrato PDF</label>
+              {form.contract_url ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a href={`${process.env.REACT_APP_BACKEND_URL}${form.contract_url}?auth=${localStorage.getItem('token')}`} target="_blank" rel="noreferrer" className="text-xs text-brand-main underline">Ver contrato atual</a>
+                  <label className="inline-flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 cursor-pointer text-xs hover:bg-bg-secondary">
+                    <Upload className="w-3 h-3" /> Substituir
+                    <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={async e => {
+                      const f = e.target.files?.[0]; if (!f || !isEdit) return;
+                      const fd = new FormData(); fd.append('file', f);
+                      try {
+                        const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/companies/${companyId}/contract`, {
+                          method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, body: fd });
+                        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'erro');
+                        setForm(f => ({ ...f, contract_url: d.contract_url }));
+                        toast.success('Contrato enviado');
+                      } catch (err) { toast.error(err.message); }
+                    }} />
+                  </label>
+                </div>
+              ) : isEdit ? (
+                <label className="inline-flex items-center gap-2 border border-border rounded-lg px-3 py-2 cursor-pointer text-sm hover:bg-bg-secondary" data-testid="upload-contract-btn">
+                  <Upload className="w-4 h-4" /> Enviar contrato PDF
+                  <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={async e => {
+                    const f = e.target.files?.[0]; if (!f) return;
+                    const fd = new FormData(); fd.append('file', f);
+                    try {
+                      const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/companies/${companyId}/contract`, {
+                        method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, body: fd });
+                      const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'erro');
+                      setForm(f => ({ ...f, contract_url: d.contract_url }));
+                      toast.success('Contrato enviado');
+                    } catch (err) { toast.error(err.message); }
+                  }} />
+                </label>
+              ) : (
+                <div className="text-xs text-txt-secondary italic">Salve a empresa primeiro para enviar o PDF do contrato.</div>
+              )}
+            </div>
           </div>
 
           <div className="border-t border-border pt-3">
             <div className="text-xs font-bold text-txt-secondary uppercase mb-2">Regras comerciais</div>
             <div className="grid md:grid-cols-3 gap-3">
               <Input label="Desconto para funcionários (%)" type="number" step="0.01" value={form.discount_percent} onChange={e => setForm({ ...form, discount_percent: e.target.value })} hint="0-100" />
+              <Input label="Máx unidades c/ desconto por pedido" type="number" step="1" value={form.discount_max_units || ''} onChange={e => setForm({ ...form, discount_max_units: e.target.value })} placeholder="ilimitado" hint="Opcional — limita quantas unidades por pedido ganham o desconto" />
               <Input label="Limite consignado (%)" type="number" step="0.01" value={form.payroll_limit_percent} onChange={e => setForm({ ...form, payroll_limit_percent: e.target.value })} hint="Máx 35% (lei)" />
+            </div>
+            <div className="grid md:grid-cols-2 gap-3 mt-3">
               <Input label="Comissão da empresa (%)" type="number" step="0.01" value={form.commission_company_percent} onChange={e => setForm({ ...form, commission_company_percent: e.target.value })} hint="Deduzida do propagandista" />
             </div>
             <label className="flex items-center gap-2 text-sm mt-3"><input type="checkbox" checked={form.payroll_enabled} onChange={e => setForm({ ...form, payroll_enabled: e.target.checked })} data-testid="payroll-enabled" /> Habilitar <b>Desconto em folha</b> como método de pagamento</label>
