@@ -44,7 +44,7 @@ export default function AdminProductForm() {
 
   const loadRefs = useCallback(async () => {
     const [c, sc, uc, tpls] = await Promise.all([
-      api.get('/api/categories'),
+      api.get('/api/admin/categories').catch(() => api.get('/api/categories')),
       api.get('/api/admin/subcategories').catch(() => ({ subcategories: [] })),
       api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
       api.get('/api/admin/product-field-templates').catch(() => ({ templates: [] })),

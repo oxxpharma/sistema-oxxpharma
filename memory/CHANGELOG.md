@@ -4,6 +4,12 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66.6 (Fev/2026) — AdminProductForm: mostrar categorias/subcategorias inativas
+
+- `AdminProductForm.jsx` agora usa `GET /api/admin/categories` (que retorna TODAS: ativas + inativas) em vez do endpoint público. Fallback para `/api/categories` mantido.
+- Subcategorias já usavam `/api/admin/subcategories` que retorna todas.
+- Comportamento: categoria/subcategoria inativa continua invisível no site, mas pode ser vinculada normalmente a produtos no admin.
+
 ## Iter 66.5 (Fev/2026) — Fix: Supressão de Rede quebrando em produção
 
 **Root cause identificado:** `_find_users_by_emails` construía um regex gigante `^(email1|email2|...|emailN)$` com `re.escape`. Em produção com milhares de usuários, MongoDB retornava erro no compile/execute do regex (500). Em preview, com poucos emails, funcionava.
