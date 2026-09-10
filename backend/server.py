@@ -64,6 +64,34 @@ AFFILIATE_COMMISSION_RATE = 0.08
 NETWORK_CUSTOMER = "customer"      # Cliente comum - so 8% afiliado, sem MMN
 NETWORK_1 = "network_1"            # Rede 1: importada do sistema externo
 NETWORK_2 = "network_2"            # Rede 2: Propagandista promovido organicamente
+_VALID_NETWORKS = {NETWORK_CUSTOMER, NETWORK_1, NETWORK_2}
+
+
+def _normalize_networks(value, fallback=None) -> list:
+    """Aceita string, lista ou None e retorna lista de redes validas (deduplicada)."""
+    if isinstance(value, list):
+        seen = []
+        for v in value:
+            s = str(v or "").strip()
+            if s in _VALID_NETWORKS and s not in seen:
+                seen.append(s)
+        return seen or ([fallback] if fallback in _VALID_NETWORKS else [NETWORK_CUSTOMER])
+    if isinstance(value, str) and value.strip() in _VALID_NETWORKS:
+        return [value.strip()]
+    return [fallback] if fallback in _VALID_NETWORKS else [NETWORK_CUSTOMER]
+
+
+def _user_networks(user: dict) -> list:
+    """Retorna as redes do usuario. Prioriza `networks`, cai para `network_type`."""
+    nets = user.get("networks")
+    if isinstance(nets, list) and nets:
+        return [n for n in nets if n in _VALID_NETWORKS]
+    nt = user.get("network_type") or NETWORK_CUSTOMER
+    return [nt] if nt in _VALID_NETWORKS else [NETWORK_CUSTOMER]
+
+
+def _user_in_network(user: dict, network: str) -> bool:
+    return network in _user_networks(user)
 
 DEFAULT_SETTINGS = {
     "affiliate_commission_rate": 0.08,
@@ -467,6 +495,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"could not create uq_commission_per_beneficiary index: {e}")
     await app.db.users.create_index("network_type")
+    await app.db.users.create_index("networks")
     await app.db.users.create_index("network_sponsor_id")
     await app.db.users.create_index("external_id", sparse=True)
     await app.db.users.create_index("leader_external_id", sparse=True)
@@ -616,6 +645,22 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"backfill tenant em {coll} falhou: {e}")
         await app.db.migrations.insert_one({"_id": "tenant_backfill_v1", "ran_at": now_iso()})
         logger.info("Iter 43: tenant backfill v1 aplicado (oxxpharma)")
+
+    # Iter 68: backfill do array `networks` a partir do campo `network_type` (multi-rede)
+    networks_migration = await app.db.migrations.find_one({"_id": "networks_array_backfill_v1"})
+    if not networks_migration:
+        try:
+            # Copia network_type -> networks: [network_type] para todos que ainda nao tem
+            cursor = app.db.users.find({"networks": {"$exists": False}}, {"_id": 0, "user_id": 1, "network_type": 1})
+            updated = 0
+            async for u in cursor:
+                nt = u.get("network_type") or NETWORK_CUSTOMER
+                await app.db.users.update_one({"user_id": u["user_id"]}, {"$set": {"networks": [nt]}})
+                updated += 1
+            await app.db.migrations.insert_one({"_id": "networks_array_backfill_v1", "ran_at": now_iso(), "updated": updated})
+            logger.info(f"Iter 68: networks array backfill aplicado ({updated} usuarios)")
+        except Exception as e:
+            logger.warning(f"networks array backfill falhou: {e}")
     yield
     app.mongodb_client.close()
 
@@ -5546,12 +5591,67 @@ async def admin_users_by_network(request: Request, network_type: str, search: Op
     db = request.app.db
     if network_type not in (NETWORK_CUSTOMER, NETWORK_1, NETWORK_2):
         raise HTTPException(status_code=400, detail="network_type invalido")
-    q = {"network_type": network_type}
+    # Iter 68: filtra por networks[] (multi-rede) com fallback para network_type (legado)
+    q = {"$or": [{"networks": network_type}, {"network_type": network_type}]}
     if search:
-        q["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"email": {"$regex": search, "$options": "i"}}, {"external_id": search}]
+        q["$and"] = [{"$or": [{"name": {"$regex": search, "$options": "i"}}, {"email": {"$regex": search, "$options": "i"}}, {"external_id": search}]}]
     total = await db.users.count_documents(q)
     users = await db.users.find(q, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     return {"users": users, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit), "limit": limit}
+
+
+# Iter 68: Topo da Rede (lider global por rede)
+@app.get("/api/admin/network-top-leaders")
+async def get_network_top_leaders(request: Request, user: dict = Depends(require_admin())):
+    """Retorna o usuario topo de cada rede (Rede 1, Rede 2)."""
+    db = request.app.db
+    doc = await db.platform_settings.find_one({"key": "network_top_leaders"}, {"_id": 0})
+    leaders = (doc or {}).get("value") or {}
+    # enriquece com dados basicos do usuario
+    resolved = {}
+    for net, uid in leaders.items():
+        if not uid:
+            continue
+        u = await db.users.find_one({"user_id": uid}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "external_id": 1, "referral_code": 1})
+        resolved[net] = u
+    return {"leaders": leaders, "resolved": resolved, "updated_at": (doc or {}).get("updated_at"), "updated_by": (doc or {}).get("updated_by")}
+
+
+@app.put("/api/admin/network-top-leaders")
+async def set_network_top_leader(request: Request, user: dict = Depends(require_admin())):
+    """Define o usuario topo de uma rede.
+
+    Body: { network: 'network_1'|'network_2', user_id: str|null }
+    """
+    db = request.app.db
+    body = await request.json() or {}
+    network = (body.get("network") or "").strip()
+    target_user_id = body.get("user_id")
+    if network not in (NETWORK_1, NETWORK_2):
+        raise HTTPException(status_code=400, detail="Rede invalida")
+    if target_user_id:
+        target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0, "user_id": 1, "networks": 1, "network_type": 1})
+        if not target:
+            raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+        # Garante que ele esta na rede escolhida
+        target_nets = _user_networks(target)
+        if network not in target_nets:
+            # Adiciona automaticamente
+            new_nets = target_nets + [network]
+            await db.users.update_one({"user_id": target_user_id}, {"$set": {"networks": new_nets}})
+    # Salva no platform_settings
+    existing = await db.platform_settings.find_one({"key": "network_top_leaders"}, {"_id": 0})
+    leaders = (existing or {}).get("value") or {}
+    if target_user_id:
+        leaders[network] = target_user_id
+    else:
+        leaders.pop(network, None)
+    await db.platform_settings.update_one(
+        {"key": "network_top_leaders"},
+        {"$set": {"value": leaders, "updated_at": now_iso(), "updated_by": user.get("email") or user.get("user_id")}},
+        upsert=True,
+    )
+    return {"ok": True, "leaders": leaders}
 
 @app.get("/api/admin/users/{user_id}/tree")
 async def admin_user_tree(request: Request, user_id: str, user: dict = Depends(require_admin())):
@@ -8229,7 +8329,7 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     # Campos editaveis
     allowed = {
         "name", "email", "phone", "cpf", "status", "role", "access_level",
-        "network_type", "network_sponsor_id", "sponsor_id", "sponsor_code",
+        "network_type", "networks", "network_sponsor_id", "sponsor_id", "sponsor_code",
         "external_id", "leader_external_id", "addresses", "pix_key", "pix_key_type",
         "referral_program_active", "must_set_password", "profile_id",
     }
@@ -8237,6 +8337,19 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     for k, v in body.items():
         if k in allowed:
             update[k] = v
+
+    # Iter 68: sincroniza networks[] <-> network_type
+    if "networks" in update or "network_type" in update:
+        primary_hint = update.get("network_type") or (target.get("network_type") if target else None)
+        nets = _normalize_networks(update.get("networks") if "networks" in update else target.get("networks"),
+                                   fallback=primary_hint)
+        # Se enviou apenas network_type, garante que ele esteja na lista
+        if "network_type" in update and update.get("network_type") in _VALID_NETWORKS:
+            if update["network_type"] not in nets:
+                nets = [update["network_type"]] + nets
+        update["networks"] = nets
+        # primary_network = primeiro da lista (usado como network_type legado)
+        update["network_type"] = nets[0] if nets else NETWORK_CUSTOMER
     
     # Validação de profile_id se foi alterado
     if "profile_id" in update:

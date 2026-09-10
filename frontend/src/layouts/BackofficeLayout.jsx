@@ -44,7 +44,7 @@ const NAV_GROUPS = [
     key: 'mmn',
     label: 'Equipe / Cashbacks',
     items: [
-      { to: '/backoffice/redes', icon: Network, label: 'Redes Equipe', testId: 'nav-networks', perm: 'commercial' },
+      { to: '/backoffice/redes', icon: Network, label: 'Redes', testId: 'nav-networks', perm: 'commercial' },
       { to: '/backoffice/candidatos', icon: Award, label: 'Candidatos', testId: 'nav-candidates', perm: 'commercial' },
       { to: '/backoffice/adesoes-indicacao', icon: UserCheck, label: 'Adesões pendentes', testId: 'nav-referral-enrollments', perm: 'commercial' },
       { to: '/backoffice/programa-aprovados', icon: UserCheck, label: 'Aprovados no programa', testId: 'nav-referral-approved', perm: 'commercial' },

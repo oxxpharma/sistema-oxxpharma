@@ -458,3 +458,12 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 - Botão **Histórico** em cada linha abre modal com todas as atualizações que a Opery mandou pra aquele dia (do mais recente pro mais antigo), cruzando com `opery_inbound_log`.
 - Aviso destacado explicando o comportamento idempotente (sobrescreve).
 - Confirmado via testes ao vivo: 3 envios pro mesmo dia (10:00, 12:00, 18:00) resultaram em 1 documento com valores finais + rastro completo no histórico.
+
+## 2026-02-10 · Iter 68 · Convênio Fase 1 — Multi-rede + Topo da Rede
+- Renomeado "Equipe" → "Rede" em toda UI (sidebar, tabs, formulários, botões).
+- **Multi-rede por usuário**: novo campo `networks: List[str]` (backward-compat via `network_type` = primeiro item). Backfill automático no startup para todos os usuários existentes.
+- UserEditModal: dropdown "Equipe" (single-select) substituído por **3 checkboxes** (Cliente/Rede 1/Rede 2) — usuário pode participar de quantas quiser simultaneamente.
+- Query `/api/admin/users-by-network` agora filtra por `networks[]` com fallback para `network_type` (retrocompat).
+- Novo endpoint `GET/PUT /api/admin/network-top-leaders` — armazena o "líder do topo" de cada rede em `platform_settings`.
+- Nova UI na tela `/backoffice/redes`: card destacado com ícone de coroa mostrando o Topo da Rede atual, botões Alterar/Remover, busca de usuário com autocomplete. Se o usuário escolhido não estiver na rede, é adicionado automaticamente ao array.
+- Base pronta pra Entrega 2 (comissões 3-gen + desconto empresa).

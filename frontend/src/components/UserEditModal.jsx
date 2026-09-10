@@ -15,9 +15,9 @@ const FIELDS = [
 ];
 
 const NETWORK_OPTIONS = [
-  { value: 'customer', label: 'Cliente' },
-  { value: 'network_1', label: 'Equipe 1 (Corporativa)' },
-  { value: 'network_2', label: 'Equipe 2 (Propagandista)' },
+  { value: 'customer', label: 'Cliente (Indicação)' },
+  { value: 'network_1', label: 'Rede 1 (Corporativa)' },
+  { value: 'network_2', label: 'Rede 2 (Propagandistas)' },
 ];
 const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
@@ -77,6 +77,14 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
     setU(prev => ({ ...prev, category_ids: [...cur] }));
   };
 
+  const toggleNetwork = (net) => {
+    const cur = new Set(u.networks && u.networks.length ? u.networks : [u.network_type || 'customer']);
+    if (cur.has(net)) cur.delete(net); else cur.add(net);
+    if (cur.size === 0) cur.add('customer');
+    const arr = [...cur];
+    setU(prev => ({ ...prev, networks: arr, network_type: arr[0] }));
+  };
+
   const handleRoleChange = (v) => {
     // Verifica se é um system profile (role) ou customizado (profile_id)
     const systemRoles = ['customer', 'comercial', 'financeiro', 'estoque', 'admin', 'super_admin'];
@@ -98,7 +106,9 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
         name: u.name, email: u.email, phone: u.phone, cpf: u.cpf,
         external_id: u.external_id, sponsor_code: u.sponsor_code,
         leader_external_id: u.leader_external_id || null,
-        status: u.status, role: u.role, profile_id: u.profile_id || null, network_type: u.network_type,
+        status: u.status, role: u.role, profile_id: u.profile_id || null,
+        networks: u.networks && u.networks.length ? u.networks : [u.network_type || 'customer'],
+        network_type: (u.networks && u.networks[0]) || u.network_type,
         // access_level agora e sincronizado pelo backend baseado no role
       };
       // Se o admin alterou leader_external_id mas NAO tocou no network_sponsor_id,
@@ -181,9 +191,26 @@ export default function UserEditModal({ userId, onClose, onSaved }) {
           options={allRoles.length > 0 ? allRoles : ROLE_OPTIONS} 
           testId="edit-role" 
         />
-        <Select label="Equipe" value={u.network_type || 'customer'} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="edit-network" />
+        <div className="md:col-span-2">
+          <label className="text-xs font-semibold block mb-2">Redes do usuário (pode participar de mais de uma)</label>
+          <div className="flex flex-wrap gap-2" data-testid="edit-networks">
+            {NETWORK_OPTIONS.map(opt => {
+              const nets = u.networks && u.networks.length ? u.networks : [u.network_type || 'customer'];
+              const checked = nets.includes(opt.value);
+              return (
+                <label key={opt.value}
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition ${checked ? 'bg-brand-main/10 border-brand-main text-brand-main' : 'bg-white border-border hover:border-brand-main/50'}`}
+                  data-testid={`network-${opt.value}`}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleNetwork(opt.value)} className="accent-brand-main" />
+                  <span className="text-sm font-semibold">{opt.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="text-[11px] text-txt-secondary mt-1">A primeira rede marcada é a principal (rede de exibição e ranking).</div>
+        </div>
         <Field label="ID externo do líder (leader_external_id)" value={u.leader_external_id} onChange={(v) => set('leader_external_id', v || null)} testId="edit-leader-external-id" />
-        <Field label="ID do líder na rede Equipe (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />
+        <Field label="ID do líder na rede (network_sponsor_id)" value={u.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v || null)} testId="edit-network-sponsor" />
       </div>
 
       {/* Categorias do usuário (multi-select) */}

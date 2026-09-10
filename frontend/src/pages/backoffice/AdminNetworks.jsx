@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Upload, Users, Network, Loader2, Search, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { Upload, Users, Network, Loader2, Search, FileSpreadsheet, RefreshCw, Crown, Edit2, Trash2, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 import ResolvePendingLeadersModal from '../../components/admin/ResolvePendingLeadersModal';
@@ -11,9 +11,9 @@ import ResolvePendingLeadersModal from '../../components/admin/ResolvePendingLea
 const PAGE_LIMIT = 20;
 
 const TABS = [
-  { id: 'network_1', label: 'Equipe 1 (Corporativo)', color: 'brand' },
-  { id: 'network_2', label: 'Equipe 2 (Propagandistas)', color: 'success' },
-  { id: 'customer', label: 'Indicadores (clientes)', color: 'default' },
+  { id: 'network_1', label: 'Rede 1 (Corporativa)', color: 'brand' },
+  { id: 'network_2', label: 'Rede 2 (Propagandistas)', color: 'success' },
+  { id: 'customer', label: 'Indicação (clientes)', color: 'default' },
 ];
 
 export default function AdminNetworks() {
@@ -56,7 +56,7 @@ export default function AdminNetworks() {
     <div data-testid="admin-networks">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
-          <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><Network className="w-7 h-7 text-brand-main" /> Redes Equipe</h1>
+          <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><Network className="w-7 h-7 text-brand-main" /> Redes</h1>
           <p className="text-sm text-txt-secondary mt-1">Gerencie usuários por tipo de rede.</p>
         </div>
         {tab === 'network_1' && (
@@ -64,7 +64,7 @@ export default function AdminNetworks() {
             <Button variant="outline" onClick={() => setShowResolveModal(true)} data-testid="resolve-pending-btn">
               <RefreshCw className="w-4 h-4" /> Varrer rede (vincular pendentes)
             </Button>
-            <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Equipe 1</Button>
+            <Button onClick={() => setShowImport(true)} data-testid="import-btn"><Upload className="w-4 h-4" /> Importar Rede 1</Button>
           </div>
         )}
       </div>
@@ -82,6 +82,9 @@ export default function AdminNetworks() {
           </button>
         ))}
       </div>
+
+      {/* Topo da Rede (só p/ redes MMN) */}
+      {(tab === 'network_1' || tab === 'network_2') && <NetworkTopLeaderCard network={tab} />}
 
       {/* Search */}
       <div className="bg-white rounded-xl border border-border p-3 mb-4 flex gap-2">
@@ -224,7 +227,7 @@ function ImportModal({ onClose }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="p-6 border-b border-border">
-          <h2 className="font-heading font-black text-xl flex items-center gap-2"><FileSpreadsheet className="w-6 h-6 text-brand-main" /> Importar Equipe 1</h2>
+          <h2 className="font-heading font-black text-xl flex items-center gap-2"><FileSpreadsheet className="w-6 h-6 text-brand-main" /> Importar Rede 1</h2>
           <p className="text-xs text-txt-secondary mt-1">
             Envie um arquivo <strong>CSV</strong> com colunas: <code>id, nome, email, id_lider, telefone</code>. A primeira linha deve ser o cabeçalho.
           </p>
@@ -279,3 +282,124 @@ function ImportModal({ onClose }) {
     </div>
   );
 }
+
+
+/* ============ TOPO DA REDE (Líder global por rede) ============ */
+
+function NetworkTopLeaderCard({ network }) {
+  const [data, setData] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const label = network === 'network_1' ? 'Rede 1 (Corporativa)' : 'Rede 2 (Propagandistas)';
+
+  const load = async () => {
+    try {
+      const d = await api.get('/api/admin/network-top-leaders');
+      setData(d);
+    } catch (e) { toast.error(e.message); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [network]);
+
+  const doSearch = async (q) => {
+    setQuery(q);
+    if (!q || q.length < 2) { setResults([]); return; }
+    setSearching(true);
+    try {
+      const d = await api.get(`/api/admin/users?search=${encodeURIComponent(q)}&limit=10`);
+      setResults(d.users || []);
+    } finally { setSearching(false); }
+  };
+
+  const save = async (userId) => {
+    setSaving(true);
+    try {
+      await api.put('/api/admin/network-top-leaders', { network, user_id: userId });
+      toast.success(userId ? 'Topo da rede definido' : 'Topo da rede removido');
+      setEditing(false); setQuery(''); setResults([]);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const current = data?.resolved?.[network];
+
+  return (
+    <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 mb-4" data-testid={`network-top-${network}`}>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow shadow-amber-500/30">
+            <Crown className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-[11px] font-black text-amber-800 uppercase tracking-wider">Topo da {label}</div>
+            {current ? (
+              <div>
+                <div className="font-heading font-black text-lg">{current.name}</div>
+                <div className="text-xs text-txt-secondary">{current.email} {current.referral_code && <span className="font-mono">· #{current.referral_code}</span>}</div>
+              </div>
+            ) : (
+              <div className="text-sm text-txt-secondary italic">Nenhum usuário definido — todos os propagandistas ficam pendurados diretamente sem líder.</div>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {!editing && (
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)} data-testid={`edit-network-top-${network}`}>
+              <Edit2 className="w-3.5 h-3.5" /> {current ? 'Alterar' : 'Definir'}
+            </Button>
+          )}
+          {current && !editing && (
+            <Button variant="outline" size="sm" onClick={() => { if (window.confirm('Remover o topo desta rede?')) save(null); }} data-testid={`clear-network-top-${network}`}>
+              <Trash2 className="w-3.5 h-3.5" /> Remover
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="mt-4 bg-white rounded-lg border border-amber-200 p-3">
+          <input
+            type="text"
+            value={query}
+            onChange={e => doSearch(e.target.value)}
+            placeholder="Buscar por nome ou email do usuário..."
+            className="w-full h-10 px-3 border border-border rounded-lg text-sm"
+            autoFocus
+            data-testid="network-top-search"
+          />
+          <div className="mt-2 max-h-64 overflow-y-auto">
+            {searching ? (
+              <div className="p-3 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></div>
+            ) : results.length === 0 ? (
+              query.length >= 2 ? <div className="text-xs text-txt-secondary p-2">Nenhum usuário encontrado.</div> : <div className="text-xs text-txt-secondary p-2">Digite pelo menos 2 caracteres.</div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {results.map(r => (
+                  <li key={r.user_id}>
+                    <button onClick={() => save(r.user_id)} disabled={saving}
+                      className="w-full text-left px-2 py-2 hover:bg-amber-50 flex items-center justify-between gap-2 rounded"
+                      data-testid={`select-user-${r.user_id}`}>
+                      <div>
+                        <div className="font-semibold text-sm">{r.name}</div>
+                        <div className="text-xs text-txt-secondary">{r.email}</div>
+                      </div>
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => { setEditing(false); setQuery(''); setResults([]); }}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
