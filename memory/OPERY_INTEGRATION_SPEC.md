@@ -1,12 +1,14 @@
 # Integração OxxPharma ↔ Opery Solutions
 
-**Versão:** 1.1 · **Data:** Fev/2026
+**Versão:** 2.0 · **Data:** Fev/2026
 **Ambientes:** ambos rodam no mesmo servidor de produção, diferenciados apenas pela URL. O token de autenticação é o mesmo nos dois.
 
 Este documento descreve o contrato de integração entre o sistema **OxxPharma** (e-commerce online) e o **Opery Solutions** (ERP interno da loja física). A integração é bidirecional:
 
-1. **Opery → OxxPharma** (Inbound): envio de vendas presenciais para consolidar dashboard.
+1. **Opery → OxxPharma** (Inbound): envio de **snapshots diários de faturamento** para consolidar o dashboard.
 2. **OxxPharma → Opery** (Outbound): envio de pedidos online pagos para emissão de NF-e.
+
+> ⚠️ **Mudança na v2.0** — Não enviamos mais pedido por pedido no inbound. O que a Opery precisa enviar agora é apenas **1 registro agregado por dia** (data, faturamento, valor total dos pedidos, quantidade). Dados de cliente/CPF/itens **não são mais necessários**.
 
 ---
 
@@ -36,18 +38,20 @@ Ambos os lados usam **API Key** (bearer token) trocada via header HTTP.
 
 ---
 
-## 3. INBOUND — Opery envia vendas presenciais
+## 3. INBOUND — Opery envia snapshots diários de faturamento
+
+Este é o **fluxo principal** da integração. A Opery deve mandar **1 registro por dia** com os totais consolidados daquele dia.
 
 ### 3.1 Endpoints (escolha o ambiente)
 
 **Sandbox:**
 ```
-POST https://oxxpharma.com.br/api/opery/sandbox/webhook/sales
+POST https://oxxpharma.com.br/api/opery/sandbox/webhook/revenue
 ```
 
 **Produção:**
 ```
-POST https://oxxpharma.com.br/api/opery/webhook/sales
+POST https://oxxpharma.com.br/api/opery/webhook/revenue
 ```
 
 ### 3.2 Headers
@@ -59,36 +63,28 @@ X-Opery-Api-Key: <chave-fornecida-pela-oxxpharma>
 
 ### 3.3 Body (JSON)
 
-Aceita **1 venda** ou **lote**. Use `sale` para 1 e `sales` para várias.
+Aceita **1 snapshot** ou **lote** (recomendado para backfill/sync). Use `snapshot` para 1 e `snapshots` para várias.
 
-#### Envio único
+#### Snapshot único
 ```json
 {
-  "sale": {
-    "opery_order_id": "OP-2026-000123",
-    "order_date": "2026-02-15T14:32:00-03:00",
-    "total": 250.50,
-    "status": "paid",
-    "customer_name": "Maria Silva",
-    "customer_cpf": "12345678900",
-    "customer_email": "maria@exemplo.com",
-    "payment_method": "pix",
-    "branch": "Loja Centro",
-    "operator": "Vendedor 07",
-    "items": [
-      { "sku": "MED-DIP-500", "name": "Dipirona 500mg 20 comp", "qty": 2, "unit_price": 15.90, "total": 31.80 }
-    ],
-    "metadata": { "nfce_number": "12345" }
+  "snapshot": {
+    "date": "2026-02-15",
+    "total_revenue": 12580.50,
+    "total_orders_value": 15230.00,
+    "orders_count": 87,
+    "paid_orders_count": 72
   }
 }
 ```
 
-#### Envio em lote (recomendado para sync diário)
+#### Lote (recomendado para primeira carga histórica)
 ```json
 {
-  "sales": [
-    { "opery_order_id": "OP-001", "order_date": "2026-02-15", "total": 89.90, "status": "paid" },
-    { "opery_order_id": "OP-002", "order_date": "2026-02-15", "total": 420.00, "status": "pending" }
+  "snapshots": [
+    { "date": "2026-02-13", "total_revenue": 760.30, "total_orders_value": 900.00, "orders_count": 8, "paid_orders_count": 6 },
+    { "date": "2026-02-14", "total_revenue": 1580.00, "total_orders_value": 1750.00, "orders_count": 14, "paid_orders_count": 12 },
+    { "date": "2026-02-15", "total_revenue": 12580.50, "total_orders_value": 15230.00, "orders_count": 87, "paid_orders_count": 72 }
   ]
 }
 ```
@@ -97,62 +93,63 @@ Aceita **1 venda** ou **lote**. Use `sale` para 1 e `sales` para várias.
 
 | Campo | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `opery_order_id` | string | **sim** | ID único do pedido no ERP (idempotência) |
-| `order_date` | string | recomendado | ISO-8601 (`2026-02-15T14:32:00-03:00`), `YYYY-MM-DD` ou `DD/MM/YYYY [HH:MM:SS]` |
-| `total` | number | recomendado | Valor total do pedido em reais |
-| `status` | string | recomendado | `paid`\|`pending`\|`cancelled` (aceita também PT: `pago`, `aguardando`, `cancelado`) |
-| `customer_name` | string | opcional | Nome do cliente |
-| `customer_cpf` | string | opcional | CPF (só dígitos ou formatado) |
-| `customer_email` | string | opcional | Email do cliente |
-| `payment_method` | string | opcional | `pix`, `credito`, `debito`, `dinheiro`, etc. |
-| `branch` | string | opcional | Filial/loja |
-| `operator` | string | opcional | Vendedor/operador do caixa |
-| `items` | array | opcional | Itens do pedido |
-| `metadata` | object | opcional | Qualquer JSON adicional |
+| `date` | string | **sim** | Formato **`YYYY-MM-DD`** (chave de idempotência). Aceita também ISO e `DD/MM/YYYY`. |
+| `total_revenue` | number | **sim** | Faturamento do dia — soma dos pedidos **PAGOS** apenas. |
+| `total_orders_value` | number | **sim** | Valor total dos pedidos no dia — **pagos + pendentes**. |
+| `orders_count` | integer | **sim** | Quantidade total de pedidos do dia (pagos + pendentes). |
+| `paid_orders_count` | integer | opcional | Quantidade de pedidos pagos (para cálculo do ticket médio). Se ausente, usamos `orders_count`. |
 
-### 3.5 Comportamento
+> **Ticket médio** é calculado internamente pela OxxPharma: `total_revenue / paid_orders_count`. Não precisa enviar.
 
-- **Idempotente**: reenviar o mesmo `opery_order_id` **atualiza** o registro existente (não duplica).
-- Cancelamento: enviar `status: "cancelled"` no mesmo `opery_order_id`.
-- Atualizações de status/valor: envie o payload atualizado com o mesmo ID.
+### 3.5 Idempotência e correção
 
-### 3.6 Resposta
+- **Idempotente por `date`**: reenviar o mesmo dia **sobrescreve** o registro existente. Não duplica.
+- Se um valor foi lançado errado: basta reenviar o mesmo `date` com os valores corretos.
+- Não há campo de "delete" — se um dia teve zero movimento, envie zeros explicitamente ou simplesmente não envie (fica ausente).
+
+### 3.6 Carga inicial (backfill)
+
+Na primeira integração, envie o histórico completo de faturamento que a Opery tiver disponível (últimos X anos). Divida em lotes de até ~500 snapshots por request (~500 dias ≈ 1,3 anos por lote).
+
+Exemplo de estratégia:
+```
+Lote 1: dias de 2024-01-01 até 2024-12-31 (365 snapshots)
+Lote 2: dias de 2025-01-01 até 2025-12-31 (365 snapshots)
+Lote 3: dias de 2026-01-01 até hoje
+```
+
+Depois da carga inicial, envie **1 snapshot por dia** (ou reenvie o dia atual várias vezes conforme os valores forem sendo atualizados durante o dia).
+
+### 3.7 Resposta
 
 ```json
-{ "received": 2, "created": 1, "updated": 1, "errors": [] }
+{ "received": 3, "created": 2, "updated": 1, "errors": [] }
 ```
 
 **Códigos HTTP:**
-- `200`: processado (mesmo com alguns itens em `errors`).
-- `400`: body inválido (ausência de `sale`/`sales`).
+- `200`: processado.
+- `400`: body inválido (ausência de `snapshot`/`snapshots` ou `date` faltando).
 - `401`: `X-Opery-Api-Key` inválido ou ausente.
 
-### 3.7 Health check
+### 3.8 Health check
 
 Use antes de enviar dados para validar chave e conectividade.
 
-**Sandbox:**
 ```
 POST https://oxxpharma.com.br/api/opery/sandbox/webhook/health
-X-Opery-Api-Key: <chave>
-```
-
-**Produção:**
-```
 POST https://oxxpharma.com.br/api/opery/webhook/health
 X-Opery-Api-Key: <chave>
 ```
 
 Resposta:
 ```json
-{ "ok": true, "message": "Autenticado. Endpoint de vendas: POST /api/opery/webhook/sales", "environment": "sandbox" }
+{ "ok": true, "message": "Autenticado.", "environment": "sandbox" }
 ```
 
-### 3.8 Frequência recomendada
+### 3.9 Frequência recomendada
 
-- **Realtime** (recomendado): dispare o webhook logo após cada venda finalizada.
-- **Batch** (fallback): rode um sync a cada 5–15 min enviando as vendas do intervalo.
-- Envie **status updates** também (ex: quando um pedido pendente for pago).
+- **Diária**: rode um job à meia-noite (America/Sao_Paulo) que envia o snapshot **do dia anterior** (fechado).
+- **Realtime opcional**: durante o dia, reenvie o snapshot do dia atual a cada X minutos com os valores parciais atualizados (a idempotência por data garante que não duplica).
 
 ---
 
@@ -273,8 +270,8 @@ Com body:
 
 ## 5. Timezone & formatos
 
-- Todas as datas devem estar em **ISO-8601** com offset. Sem timezone assumimos **UTC**.
-- Timezone padrão de negócio: `America/Sao_Paulo` (BRT/BRST).
+- `date` no snapshot: use `YYYY-MM-DD` referente ao dia contábil no fuso `America/Sao_Paulo`.
+- Datas em outros campos: **ISO-8601** com offset. Sem timezone assumimos **UTC**.
 - Valores monetários: `number` (não string), 2 casas decimais, `.` como separador. Ex.: `1234.56`.
 
 ## 6. Códigos de erro
@@ -282,7 +279,7 @@ Com body:
 | HTTP | Significado | Ação |
 |---|---|---|
 | 200 | OK | — |
-| 400 | Payload inválido | Corrigir conforme spec |
+| 400 | Payload inválido (ex: `date` faltando) | Corrigir conforme spec |
 | 401 | Chave inválida | Verificar `X-Opery-Api-Key` |
 | 429 | Rate limit (a implementar) | Aguardar e reenviar |
 | 5xx | Erro no servidor | Retry exponencial |
@@ -293,9 +290,10 @@ Com body:
 
 - [ ] Receber o token único da OxxPharma (canal seguro).
 - [ ] Testar em **sandbox** via `POST /api/opery/sandbox/webhook/health`.
-- [ ] Enviar vendas em sandbox e validar que aparecem no dashboard.
-- [ ] Após homologação, apontar para o endpoint **produção**.
-- [ ] Enviar seed inicial (últimas vendas do mês) em produção.
+- [ ] Levantar desde qual data existem valores históricos disponíveis no ERP.
+- [ ] Enviar **carga inicial (backfill)** em lotes para o sandbox — validar no dashboard.
+- [ ] Após homologação, apontar para o endpoint **produção** e enviar backfill lá.
+- [ ] Configurar job diário que envia o snapshot do dia anterior (recomendado à 00:15 BRT).
 - [ ] **Fase 2:** Expor endpoint POST (sandbox + produção) que aceite o payload de "pedido pago" (seção 4) e emita NF-e.
 - [ ] **Fase 2:** Fornecer 2 URLs (sandbox + produção) e o token único para OxxPharma configurar.
 
@@ -306,7 +304,7 @@ Com body:
 | Método | Rota | Descrição |
 |---|---|---|
 | GET | `/api/admin/opery/dashboard` | KPIs consolidados |
-| GET | `/api/admin/opery/sales` | Listagem paginada das vendas presenciais |
+| GET | `/api/admin/opery/snapshots` | Listagem paginada dos snapshots diários |
 | GET | `/api/admin/opery/inbound-log` | Logs de recebimento (auditoria) |
 | GET | `/api/admin/opery/dispatch-log` | Logs de envio p/ Opery |
 | POST | `/api/admin/opery/dispatch/retry` | Reprocessa envios que falharam |
@@ -315,7 +313,13 @@ Com body:
 
 ---
 
-## 9. Contatos
+## 9. Endpoint legado (compatibilidade)
+
+O endpoint antigo `POST /api/opery/webhook/sales` (envio pedido-por-pedido) **ainda funciona**, mas não é mais recomendado. Prefira usar `/webhook/revenue` no novo modelo agregado.
+
+---
+
+## 10. Contatos
 
 - **OxxPharma (integração):** _(preencher)_
 - **Opery (integração):** _(preencher)_

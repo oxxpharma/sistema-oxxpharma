@@ -242,8 +242,8 @@ function ConfigForm({ config, onSaved }) {
           <ol className="text-sm space-y-1.5 text-txt-secondary list-decimal list-inside">
             <li>Configure o <b>token único</b> e as duas URLs (sandbox + produção).</li>
             <li>Escolha o <b>ambiente ativo</b> — o OxxPharma dispara apenas para esse.</li>
-            <li>A Opery envia vendas para <code>/api/opery/sandbox/webhook/sales</code> ou <code>/api/opery/webhook/sales</code>.</li>
-            <li>Quando um pedido é pago, disparamos para a URL do ambiente ativo.</li>
+            <li>A Opery envia <b>snapshots diários</b> de faturamento para <code>/api/opery/webhook/revenue</code> (só valor, quantidade e data — sem dados de clientes).</li>
+            <li>Quando um pedido é pago aqui, disparamos para a URL do ambiente ativo.</li>
             <li>A Opery retorna XML da NF-e ou callback → geramos o DANFE (PDF).</li>
           </ol>
         </div>
@@ -302,7 +302,7 @@ function EndpointsCard({ config }) {
       color: 'border-amber-200 bg-amber-50/40',
       badge: 'bg-amber-100 text-amber-800',
       items: [
-        { key: 'sb-sales', label: 'Recebimento de vendas', url: `${base}/api/opery/sandbox/webhook/sales`, method: 'POST' },
+        { key: 'sb-revenue', label: 'Snapshots de faturamento (recomendado)', url: `${base}/api/opery/sandbox/webhook/revenue`, method: 'POST' },
         { key: 'sb-health', label: 'Health check', url: `${base}/api/opery/sandbox/webhook/health`, method: 'POST' },
         { key: 'sb-nf', label: 'Callback NF emitida', url: `${base}/api/opery/sandbox/webhook/nf-issued`, method: 'POST' },
       ],
@@ -310,11 +310,11 @@ function EndpointsCard({ config }) {
     {
       key: 'production',
       title: '🚀 Ambiente Produção',
-      subtitle: 'URLs oficiais. Vendas aqui alimentam o dashboard real.',
+      subtitle: 'URLs oficiais. Snapshots aqui alimentam o dashboard real.',
       color: 'border-emerald-200 bg-emerald-50/40',
       badge: 'bg-emerald-100 text-emerald-800',
       items: [
-        { key: 'pr-sales', label: 'Recebimento de vendas', url: `${base}/api/opery/webhook/sales`, method: 'POST' },
+        { key: 'pr-revenue', label: 'Snapshots de faturamento (recomendado)', url: `${base}/api/opery/webhook/revenue`, method: 'POST' },
         { key: 'pr-health', label: 'Health check', url: `${base}/api/opery/webhook/health`, method: 'POST' },
         { key: 'pr-nf', label: 'Callback NF emitida', url: `${base}/api/opery/webhook/nf-issued`, method: 'POST' },
       ],
@@ -422,7 +422,8 @@ function InboundLogs() {
       <div className="flex flex-wrap items-center gap-2">
         <select value={kind} onChange={e => setKind(e.target.value)} className="h-9 px-2 border border-border rounded-lg text-sm" data-testid="inbound-filter-kind">
           <option value="">Todos os tipos</option>
-          <option value="sales">Vendas</option>
+          <option value="revenue">Snapshots de faturamento</option>
+          <option value="sales">Vendas (legado)</option>
           <option value="health">Health check</option>
           <option value="nf_callback">Callback NF</option>
         </select>

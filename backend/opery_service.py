@@ -134,6 +134,7 @@ async def ensure_indexes(db):
         await db.opery_sales.create_index("opery_order_id", unique=True)
         await db.opery_sales.create_index("order_date")
         await db.opery_sales.create_index("status")
+        await db.opery_revenue_snapshots.create_index("date", unique=True)
         await db.opery_dispatch_log.create_index("order_id")
         await db.opery_dispatch_log.create_index("created_at")
         await db.opery_dispatch_log.create_index([("status", 1), ("next_retry_at", 1)])
@@ -226,18 +227,10 @@ def _parse_date(raw: Any) -> str:
 
 
 async def upsert_sale(db, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Grava/atualiza uma venda presencial vinda da Opery.
+    """(Deprecated) Grava/atualiza uma venda presencial (pedido individual).
 
-    Campos aceitos no payload:
-      - opery_order_id (str, obrigatorio) — id unico do pedido no ERP (idempotencia)
-      - order_date (str) — data do pedido
-      - total (num) — valor total do pedido
-      - status (str) — 'paid'|'pending'|'cancelled' (ou pt-BR: pago/aguardando/cancelado)
-      - customer_name, customer_cpf, customer_email (opcionais)
-      - items [{sku, name, qty, unit_price, total}] (opcional)
-      - payment_method (str, opcional)
-      - branch / operator (str, opcional) — filial e vendedor
-      - metadata (dict, opcional)
+    Mantido apenas para retrocompatibilidade. O modelo agora usa snapshots
+    diarios agregados via `upsert_revenue_snapshot`.
     """
     opery_order_id = str(payload.get("opery_order_id") or payload.get("order_id") or "").strip()
     if not opery_order_id:
@@ -256,7 +249,7 @@ async def upsert_sale(db, payload: Dict[str, Any]) -> Dict[str, Any]:
         "branch": payload.get("branch") or payload.get("filial"),
         "operator": payload.get("operator") or payload.get("vendedor"),
         "metadata": payload.get("metadata") or {},
-        "tenant": "oxxpharma",  # loja fisica e apenas OxxPharma
+        "tenant": "oxxpharma",
         "source": "opery",
         "updated_at": _now_iso(),
     }
@@ -270,80 +263,131 @@ async def upsert_sale(db, payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"created": True, "opery_order_id": opery_order_id, "sale_id": doc["sale_id"]}
 
 
+# ==================== SNAPSHOTS DIARIOS (modelo novo) ====================
+
+
+def _parse_iso_date(raw: Any) -> Optional[str]:
+    """Aceita 'YYYY-MM-DD', ISO ou 'DD/MM/YYYY' e retorna sempre 'YYYY-MM-DD'."""
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw.date().isoformat()
+    s = str(raw).strip()
+    # ja ta no formato certo
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    # DD/MM/YYYY
+    for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).date().isoformat()
+    except Exception:
+        return None
+
+
+async def upsert_revenue_snapshot(db, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Grava/atualiza 1 snapshot diario de faturamento vindo da Opery.
+
+    Payload aceito:
+      - date (str, obrigatorio) — 'YYYY-MM-DD' (chave de idempotencia)
+      - total_revenue (num) — faturamento (somente pedidos PAGOS)
+      - total_orders_value (num) — valor total dos pedidos (pagos + pendentes)
+      - orders_count (int) — quantidade total de pedidos no dia
+      - paid_orders_count (int, opcional) — quantos foram pagos (pra calcular ticket medio)
+    """
+    date = _parse_iso_date(payload.get("date") or payload.get("data"))
+    if not date:
+        raise ValueError("date obrigatorio no formato YYYY-MM-DD")
+
+    total_revenue = round(_to_float(payload.get("total_revenue") or payload.get("faturamento")), 2)
+    total_orders_value = round(_to_float(payload.get("total_orders_value") or payload.get("valor_total_pedidos")), 2)
+    orders_count = int(_to_float(payload.get("orders_count") or payload.get("qtd_pedidos") or 0))
+    paid_orders_count_raw = payload.get("paid_orders_count")
+    paid_orders_count = int(_to_float(paid_orders_count_raw)) if paid_orders_count_raw is not None else None
+
+    doc = {
+        "date": date,
+        "total_revenue": total_revenue,
+        "total_orders_value": total_orders_value,
+        "orders_count": orders_count,
+        "paid_orders_count": paid_orders_count,
+        "tenant": "oxxpharma",
+        "source": "opery",
+        "updated_at": _now_iso(),
+    }
+    existing = await db.opery_revenue_snapshots.find_one({"date": date}, {"_id": 0})
+    if existing:
+        await db.opery_revenue_snapshots.update_one({"date": date}, {"$set": doc})
+        return {"created": False, "date": date}
+    doc["snapshot_id"] = _gen_id("opsnap_")
+    doc["created_at"] = _now_iso()
+    await db.opery_revenue_snapshots.insert_one(doc)
+    return {"created": True, "date": date, "snapshot_id": doc["snapshot_id"]}
+
+
 # ==================== DASHBOARD STATS ====================
 
 
 async def aggregate_stats(db, start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
-    """Calcula KPIs de vendas presenciais para o dashboard.
+    """Calcula KPIs de vendas presenciais somando os snapshots diarios da Opery.
 
     Retorna:
-      - total_orders_value: soma de TODOS os pedidos (pagos + pendentes, exclui cancelados)
-      - total_revenue: soma dos pedidos PAGOS (faturamento)
-      - orders_count: quantidade total (exclui cancelados)
-      - paid_orders_count: quantidade de pagos
+      - total_orders_value: soma de total_orders_value no periodo
+      - total_revenue: soma de total_revenue (faturamento pago) no periodo
+      - orders_count: soma de orders_count no periodo
+      - paid_orders_count: soma de paid_orders_count (fallback orders_count)
       - avg_ticket: total_revenue / paid_orders_count
-      - revenue_by_day: lista {date, revenue, orders} dos ultimos 30 dias
-      - by_status: distribuicao por status
+      - revenue_by_day: 30 dias (usa snapshots quando existem)
+      - by_status: [] (nao ha mais status individual — modelo agregado)
     """
-    match: Dict[str, Any] = {"status": {"$ne": STATUS_CANCELLED}}
-    if start:
-        match.setdefault("order_date", {})["$gte"] = start + "T00:00:00"
-    if end:
-        match.setdefault("order_date", {})["$lte"] = end + "T23:59:59"
+    from datetime import timedelta
 
-    # totais gerais (pagos + pendentes)
-    all_agg = await db.opery_sales.aggregate([
+    start_date = _parse_iso_date(start) if start else None
+    end_date = _parse_iso_date(end) if end else None
+    match: Dict[str, Any] = {}
+    if start_date:
+        match.setdefault("date", {})["$gte"] = start_date
+    if end_date:
+        match.setdefault("date", {})["$lte"] = end_date
+
+    agg = await db.opery_revenue_snapshots.aggregate([
         {"$match": match},
-        {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
+        {"$group": {
+            "_id": None,
+            "total_revenue": {"$sum": "$total_revenue"},
+            "total_orders_value": {"$sum": "$total_orders_value"},
+            "orders_count": {"$sum": "$orders_count"},
+            "paid_orders_count": {"$sum": {"$ifNull": ["$paid_orders_count", "$orders_count"]}},
+        }},
     ]).to_list(1)
-    total_orders_value = round(all_agg[0]["total"], 2) if all_agg else 0.0
-    orders_count = all_agg[0]["count"] if all_agg else 0
 
-    # somente pagos
-    paid_match = {**match, "status": STATUS_PAID}
-    paid_agg = await db.opery_sales.aggregate([
-        {"$match": paid_match},
-        {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
-    ]).to_list(1)
-    total_revenue = round(paid_agg[0]["total"], 2) if paid_agg else 0.0
-    paid_orders_count = paid_agg[0]["count"] if paid_agg else 0
+    if agg:
+        row = agg[0]
+        total_revenue = round(row.get("total_revenue") or 0, 2)
+        total_orders_value = round(row.get("total_orders_value") or 0, 2)
+        orders_count = int(row.get("orders_count") or 0)
+        paid_orders_count = int(row.get("paid_orders_count") or 0)
+    else:
+        total_revenue = total_orders_value = 0.0
+        orders_count = paid_orders_count = 0
 
     avg_ticket = round(total_revenue / paid_orders_count, 2) if paid_orders_count else 0.0
 
-    # distribuicao por status (respeita periodo mas nao exclui cancelados aqui)
-    status_match_full: Dict[str, Any] = {}
-    if start:
-        status_match_full.setdefault("order_date", {})["$gte"] = start + "T00:00:00"
-    if end:
-        status_match_full.setdefault("order_date", {})["$lte"] = end + "T23:59:59"
-    status_agg = await db.opery_sales.aggregate(
-        ([{"$match": status_match_full}] if status_match_full else []) + [
-            {"$group": {"_id": "$status", "count": {"$sum": 1}, "total": {"$sum": "$total"}}}
-        ]
-    ).to_list(20)
-    by_status = [
-        {"status": s["_id"] or STATUS_PENDING, "count": s["count"], "total": round(s["total"] or 0, 2)}
-        for s in status_agg
-    ]
-
-    # ultimos 30 dias (sempre fixo)
-    from datetime import timedelta
+    # Serie diaria dos ultimos 30 dias (sempre fixo, independente do filtro)
     n = datetime.now(timezone.utc)
-    today = n.replace(hour=0, minute=0, second=0, microsecond=0)
+    today = n.replace(hour=0, minute=0, second=0, microsecond=0).date()
     last_30_start = (today - timedelta(days=29)).isoformat()
-    daily = await db.opery_sales.aggregate([
-        {"$match": {"status": STATUS_PAID, "order_date": {"$gte": last_30_start}}},
-        {"$group": {
-            "_id": {"$substr": ["$order_date", 0, 10]},
-            "revenue": {"$sum": "$total"},
-            "orders": {"$sum": 1},
-        }},
-        {"$sort": {"_id": 1}},
-    ]).to_list(60)
-    daily_map = {d["_id"]: {"revenue": round(d["revenue"], 2), "orders": d["orders"]} for d in daily}
+    daily = await db.opery_revenue_snapshots.find(
+        {"date": {"$gte": last_30_start}},
+        {"_id": 0, "date": 1, "total_revenue": 1, "orders_count": 1},
+    ).sort("date", 1).to_list(60)
+    daily_map = {d["date"]: {"revenue": round(d.get("total_revenue") or 0, 2), "orders": int(d.get("orders_count") or 0)} for d in daily}
     revenue_by_day = []
     for i in range(30):
-        day = (today - timedelta(days=29 - i)).date().isoformat()
+        day = (today - timedelta(days=29 - i)).isoformat()
         d = daily_map.get(day, {"revenue": 0, "orders": 0})
         revenue_by_day.append({"date": day, "revenue": d["revenue"], "orders": d["orders"]})
 
@@ -354,7 +398,7 @@ async def aggregate_stats(db, start: Optional[str] = None, end: Optional[str] = 
         "paid_orders_count": paid_orders_count,
         "avg_ticket": avg_ticket,
         "revenue_by_day": revenue_by_day,
-        "by_status": by_status,
+        "by_status": [],  # nao aplicavel no modelo de snapshot
     }
 
 

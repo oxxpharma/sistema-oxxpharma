@@ -229,7 +229,7 @@ function PresencialTab({ data, loading }) {
       </div>
     );
   }
-  const hasData = (data.orders_count || 0) > 0;
+  const hasData = (data.orders_count || 0) > 0 || (data.total_revenue || 0) > 0;
 
   return (
     <div className="space-y-5" data-testid="presencial-tab">
@@ -237,10 +237,10 @@ function PresencialTab({ data, loading }) {
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3" data-testid="opery-empty-state">
           <Store className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-sm">
-            <div className="font-semibold text-amber-900">Nenhuma venda presencial recebida ainda</div>
+            <div className="font-semibold text-amber-900">Nenhum snapshot de faturamento recebido ainda</div>
             <div className="text-amber-800 mt-1">
-              A Opery ainda não enviou dados neste período. Confira a documentação de integração em{' '}
-              <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 font-mono text-xs">POST /api/opery/webhook/sales</code>.
+              A Opery envia snapshots diários de faturamento para{' '}
+              <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 font-mono text-xs">POST /api/opery/webhook/revenue</code>.
             </div>
           </div>
         </div>
@@ -273,22 +273,19 @@ function PresencialTab({ data, loading }) {
           icon={Receipt}
           label="Ticket médio"
           value={formatCurrency(data.avg_ticket || 0)}
-          hint="somente pagos"
+          hint="faturamento / pagos"
           testId="opery-kpi-ticket"
         />
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl border border-border p-5 lg:col-span-2" data-testid="opery-revenue-chart">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="font-heading font-black text-lg">Faturamento presencial (últimos 30 dias)</h2>
-              <p className="text-xs text-txt-secondary">Vendas pagas registradas na Opery</p>
-            </div>
+      <div className="bg-white rounded-2xl border border-border p-5" data-testid="opery-revenue-chart">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="font-heading font-black text-lg">Faturamento presencial (últimos 30 dias)</h2>
+            <p className="text-xs text-txt-secondary">Snapshots diários enviados pela Opery</p>
           </div>
-          <RevenueChart series={[{ key: 'revenue', label: 'Presencial', color: '#0ea5e9', data: data.revenue_by_day || [] }]} />
         </div>
-        <StatusBreakdownCard items={data.by_status || []} />
+        <RevenueChart series={[{ key: 'revenue', label: 'Presencial', color: '#0ea5e9', data: data.revenue_by_day || [] }]} />
       </div>
     </div>
   );

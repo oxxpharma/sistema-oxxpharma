@@ -443,3 +443,11 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 - Backend expõe webhooks espelhados: `/api/opery/webhook/*` (produção) e `/api/opery/sandbox/webhook/*` (sandbox), aceitando o mesmo token. Health check sandbox retorna `environment: sandbox` no response.
 - UI: toggle 🧪 Sandbox / 🚀 Produção, alerta vermelho quando Produção ativa ("Modo produção — pedidos reais vão emitir NF-e"), badge "ATIVA" na URL escolhida, dois blocos separados na aba Endpoints.
 - Documentação pública `/docs/opery` atualizada com tabela de ambientes explicando que **URL muda mas token é o mesmo**, endpoints listados nas duas variantes em cada seção.
+
+## 2026-02-10 · Iter 67.3 · Opery — Modelo agregado por snapshot diário
+- Migrado do modelo pedido-por-pedido para **snapshots diários agregados**. A Opery agora envia só: `date`, `total_revenue`, `total_orders_value`, `orders_count` (+ `paid_orders_count` opcional). Sem dados de cliente/CPF/itens.
+- Nova coleção `opery_revenue_snapshots` com index único em `date` (idempotência: reenvio da mesma data sobrescreve).
+- Novos endpoints `POST /api/opery/webhook/revenue` (produção) e `POST /api/opery/sandbox/webhook/revenue` (sandbox). Aceitam `snapshot` (1) ou `snapshots` (lote — ideal pra backfill histórico).
+- `aggregate_stats` reescrito pra somar snapshots via aggregation pipeline. Ticket médio calculado internamente = `total_revenue / paid_orders_count`.
+- `GET /api/admin/opery/snapshots` substitui `/sales` (que fica como legado). Dashboard "Vendas Presenciais" atualizado — removido card de status (não aplicável). Empty state atualizado.
+- Documentação v2.0 (`/docs/opery`) com aviso destacado da mudança, guia de backfill (envio histórico em lotes) e frequência recomendada (job diário à meia-noite BRT).

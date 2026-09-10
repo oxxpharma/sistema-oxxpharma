@@ -88,6 +88,19 @@ class WebhookIn(BaseModel):
     sales: Optional[List[SaleIn]] = None
 
 
+class RevenueSnapshotIn(BaseModel):
+    date: str  # YYYY-MM-DD
+    total_revenue: Optional[float] = None
+    total_orders_value: Optional[float] = None
+    orders_count: Optional[int] = None
+    paid_orders_count: Optional[int] = None
+
+
+class RevenueWebhookIn(BaseModel):
+    snapshot: Optional[RevenueSnapshotIn] = None
+    snapshots: Optional[List[RevenueSnapshotIn]] = None
+
+
 @router.post("/opery/webhook/sales")
 async def receive_sales(
     body: WebhookIn,
@@ -142,6 +155,48 @@ async def webhook_health(
     resp = {"ok": True, "message": "Autenticado. Endpoint de vendas: POST /api/opery/webhook/sales"}
     await opery_service.log_inbound(db, "health", ok=True, headers_sample=_sample_headers(request),
                                     body=None, response=resp)
+    return resp
+
+
+@router.post("/opery/webhook/revenue")
+async def receive_revenue(
+    body: RevenueWebhookIn,
+    request: Request,
+    x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key"),
+):
+    """Recebe snapshots diarios de faturamento (modelo agregado — recomendado).
+
+    Aceita `snapshot` (1) ou `snapshots` (lote). Idempotente por `date`.
+    """
+    db = request.app.db
+    if not opery_service.verify_webhook_key(x_opery_api_key):
+        await opery_service.log_inbound(db, "revenue", ok=False, headers_sample=_sample_headers(request),
+                                        body=body.model_dump(exclude_none=True), response={"status": 401},
+                                        error="chave invalida")
+        raise HTTPException(status_code=401, detail="Chave invalida (X-Opery-Api-Key)")
+
+    items: List[RevenueSnapshotIn] = []
+    if body.snapshots: items.extend(body.snapshots)
+    if body.snapshot: items.append(body.snapshot)
+    if not items:
+        await opery_service.log_inbound(db, "revenue", ok=False, headers_sample=_sample_headers(request),
+                                        body=body.model_dump(exclude_none=True), response={"status": 400},
+                                        error="payload vazio")
+        raise HTTPException(status_code=400, detail="Envie 'snapshot' ou 'snapshots' no body")
+
+    created = 0; updated = 0; errors: List[Dict[str, Any]] = []
+    for s in items:
+        try:
+            r = await opery_service.upsert_revenue_snapshot(db, s.model_dump(exclude_none=True))
+            if r.get("created"): created += 1
+            else: updated += 1
+        except Exception as e:
+            logger.error(f"opery.webhook.revenue: erro no item {s.date}: {e}")
+            errors.append({"date": s.date, "error": str(e)})
+
+    resp = {"received": len(items), "created": created, "updated": updated, "errors": errors}
+    await opery_service.log_inbound(db, "revenue", ok=True, headers_sample=_sample_headers(request),
+                                    body=body.model_dump(exclude_none=True), response=resp)
     return resp
 
 
@@ -241,8 +296,27 @@ async def opery_dashboard(request: Request, start: Optional[str] = None, end: Op
     return await opery_service.aggregate_stats(db, start=start, end=end)
 
 
+@router.get("/admin/opery/snapshots")
+async def list_snapshots(
+    request: Request,
+    start: Optional[str] = None, end: Optional[str] = None,
+    page: int = Query(1, ge=1), per_page: int = Query(31, ge=1, le=366),
+    user: dict = Depends(admin_dep),
+):
+    """Lista os snapshots diarios de faturamento recebidos da Opery."""
+    db = request.app.db
+    match: Dict[str, Any] = {}
+    if start: match.setdefault("date", {})["$gte"] = start
+    if end: match.setdefault("date", {})["$lte"] = end
+    total = await db.opery_revenue_snapshots.count_documents(match)
+    cursor = db.opery_revenue_snapshots.find(match, {"_id": 0}).sort("date", -1).skip((page - 1) * per_page).limit(per_page)
+    items = await cursor.to_list(per_page)
+    return {"total": total, "page": page, "per_page": per_page, "items": items}
+
+
+# Legacy: mantido para compatibilidade retroativa
 @router.get("/admin/opery/sales")
-async def list_sales(
+async def list_sales_legacy(
     request: Request,
     start: Optional[str] = None, end: Optional[str] = None,
     status: Optional[str] = None, q: Optional[str] = None,
@@ -346,8 +420,9 @@ async def opery_config(request: Request, user: dict = Depends(admin_dep)):
         "docs_url": cfg.get("docs_url") or "/docs/opery",
         "updated_at": cfg.get("updated_at"),
         "updated_by": cfg.get("updated_by"),
-        "webhook_endpoint": "/api/opery/webhook/sales",
-        "webhook_endpoint_sandbox": "/api/opery/sandbox/webhook/sales",
+        "webhook_endpoint": "/api/opery/webhook/revenue",
+        "webhook_endpoint_sandbox": "/api/opery/sandbox/webhook/revenue",
+        "webhook_endpoint_legacy_sales": "/api/opery/webhook/sales",
         "health_endpoint": "/api/opery/webhook/health",
         "health_endpoint_sandbox": "/api/opery/sandbox/webhook/health",
         "nf_callback_endpoint": "/api/opery/webhook/nf-issued",
@@ -462,6 +537,11 @@ def register_opery_routes(app, deps: Dict[str, Any]):
                                     x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
         result = await receive_sales(body, request, x_opery_api_key)
         return result
+
+    @sandbox_router.post("/webhook/revenue")
+    async def sandbox_receive_revenue(body: RevenueWebhookIn, request: Request,
+                                      x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
+        return await receive_revenue(body, request, x_opery_api_key)
 
     @sandbox_router.post("/webhook/health")
     async def sandbox_webhook_health(request: Request,
