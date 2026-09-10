@@ -451,3 +451,10 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 - `aggregate_stats` reescrito pra somar snapshots via aggregation pipeline. Ticket médio calculado internamente = `total_revenue / paid_orders_count`.
 - `GET /api/admin/opery/snapshots` substitui `/sales` (que fica como legado). Dashboard "Vendas Presenciais" atualizado — removido card de status (não aplicável). Empty state atualizado.
 - Documentação v2.0 (`/docs/opery`) com aviso destacado da mudança, guia de backfill (envio histórico em lotes) e frequência recomendada (job diário à meia-noite BRT).
+
+## 2026-02-10 · Iter 67.4 · Opery — Aba Snapshots + Histórico de atualizações
+- Nova aba **"Snapshots recebidos"** na página `/backoffice/opery` — tabela com todos os snapshots (data, faturamento, total pedidos, qtd, pagos, ticket médio calculado, última atualização).
+- Filtros de intervalo (De/Até) para navegar no histórico.
+- Botão **Histórico** em cada linha abre modal com todas as atualizações que a Opery mandou pra aquele dia (do mais recente pro mais antigo), cruzando com `opery_inbound_log`.
+- Aviso destacado explicando o comportamento idempotente (sobrescreve).
+- Confirmado via testes ao vivo: 3 envios pro mesmo dia (10:00, 12:00, 18:00) resultaram em 1 documento com valores finais + rastro completo no histórico.

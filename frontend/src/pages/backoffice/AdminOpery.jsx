@@ -60,6 +60,7 @@ export default function AdminOpery() {
         {[
           { key: 'config', label: 'Configuração' },
           { key: 'endpoints', label: 'Endpoints' },
+          { key: 'snapshots', label: 'Snapshots recebidos' },
           { key: 'inbound', label: 'Logs Entrada' },
           { key: 'outbound', label: 'Logs Saída' },
         ].map(t => (
@@ -73,6 +74,7 @@ export default function AdminOpery() {
 
       {tab === 'config' && <ConfigForm config={config} onSaved={reload} />}
       {tab === 'endpoints' && <EndpointsCard config={config} />}
+      {tab === 'snapshots' && <SnapshotsTab />}
       {tab === 'inbound' && <InboundLogs />}
       {tab === 'outbound' && <OutboundLogs />}
     </div>
@@ -674,3 +676,173 @@ function CodeBlock({ title, content }) {
     </div>
   );
 }
+
+
+/* ============ SNAPSHOTS RECEBIDOS ============ */
+
+function SnapshotsTab() {
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [history, setHistory] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const q = new URLSearchParams({ per_page: 90 });
+      if (start) q.set('start', start);
+      if (end) q.set('end', end);
+      const d = await api.get(`/api/admin/opery/snapshots?${q}`);
+      setItems(d.items || []); setTotal(d.total || 0);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [start, end]);
+
+  const showHistory = async (date) => {
+    // Busca todos os inbound-logs de 'revenue' que contêm essa data
+    const d = await api.get(`/api/admin/opery/inbound-log?kind=revenue&per_page=100`);
+    const relevant = (d.items || []).filter(log => {
+      const body = log.body || {};
+      const arr = body.snapshots || (body.snapshot ? [body.snapshot] : []);
+      return arr.some(s => s.date === date);
+    }).map(log => ({
+      log_id: log.log_id,
+      at: log.created_at,
+      ok: log.ok,
+      values: (log.body?.snapshots || (log.body?.snapshot ? [log.body.snapshot] : [])).find(s => s.date === date),
+    }));
+    setHistory({ date, updates: relevant });
+  };
+
+  const currency = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  return (
+    <div className="space-y-4" data-testid="opery-snapshots-tab">
+      <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm flex items-start gap-2">
+        <RefreshCcw className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+        <div className="text-sky-900">
+          <b>Idempotente por data.</b> Sempre que a Opery reenvia um dia já registrado, os valores são <b>sobrescritos</b> com os novos.
+          Cada linha mostra os valores mais recentes; clique em <b>Histórico</b> para ver todas as atualizações daquele dia.
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-xs font-bold text-txt-secondary">De:</label>
+        <input type="date" value={start} onChange={e => setStart(e.target.value)}
+          className="h-9 px-2 border border-border rounded-lg text-sm" data-testid="snap-filter-start" />
+        <label className="text-xs font-bold text-txt-secondary">Até:</label>
+        <input type="date" value={end} onChange={e => setEnd(e.target.value)}
+          className="h-9 px-2 border border-border rounded-lg text-sm" data-testid="snap-filter-end" />
+        {(start || end) && (
+          <button onClick={() => { setStart(''); setEnd(''); }} className="text-xs font-semibold text-brand-main hover:underline">
+            Limpar
+          </button>
+        )}
+        <Button variant="outline" size="sm" onClick={load}><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
+        <div className="ml-auto text-xs text-txt-secondary">{total} snapshots</div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-border overflow-hidden">
+        {loading ? (
+          <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-main" /></div>
+        ) : items.length === 0 ? (
+          <div className="p-10 text-center text-sm text-txt-secondary">
+            Nenhum snapshot recebido ainda. Assim que a Opery começar a enviar, eles aparecem aqui.
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
+              <tr>
+                <th className="p-2 text-left">Data</th>
+                <th className="p-2 text-right">Faturamento</th>
+                <th className="p-2 text-right">Total pedidos</th>
+                <th className="p-2 text-right">Qtd</th>
+                <th className="p-2 text-right">Pagos</th>
+                <th className="p-2 text-right">Ticket médio</th>
+                <th className="p-2 text-left">Última atualização</th>
+                <th className="p-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(s => {
+                const paid = s.paid_orders_count || s.orders_count || 0;
+                const ticket = paid ? (s.total_revenue || 0) / paid : 0;
+                return (
+                  <tr key={s.date} className="border-t border-border hover:bg-bg-secondary/40" data-testid={`snap-row-${s.date}`}>
+                    <td className="p-2 font-mono text-xs font-bold">{s.date}</td>
+                    <td className="p-2 text-right font-bold text-emerald-700">{currency(s.total_revenue)}</td>
+                    <td className="p-2 text-right">{currency(s.total_orders_value)}</td>
+                    <td className="p-2 text-right">{s.orders_count || 0}</td>
+                    <td className="p-2 text-right">{paid}</td>
+                    <td className="p-2 text-right">{currency(ticket)}</td>
+                    <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(s.updated_at)}</td>
+                    <td className="p-2">
+                      <button onClick={() => showHistory(s.date)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`snap-history-${s.date}`}>
+                        Histórico
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {history && <SnapshotHistoryModal history={history} onClose={() => setHistory(null)} />}
+    </div>
+  );
+}
+
+function SnapshotHistoryModal({ history, onClose }) {
+  const currency = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose} data-testid="snap-history-modal">
+      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-border flex items-center justify-between sticky top-0 bg-white z-10">
+          <div>
+            <h3 className="font-heading font-black text-lg">Histórico de atualizações · {history.date}</h3>
+            <p className="text-xs text-txt-secondary">Todos os envios que a Opery fez para este dia (do mais recente para o mais antigo)</p>
+          </div>
+          <button onClick={onClose} className="text-txt-secondary hover:text-brand-main text-xl">✕</button>
+        </div>
+        <div className="p-5">
+          {history.updates.length === 0 ? (
+            <div className="text-sm text-txt-secondary py-6 text-center">
+              Nenhum log detalhado encontrado (pode ter sido gravado antes da auditoria).
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {history.updates.map((u, i) => (
+                <div key={u.log_id} className={`border rounded-lg p-3 ${u.ok ? 'border-emerald-200 bg-emerald-50/40' : 'border-rose-200 bg-rose-50/40'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-bold text-txt-secondary">
+                      #{history.updates.length - i} · {formatDateTime(u.at)}
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${u.ok ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
+                      {u.ok ? 'OK' : 'ERRO'}
+                    </span>
+                  </div>
+                  {u.values ? (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      <div><div className="text-[10px] text-txt-secondary uppercase">Faturamento</div><div className="font-bold text-emerald-700">{currency(u.values.total_revenue)}</div></div>
+                      <div><div className="text-[10px] text-txt-secondary uppercase">Total pedidos</div><div className="font-bold">{currency(u.values.total_orders_value)}</div></div>
+                      <div><div className="text-[10px] text-txt-secondary uppercase">Qtd</div><div className="font-bold">{u.values.orders_count || 0}</div></div>
+                      <div><div className="text-[10px] text-txt-secondary uppercase">Pagos</div><div className="font-bold">{u.values.paid_orders_count || '—'}</div></div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-txt-secondary">Payload não disponível neste log</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+

@@ -1,6 +1,6 @@
 # Integração OxxPharma ↔ Opery Solutions
 
-**Versão:** 2.0 · **Data:** Fev/2026
+**Versão:** 2.0 · **Data:** Set/2026
 **Ambientes:** ambos rodam no mesmo servidor de produção, diferenciados apenas pela URL. O token de autenticação é o mesmo nos dois.
 
 Este documento descreve o contrato de integração entre o sistema **OxxPharma** (e-commerce online) e o **Opery Solutions** (ERP interno da loja física). A integração é bidirecional:
@@ -8,7 +8,7 @@ Este documento descreve o contrato de integração entre o sistema **OxxPharma**
 1. **Opery → OxxPharma** (Inbound): envio de **snapshots diários de faturamento** para consolidar o dashboard.
 2. **OxxPharma → Opery** (Outbound): envio de pedidos online pagos para emissão de NF-e.
 
-> ⚠️ **Mudança na v2.0** — Não enviamos mais pedido por pedido no inbound. O que a Opery precisa enviar agora é apenas **1 registro agregado por dia** (data, faturamento, valor total dos pedidos, quantidade). Dados de cliente/CPF/itens **não são mais necessários**.
+> ⚠️ O que a Opery precisa enviar inicialmente é o lote com **1 registro agregado por dia** (data, faturamento, valor total dos pedidos, quantidade) desde Jan/2026 até o dia atual. Dados de cliente/CPF/itens **não são necessários**. Após isso, enviar valores a cada atualização. Exemplo: 10/09/2026 - 
 
 ---
 
