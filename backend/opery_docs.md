@@ -297,23 +297,4 @@ Com body:
 
 ---
 
-## 8. Endpoints admin (uso interno OxxPharma)
-
-| Método | Rota | Descrição |
-|---|---|---|
-| GET | `/api/admin/opery/dashboard` | KPIs consolidados |
-| GET | `/api/admin/opery/snapshots` | Listagem paginada dos snapshots diários |
-| GET | `/api/admin/opery/inbound-log` | Logs de recebimento (auditoria) |
-| GET | `/api/admin/opery/dispatch-log` | Logs de envio p/ Opery |
-| POST | `/api/admin/opery/dispatch/retry` | Reprocessa envios que falharam |
-| POST | `/api/admin/opery/dispatch/{order_id}` | Dispara manualmente 1 pedido |
-| GET/PUT | `/api/admin/opery/config` | Ler/salvar configuração (URLs sandbox/produção, token, ambiente ativo) |
-
----
-
-## 9. Contatos
-
-- **OxxPharma (integração):** _(preencher)_
-- **Opery (integração):** _(preencher)_
-
 _Fim do documento._
