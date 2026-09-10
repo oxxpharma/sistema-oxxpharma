@@ -6,9 +6,9 @@ import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 
 const NETWORK_OPTIONS = [
-  { value: 'customer', label: 'Cliente' },
-  { value: 'network_1', label: 'Equipe 1 (Corporativa)' },
-  { value: 'network_2', label: 'Equipe 2 (Propagandista)' },
+  { value: 'customer', label: 'Cliente (Indicação)' },
+  { value: 'network_1', label: 'Rede 1 (Corporativa)' },
+  { value: 'network_2', label: 'Rede 2 (Propagandistas)' },
 ];
 const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
@@ -51,6 +51,7 @@ export default function UserCreateModal({ onClose, onCreated }) {
     profile_id: null,
     status: 'active',
     network_type: 'customer',
+    networks: ['customer'],
     network_sponsor_id: '',
     sponsor_code: '',
     pix_key: '', pix_key_type: '',
@@ -166,10 +167,33 @@ export default function UserCreateModal({ onClose, onCreated }) {
             <Select label="Status" value={form.status} onChange={(v) => set('status', v)} options={STATUS_OPTIONS} testId="create-status" />
           </Section>
 
-          {/* Equipe */}
-          <Section title="Equipe / Indicação">
-            <Select label="Equipe" value={form.network_type} onChange={(v) => set('network_type', v)} options={NETWORK_OPTIONS} testId="create-network" />
-            <Field label="ID do líder na rede Equipe" value={form.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v)} testId="create-network-sponsor" placeholder="user_xxx" />
+          {/* Redes */}
+          <Section title="Redes / Indicação">
+            <div className="col-span-2">
+              <label className="text-xs font-semibold block mb-2">Redes do usuário (pode participar de mais de uma)</label>
+              <div className="flex flex-wrap gap-2" data-testid="create-networks">
+                {NETWORK_OPTIONS.map(opt => {
+                  const nets = form.networks && form.networks.length ? form.networks : [form.network_type];
+                  const checked = nets.includes(opt.value);
+                  return (
+                    <label key={opt.value}
+                      className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition ${checked ? 'bg-brand-main/10 border-brand-main text-brand-main' : 'bg-white border-border hover:border-brand-main/50'}`}
+                      data-testid={`create-network-${opt.value}`}>
+                      <input type="checkbox" checked={checked} onChange={() => {
+                        const cur = new Set(nets);
+                        if (cur.has(opt.value)) cur.delete(opt.value); else cur.add(opt.value);
+                        if (cur.size === 0) cur.add('customer');
+                        const arr = [...cur];
+                        setForm(prev => ({ ...prev, networks: arr, network_type: arr[0] }));
+                      }} className="accent-brand-main" />
+                      <span className="text-sm font-semibold">{opt.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="text-[11px] text-txt-secondary mt-1">A primeira rede marcada é a principal.</div>
+            </div>
+            <Field label="ID do líder na rede" value={form.network_sponsor_id} onChange={(v) => set('network_sponsor_id', v)} testId="create-network-sponsor" placeholder="user_xxx" />
             <Field label="Código do patrocinador (referral)" value={form.sponsor_code} onChange={(v) => set('sponsor_code', v.toUpperCase())} testId="create-sponsor-code" placeholder="ABC123" />
           </Section>
 

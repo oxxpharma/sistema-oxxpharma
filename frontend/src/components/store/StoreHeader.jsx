@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network, Award } from 'lucide-react';
+import { ShoppingCart, User, Search, Menu, X, LogOut, Package, MapPin, Share2, LayoutDashboard, Network, Award, Building2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { useReferral } from '../../contexts/RefContext';
@@ -10,10 +10,14 @@ import BrandLogo from '../branding/BrandLogo';
 
 export default function StoreHeader() {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
-  // Mostra "Minha rede" só para usuarios que pertencem a alguma rede Equipe
-  // (network_1 corporativa, network_2 propagandista, ou admin pra inspeção).
-  const networkType = user?.network_type;
-  const showMyNetwork = isAuthenticated && (isAdmin || (networkType && networkType !== 'customer'));
+  // Iter 68: Determina redes que o usuario participa (array networks OU legado network_type)
+  const userNetworks = Array.isArray(user?.networks) && user.networks.length
+    ? user.networks
+    : [user?.network_type].filter(Boolean);
+  const isPropagandista = userNetworks.includes('network_2');
+  const inMmnNetwork = userNetworks.some(n => n === 'network_1' || n === 'network_2');
+  const showMyNetwork = isAuthenticated && (isAdmin || inMmnNetwork);
+  const showPropagandistaArea = isAuthenticated && (isAdmin || isPropagandista);
   const { cart } = useCart();
   const { refName } = useReferral();
   const navigate = useNavigate();
@@ -100,7 +104,12 @@ export default function StoreHeader() {
                     </Link>
                     {showMyNetwork && (
                       <Link to="/minha-rede" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="my-network-link">
-                        <Network className="w-4 h-4" /> Minha Equipe
+                        <Network className="w-4 h-4" /> Minha Rede
+                      </Link>
+                    )}
+                    {showPropagandistaArea && (
+                      <Link to="/propagandista/empresas" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-bg-secondary" onClick={() => setMenuOpen(false)} data-testid="propagandista-empresas-link">
+                        <Building2 className="w-4 h-4" /> Minhas Empresas
                       </Link>
                     )}
                     {isAdmin && (
@@ -160,7 +169,8 @@ export default function StoreHeader() {
                 <Link to="/minha-conta" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha conta</Link>
                 <Link to="/meus-pedidos" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Meus pedidos</Link>
                 <Link to="/indique-ganhe" className="block py-2 text-sm text-brand-main font-semibold" onClick={() => setMobileOpen(false)}>{settings?.referral_menu_label || 'Indique e ganhe benefícios'}</Link>
-                {showMyNetwork && <Link to="/minha-rede" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha Equipe</Link>}
+                {showMyNetwork && <Link to="/minha-rede" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minha Rede</Link>}
+                {showPropagandistaArea && <Link to="/propagandista/empresas" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Minhas Empresas</Link>}
                 {isAdmin && <Link to="/backoffice" className="block py-2 text-sm" onClick={() => setMobileOpen(false)}>Painel Admin</Link>}
                 <button onClick={async () => { await logout(); setMobileOpen(false); navigate('/'); }} className="block w-full text-left py-2 text-sm text-red-600">Sair</button>
               </div>

@@ -8242,6 +8242,12 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
     if role not in ("customer", "comercial", "financeiro", "estoque", "admin", "super_admin"):
         raise HTTPException(status_code=400, detail="Papel invalido")
     network_type = body.get("network_type") or NETWORK_CUSTOMER
+    # Iter 68: multi-rede
+    networks_in = body.get("networks")
+    networks = _normalize_networks(networks_in, fallback=network_type)
+    if network_type not in networks and network_type in _VALID_NETWORKS:
+        networks = [network_type] + networks
+    network_type = networks[0] if networks else NETWORK_CUSTOMER
 
     # Sponsor por codigo (opcional)
     sponsor_id = body.get("sponsor_id") or None
@@ -8280,6 +8286,7 @@ async def admin_create_user(request: Request, user: dict = Depends(require_admin
         "sponsor_id": sponsor_id,
         "sponsor_code": sponsor_code_norm or (body.get("sponsor_code") or None),
         "network_type": network_type,
+        "networks": networks,
         "network_sponsor_id": body.get("network_sponsor_id") or None,
         "category_ids": list(body.get("category_ids") or []),
         "created_at": now_iso(),

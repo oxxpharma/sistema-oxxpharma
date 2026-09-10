@@ -76,6 +76,7 @@ import CompanyReports from './pages/company/CompanyReports';
 import CompanyMonthlyClosing from './pages/company/CompanyMonthlyClosing';
 import PropagandistaLayout from './layouts/PropagandistaLayout';
 import PropagandistaDashboard from './pages/propagandista/PropagandistaDashboard';
+import PropagandistaCompanies from './pages/propagandista/PropagandistaCompanies';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminOpery from './pages/backoffice/AdminOpery';
 import OperyDocs from './pages/OperyDocs';
@@ -216,7 +217,7 @@ function AppRoutes() {
       <Route path="/propagandista" element={<Guard requireAuth><PropagandistaLayout /></Guard>}>
         <Route index element={<PropagandistaDashboard />} />
         <Route path="comissoes" element={<PropagandistaDashboard />} />
-        <Route path="empresas" element={<PropagandistaDashboard />} />
+        <Route path="empresas" element={<PropagandistaCompanies />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

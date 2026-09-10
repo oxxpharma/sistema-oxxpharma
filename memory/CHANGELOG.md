@@ -467,3 +467,17 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 - Novo endpoint `GET/PUT /api/admin/network-top-leaders` — armazena o "líder do topo" de cada rede em `platform_settings`.
 - Nova UI na tela `/backoffice/redes`: card destacado com ícone de coroa mostrando o Topo da Rede atual, botões Alterar/Remover, busca de usuário com autocomplete. Se o usuário escolhido não estiver na rede, é adicionado automaticamente ao array.
 - Base pronta pra Entrega 2 (comissões 3-gen + desconto empresa).
+
+## 2026-02-10 · Iter 68.2 · Convênio Entrega 2 — Comissões 3-gen + Propagandista Area + CI/CD
+- **Comissões multinivel refeitas** em `convenio_routes.py::create_propagandista_commissions_for_order`:
+  - Compra do FUNCIONÁRIO → Empresa 15% (Gen1) · Propagandista 5% (Gen2) · Líder da Rede 2 1% (Gen3)
+  - Compra da EMPRESA (usuário representante) → Propagandista 15% (Gen1) · Líder 5% (Gen2)
+  - Sem propagandista configurado = não emite nada (retido)
+  - Split legado propagandista↔empresa REMOVIDO
+- Novos campos em `companies`: `representative_user_id` + `employee_discount_pct` (0-15). Se preenchido, sai do checkout do funcionário como desconto automático e reduz comissão da empresa no mesmo %.
+- `get_employee_context` retorna agora `discount_percent = base + employee_discount_pct` (aplicado automaticamente no pricing engine).
+- **UserCreateModal**: dropdown "Equipe" trocado por 3 checkboxes multi-rede (mesmo padrão do UserEditModal).
+- **StoreHeader**: menu do usuário mostra "Minha Rede" (todos MMN) + **"Minhas Empresas"** apenas para Rede 2 (propagandistas). Diferenciação via `user.networks.includes('network_2')`.
+- Nova página `/propagandista/empresas` (`PropagandistaCompanies.jsx`) com KPIs, lista de empresas, quadro explicativo das regras.
+- Endpoints `/api/propagandista/*` agora aceitam qualquer usuário com `network_2` na array `networks` (não exige role específica).
+- **CI/CD GitHub Actions** em `.github/workflows/deploy.yml`: no push pra main faz build do frontend (React), valida sintaxe do backend, monta bundle e envia via rsync+SSH pro servidor, reinicia supervisor e faz healthcheck. Precisa configurar secrets: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`, `SSH_PORT`, `DEPLOY_PATH`, `REACT_APP_BACKEND_URL`.

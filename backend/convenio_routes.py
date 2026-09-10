@@ -50,7 +50,9 @@ class CompanyCreate(BaseModel):
     payroll_limit_percent: float = 35.0  # % max do salario (lei brasileira: 35% incluindo consignados)
     # Comissoes
     propagandista_id: Optional[str] = None    # user_id do propagandista responsavel
-    commission_company_percent: float = 0.0   # % que a empresa recebe (deduzida do propagandista)
+    commission_company_percent: float = 0.0   # (legado) split - nao usado mais na nova comissao 3-gen
+    representative_user_id: Optional[str] = None  # Iter 68: user_id que representa a empresa (compra da empresa)
+    employee_discount_pct: float = 0.0        # Iter 68: % da comissao da empresa que vira desconto p/ funcionarios (0-15)
     # Documentos/Notas
     contract_url: Optional[str] = None
     notes: Optional[str] = None
@@ -70,6 +72,8 @@ class CompanyUpdate(BaseModel):
     payroll_limit_percent: Optional[float] = None
     propagandista_id: Optional[str] = None
     commission_company_percent: Optional[float] = None
+    representative_user_id: Optional[str] = None
+    employee_discount_pct: Optional[float] = None
     contract_url: Optional[str] = None
     notes: Optional[str] = None
     active: Optional[bool] = None
@@ -635,6 +639,9 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
         {"_id": 0, "amount": 1},
     ).to_list(1000)
     open_total = round(sum(float(c.get("amount", 0)) for c in charges), 2)
+    base_disc = float(company.get("discount_percent") or 0.0)
+    extra_disc = float(company.get("employee_discount_pct") or 0.0)
+    effective_disc = round(base_disc + extra_disc, 2)
     return {
         "employee_id": emp["employee_id"],
         "employee_name": emp.get("name"),
@@ -642,7 +649,9 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
         "company_name": company.get("name"),
         # Iter 66.3: NAO exponho o salario ao frontend (privacidade). Fica so no admin.
         "position": emp.get("position"),
-        "discount_percent": float(company.get("discount_percent") or 0.0),
+        "discount_percent": effective_disc,  # Iter 68: soma base + extra
+        "base_discount_pct": base_disc,
+        "employee_discount_pct": extra_disc,  # Iter 68: cedido da comissao da empresa
         "discount_max_units": company.get("discount_max_units"),
         "payroll_enabled": bool(company.get("payroll_enabled")),
         "payroll_limit_percent": limit_pct,
@@ -745,10 +754,22 @@ class PropagandistaCommissionQuery(BaseModel):
     end_date: Optional[str] = None
 
 
+def _is_propagandista_user(user: dict) -> bool:
+    """Iter 68: usuario e propagandista se role=propagandista, se tem network_2 nas redes ou se e admin."""
+    if user.get("role") in ("propagandista", "admin", "super_admin"):
+        return True
+    nets = user.get("networks")
+    if isinstance(nets, list) and "network_2" in nets:
+        return True
+    if user.get("network_type") == "network_2":
+        return True
+    return False
+
+
 @router.get("/propagandista/me")
 async def propagandista_me(request: Request, user: dict = Depends(_current_user_lazy)):
     """Retorna dados do propagandista logado + empresas vinculadas."""
-    if user.get("role") not in ("propagandista", "admin", "super_admin"):
+    if not _is_propagandista_user(user):
         raise HTTPException(status_code=403, detail="Acesso restrito a Propagandistas")
     db = request.app.db
     companies = await db.companies.find({"propagandista_id": user["user_id"]}, {"_id": 0}).to_list(500)
@@ -765,7 +786,7 @@ async def propagandista_me(request: Request, user: dict = Depends(_current_user_
 async def propagandista_commissions(request: Request, month: Optional[str] = None,
                                     user: dict = Depends(_current_user_lazy)):
     """Lista comissoes do propagandista (gen1 + gen2) para um mes YYYY-MM (default: atual)."""
-    if user.get("role") not in ("propagandista", "admin", "super_admin"):
+    if not _is_propagandista_user(user):
         raise HTTPException(status_code=403, detail="Acesso restrito a Propagandistas")
     db = request.app.db
     if not month:
@@ -778,8 +799,19 @@ async def propagandista_commissions(request: Request, month: Optional[str] = Non
 
 
 async def create_propagandista_commissions_for_order(db, order: Dict):
-    """Cria comissoes de propagandista (gen1 e gen2) para uma order paga.
-    Chamado a partir de mark_order_paid. Idempotente (sem duplicar por order_id)."""
+    """Iter 68: Cria comissoes do Convenio para uma order paga.
+
+    Regra multinivel (3 geracoes):
+      - Compra do FUNCIONARIO   -> Empresa 15%, Propagandista 5%, Lider 1%
+      - Compra da EMPRESA (usuario representante) -> Propagandista 15%, Lider 5%
+
+    Se a empresa nao tem propagandista configurado: nao emite nada (fica retido).
+    Se a empresa optou por conceder desconto ao funcionario (`employee_discount_pct`),
+    esse valor JA foi aplicado como desconto no checkout e a comissao da empresa
+    fica reduzida pelo mesmo %.
+
+    Chamado a partir de mark_order_paid. Idempotente por order_id.
+    """
     order_id = order.get("order_id")
     user_id = order.get("user_id")
     if not order_id or not user_id:
@@ -788,63 +820,139 @@ async def create_propagandista_commissions_for_order(db, order: Dict):
     exists = await db.propagandista_commissions.count_documents({"order_id": order_id})
     if exists:
         return
-    # 1) usuario e funcionario de alguma empresa?
+
+    # 1) usuario e representante de alguma empresa? (compra da empresa)
+    company_by_rep = await db.companies.find_one(
+        {"representative_user_id": user_id, "active": True}, {"_id": 0}
+    )
+    if company_by_rep:
+        await _emit_convenio_commissions(db, order, company_by_rep, actor="company")
+        return
+
+    # 2) usuario e funcionario de alguma empresa? (compra do funcionario)
     emp = await db.company_employees.find_one({"user_id": user_id, "active": True}, {"_id": 0})
-    if not emp:
-        # 2) o sponsor dele e funcionario? (gen2 — indicacao do funcionario)
-        sponsor_id = order.get("sponsor_id") or order.get("affiliate_id")
-        if not sponsor_id:
-            return
-        sponsor_emp = await db.company_employees.find_one({"user_id": sponsor_id, "active": True}, {"_id": 0})
-        if not sponsor_emp:
-            return
-        company = await db.companies.find_one({"company_id": sponsor_emp["company_id"], "active": True}, {"_id": 0})
-        if not company or not company.get("propagandista_id"):
-            return
-        # gen2
-        _emit_commission(db, order, company, generation=2, employee_id=sponsor_emp["employee_id"])
-    else:
+    if emp:
         company = await db.companies.find_one({"company_id": emp["company_id"], "active": True}, {"_id": 0})
         if not company or not company.get("propagandista_id"):
             return
-        # gen1
-        await _emit_commission(db, order, company, generation=1, employee_id=emp["employee_id"])
+        await _emit_convenio_commissions(db, order, company, actor="employee", employee_id=emp["employee_id"])
 
 
-async def _emit_commission(db, order: Dict, company: Dict, generation: int, employee_id: str):
-    # base: subtotal (sem frete)
+async def _get_network_top_leader_id(db) -> Optional[str]:
+    """Retorna o user_id do topo da Rede 2 (propagandistas), ou None."""
+    doc = await db.platform_settings.find_one({"key": "network_top_leaders"}, {"_id": 0})
+    leaders = (doc or {}).get("value") or {}
+    return leaders.get("network_2")
+
+
+# Novos rates configuraveis (com defaults conforme conversa com o usuario)
+_DEFAULT_RATES = {
+    "employee_purchase": {"empresa": 15.0, "propagandista": 5.0, "leader": 1.0},
+    "company_purchase": {"propagandista": 15.0, "leader": 5.0},
+}
+
+
+async def _emit_convenio_commissions(db, order: Dict, company: Dict, actor: str, employee_id: Optional[str] = None):
+    """Emite as comissoes multinivel de acordo com quem comprou.
+
+    actor='employee' -> gen1=Empresa (15%), gen2=Propagandista (5%), gen3=Lider (1%)
+    actor='company'  -> gen1=Propagandista (15%), gen2=Lider (5%)
+    """
     base = float(order.get("subtotal") or 0)
     if base <= 0:
         return
-    # Taxa por geracao — usa comissao configurada globalmente do propagandista (default 8% gen1, 3% gen2)
     settings = await db.settings.find_one({}, {"_id": 0}) or {}
-    prop_rates = settings.get("propagandista_rates") or {}
-    rate_gen = float(prop_rates.get(f"gen{generation}") or (8.0 if generation == 1 else 3.0))
-    # empresa recebe split — sai da comissao do propagandista, limitado ao proprio rate
-    company_pct = min(float(company.get("commission_company_percent") or 0), rate_gen)
-    prop_pct = rate_gen - company_pct
-    prop_amount = round(base * prop_pct / 100, 2)
-    company_amount = round(base * company_pct / 100, 2)
+    rates_cfg = settings.get("convenio_rates") or _DEFAULT_RATES
+
+    propagandista_id = company.get("propagandista_id")
+    leader_id = await _get_network_top_leader_id(db)
     now = _now_iso()
-    doc = {
-        "commission_id": _gen_id("comm_"),
-        "order_id": order["order_id"],
-        "user_id": order.get("user_id"),
-        "generation": generation,
-        "company_id": company["company_id"],
-        "company_name": company.get("name"),
-        "employee_id": employee_id,
-        "propagandista_id": company.get("propagandista_id"),
-        "base_amount": base,
-        "rate_percent": rate_gen,
-        "company_split_percent": company_pct,
-        "amount": prop_amount,               # o que vai para o propagandista
-        "company_amount": company_amount,    # o que vai para a empresa
-        "status": "pending",                 # pending -> paid
-        "period_month": (order.get("paid_at") or now)[:7],
-        "created_at": now,
-    }
-    await db.propagandista_commissions.insert_one(doc)
+    period_month = (order.get("paid_at") or now)[:7]
+    company_id = company["company_id"]
+    company_name = company.get("name")
+
+    docs = []
+
+    if actor == "employee":
+        r = rates_cfg.get("employee_purchase", _DEFAULT_RATES["employee_purchase"])
+        # Desconto ao funcionario reduz a comissao da empresa
+        employee_disc_pct = float(company.get("employee_discount_pct") or 0)
+        empresa_pct = max(0.0, float(r.get("empresa", 15.0)) - employee_disc_pct)
+        prop_pct = float(r.get("propagandista", 5.0))
+        leader_pct = float(r.get("leader", 1.0))
+
+        docs.append({
+            "beneficiary_role": "empresa",
+            "beneficiary_id": company_id,
+            "generation": 1,
+            "rate_percent": empresa_pct,
+            "amount": round(base * empresa_pct / 100, 2),
+        })
+        if propagandista_id:
+            docs.append({
+                "beneficiary_role": "propagandista",
+                "beneficiary_id": propagandista_id,
+                "generation": 2,
+                "rate_percent": prop_pct,
+                "amount": round(base * prop_pct / 100, 2),
+            })
+        if leader_id:
+            docs.append({
+                "beneficiary_role": "leader",
+                "beneficiary_id": leader_id,
+                "generation": 3,
+                "rate_percent": leader_pct,
+                "amount": round(base * leader_pct / 100, 2),
+            })
+    elif actor == "company":
+        r = rates_cfg.get("company_purchase", _DEFAULT_RATES["company_purchase"])
+        prop_pct = float(r.get("propagandista", 15.0))
+        leader_pct = float(r.get("leader", 5.0))
+        if propagandista_id:
+            docs.append({
+                "beneficiary_role": "propagandista",
+                "beneficiary_id": propagandista_id,
+                "generation": 1,
+                "rate_percent": prop_pct,
+                "amount": round(base * prop_pct / 100, 2),
+            })
+        if leader_id:
+            docs.append({
+                "beneficiary_role": "leader",
+                "beneficiary_id": leader_id,
+                "generation": 2,
+                "rate_percent": leader_pct,
+                "amount": round(base * leader_pct / 100, 2),
+            })
+
+    if not docs:
+        return
+
+    for d in docs:
+        d.update({
+            "commission_id": _gen_id("comm_"),
+            "order_id": order["order_id"],
+            "user_id": order.get("user_id"),
+            "actor": actor,
+            "company_id": company_id,
+            "company_name": company_name,
+            "employee_id": employee_id,
+            "propagandista_id": propagandista_id,
+            "leader_id": leader_id,
+            "base_amount": base,
+            # legado (retrocompat com consultas antigas):
+            "amount": d["amount"],
+            "status": "pending",
+            "period_month": period_month,
+            "created_at": now,
+        })
+        await db.propagandista_commissions.insert_one(d)
+
+
+async def _emit_commission(db, order: Dict, company: Dict, generation: int, employee_id: str):
+    """(Deprecated) Mantido apenas p/ chamadas legadas — nao usar em codigo novo."""
+    actor = "employee" if generation == 1 else "company"
+    await _emit_convenio_commissions(db, order, company, actor=actor, employee_id=employee_id)
 
 
 # ==================== FECHAMENTO MENSAL + FATURAMENTO CONSOLIDADO ====================
