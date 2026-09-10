@@ -1,14 +1,11 @@
 # Integração OxxPharma ↔ Opery Solutions
 
-**Versão:** 2.0 · **Data:** Fev/2026
 **Ambientes:** ambos rodam no mesmo servidor de produção, diferenciados apenas pela URL. O token de autenticação é o mesmo nos dois.
 
 Este documento descreve o contrato de integração entre o sistema **OxxPharma** (e-commerce online) e o **Opery Solutions** (ERP interno da loja física). A integração é bidirecional:
 
 1. **Opery → OxxPharma** (Inbound): envio de **snapshots diários de faturamento** para consolidar o dashboard.
 2. **OxxPharma → Opery** (Outbound): envio de pedidos online pagos para emissão de NF-e.
-
-> ⚠️ **Mudança na v2.0** — Não enviamos mais pedido por pedido no inbound. O que a Opery precisa enviar agora é apenas **1 registro agregado por dia** (data, faturamento, valor total dos pedidos, quantidade). Dados de cliente/CPF/itens **não são mais necessários**.
 
 ---
 
@@ -40,7 +37,7 @@ Ambos os lados usam **API Key** (bearer token) trocada via header HTTP.
 
 ## 3. INBOUND — Opery envia snapshots diários de faturamento
 
-Este é o **fluxo principal** da integração. A Opery deve mandar **1 registro por dia** com os totais consolidados daquele dia.
+Este é o **fluxo principal** da integração. A Opery deve mandar **1 registro por dia** com os totais consolidados daquele dia. Não é necessário enviar dados de clientes, CPFs ou itens dos pedidos — apenas os totais agregados.
 
 ### 3.1 Endpoints (escolha o ambiente)
 
@@ -78,7 +75,7 @@ Aceita **1 snapshot** ou **lote** (recomendado para backfill/sync). Use `snapsho
 }
 ```
 
-#### Lote (recomendado para primeira carga histórica)
+#### Lote (recomendado para carga histórica)
 ```json
 {
   "snapshots": [
@@ -101,26 +98,32 @@ Aceita **1 snapshot** ou **lote** (recomendado para backfill/sync). Use `snapsho
 
 > **Ticket médio** é calculado internamente pela OxxPharma: `total_revenue / paid_orders_count`. Não precisa enviar.
 
-### 3.5 Idempotência e correção
+### 3.5 Comportamento idempotente
 
-- **Idempotente por `date`**: reenviar o mesmo dia **sobrescreve** o registro existente. Não duplica.
-- Se um valor foi lançado errado: basta reenviar o mesmo `date` com os valores corretos.
+- **Chave única: `date`.** Reenviar o mesmo dia **sobrescreve** o registro existente. Não duplica.
+- Se um valor foi lançado errado ou precisou ser recalculado: basta reenviar o mesmo `date` com os valores corretos.
+- Durante o dia, a Opery pode reenviar o snapshot do dia atual **quantas vezes quiser** — a cada envio, os valores no dashboard da OxxPharma são atualizados. Todo o rastro de atualizações fica registrado para auditoria.
 - Não há campo de "delete" — se um dia teve zero movimento, envie zeros explicitamente ou simplesmente não envie (fica ausente).
 
 ### 3.6 Carga inicial (backfill)
 
-Na primeira integração, envie o histórico completo de faturamento que a Opery tiver disponível (últimos X anos). Divida em lotes de até ~500 snapshots por request (~500 dias ≈ 1,3 anos por lote).
+**Na primeira integração, a Opery deve enviar o histórico completo desde 01/01/2025 até a data atual.**
 
-Exemplo de estratégia:
+Divida em lotes de até ~500 snapshots por request (~500 dias ≈ 1,3 anos por lote). Exemplo de estratégia:
+
 ```
-Lote 1: dias de 2024-01-01 até 2024-12-31 (365 snapshots)
-Lote 2: dias de 2025-01-01 até 2025-12-31 (365 snapshots)
-Lote 3: dias de 2026-01-01 até hoje
+Lote 1: 2025-01-01 → 2025-12-31 (365 snapshots)
+Lote 2: 2026-01-01 → data atual
 ```
 
-Depois da carga inicial, envie **1 snapshot por dia** (ou reenvie o dia atual várias vezes conforme os valores forem sendo atualizados durante o dia).
+### 3.7 Envios contínuos (após o backfill)
 
-### 3.7 Resposta
+Depois da carga inicial, a Opery deve enviar os valores **sempre que houver atualização**, seguindo estas duas estratégias combinadas:
+
+- **Realtime durante o dia**: sempre que os totais forem atualizados no ERP (novo pedido registrado, pagamento confirmado, etc.), reenvie o snapshot do dia atual com os valores atualizados. A idempotência por `date` garante que não duplica.
+- **Fechamento diário**: rode um job à meia-noite (America/Sao_Paulo) reenviando o snapshot **do dia anterior** já consolidado, para fixar os valores finais.
+
+### 3.8 Resposta
 
 ```json
 { "received": 3, "created": 2, "updated": 1, "errors": [] }
@@ -131,7 +134,7 @@ Depois da carga inicial, envie **1 snapshot por dia** (ou reenvie o dia atual v�
 - `400`: body inválido (ausência de `snapshot`/`snapshots` ou `date` faltando).
 - `401`: `X-Opery-Api-Key` inválido ou ausente.
 
-### 3.8 Health check
+### 3.9 Health check
 
 Use antes de enviar dados para validar chave e conectividade.
 
@@ -145,11 +148,6 @@ Resposta:
 ```json
 { "ok": true, "message": "Autenticado.", "environment": "sandbox" }
 ```
-
-### 3.9 Frequência recomendada
-
-- **Diária**: rode um job à meia-noite (America/Sao_Paulo) que envia o snapshot **do dia anterior** (fechado).
-- **Realtime opcional**: durante o dia, reenvie o snapshot do dia atual a cada X minutos com os valores parciais atualizados (a idempotência por data garante que não duplica).
 
 ---
 
@@ -290,10 +288,10 @@ Com body:
 
 - [ ] Receber o token único da OxxPharma (canal seguro).
 - [ ] Testar em **sandbox** via `POST /api/opery/sandbox/webhook/health`.
-- [ ] Levantar desde qual data existem valores históricos disponíveis no ERP.
-- [ ] Enviar **carga inicial (backfill)** em lotes para o sandbox — validar no dashboard.
-- [ ] Após homologação, apontar para o endpoint **produção** e enviar backfill lá.
-- [ ] Configurar job diário que envia o snapshot do dia anterior (recomendado à 00:15 BRT).
+- [ ] Enviar **carga inicial (backfill)** cobrindo o período **01/01/2025 até a data atual** em lotes no sandbox — validar no dashboard.
+- [ ] Após homologação, apontar para o endpoint **produção** e enviar o backfill lá também.
+- [ ] Implementar envio contínuo: reenviar o snapshot do dia atual sempre que os valores forem atualizados no ERP.
+- [ ] Configurar job diário à meia-noite (BRT) que reenvia o snapshot do dia anterior já consolidado.
 - [ ] **Fase 2:** Expor endpoint POST (sandbox + produção) que aceite o payload de "pedido pago" (seção 4) e emita NF-e.
 - [ ] **Fase 2:** Fornecer 2 URLs (sandbox + produção) e o token único para OxxPharma configurar.
 
@@ -313,13 +311,7 @@ Com body:
 
 ---
 
-## 9. Endpoint legado (compatibilidade)
-
-O endpoint antigo `POST /api/opery/webhook/sales` (envio pedido-por-pedido) **ainda funciona**, mas não é mais recomendado. Prefira usar `/webhook/revenue` no novo modelo agregado.
-
----
-
-## 10. Contatos
+## 9. Contatos
 
 - **OxxPharma (integração):** _(preencher)_
 - **Opery (integração):** _(preencher)_
