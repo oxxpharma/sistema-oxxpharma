@@ -38,6 +38,8 @@ import network_suppression_service
 import convenio_routes
 import warranty_bonus_routes
 import twofa_routes
+import opery_service
+import opery_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -471,6 +473,7 @@ async def lifespan(app: FastAPI):
     await app.db.users.create_index("cpf_digits", sparse=True)
     await igvd_service.ensure_indexes(app.db)
     await network_suppression_service.ensure_indexes(app.db)
+    await opery_service.ensure_indexes(app.db)
     # Iter 62 (SEO): backfill de slugs em categorias/subcategorias que ainda nao tem
     try:
         async for c in app.db.categories.find({"$or": [{"slug": None}, {"slug": {"$exists": False}}, {"slug": ""}]}, {"_id": 0, "category_id": 1, "name": 1}):
@@ -659,6 +662,11 @@ warranty_bonus_routes.register_warranty_bonus_routes(app, {
 # ==================== 2FA por email (Iter 66.4) ====================
 twofa_routes.register_2fa_routes(app, {
     "create_token": create_token,
+})
+
+# ==================== OPERY (Iter 67 - ERP Loja Fisica) ====================
+opery_routes.register_opery_routes(app, {
+    "require_admin": require_admin,
 })
 
 
@@ -4637,6 +4645,9 @@ async def mark_order_paid(db, order_id: str, payment_id: Optional[str] = None, s
     # Fatura detalhada para email configurado no admin
     if final and order_user:
         asyncio.create_task(_send_admin_invoice_if_configured(db, final, order_user))
+    # Iter 67: dispara pedido pago para a Opery (ERP) — outbound assincrono
+    if final:
+        opery_service.schedule_outbound(db, final)
     return final
 
 

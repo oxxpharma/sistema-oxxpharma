@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
+  PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
@@ -11,7 +11,7 @@ import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilte
 import {
   Users, ShoppingBag, DollarSign, TrendingUp, TrendingDown,
   Loader2, ArrowRight, Trophy, Award, Receipt, CircleDollarSign,
-  Package,
+  Package, Store, Globe, Sigma, Store as StoreIcon,
 } from 'lucide-react';
 
 const STATUS = {
@@ -28,9 +28,18 @@ const NETWORK_BADGE = {
   customer: { label: 'Cliente', variant: 'default' },
 };
 
+const TABS = [
+  { key: 'online', label: 'Vendas Online', icon: Globe },
+  { key: 'presencial', label: 'Vendas Presenciais', icon: StoreIcon },
+  { key: 'total', label: 'Total Consolidado', icon: Sigma },
+];
+
 export default function AdminDashboard() {
   const [data, setData] = useState(null);
+  const [operyData, setOperyData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('online');
+  const [chartMode, setChartMode] = useState('separate'); // separate | combined (aba total)
   const initial = getCurrentMonthRange();
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
@@ -41,9 +50,13 @@ export default function AdminDashboard() {
       const q = new URLSearchParams();
       if (s) q.set('start', s);
       if (e) q.set('end', e);
-      const url = q.toString() ? `/api/admin/dashboard?${q}` : '/api/admin/dashboard';
-      const d = await api.get(url);
+      const qs = q.toString();
+      const [d, op] = await Promise.all([
+        api.get(qs ? `/api/admin/dashboard?${qs}` : '/api/admin/dashboard'),
+        api.get(qs ? `/api/admin/opery/dashboard?${qs}` : '/api/admin/opery/dashboard').catch(() => null),
+      ]);
       setData(d);
+      setOperyData(op);
     } finally {
       setLoading(false);
     }
@@ -60,7 +73,6 @@ export default function AdminDashboard() {
   }
   if (!data) return null;
 
-  const wc = data.weekly_comparison || {};
   const hasFilter = !!(start || end);
   const clearFilter = () => { setStart(''); setEnd(''); load('', ''); };
   const setQuickRange = (days) => {
@@ -83,7 +95,6 @@ export default function AdminDashboard() {
               : 'Visão geral da operação'}
           </p>
         </div>
-        {/* Iter 41: filtro de range de data · Iter 49: default = mes atual + presets mes/intervalo */}
         <div className="flex flex-wrap items-end gap-2" data-testid="dashboard-period-filter">
           <PeriodFilter
             value={{ start, end }}
@@ -100,7 +111,50 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Linha 1: 4 KPIs principais */}
+      {/* TABS */}
+      <div className="flex flex-wrap gap-2 border-b border-border" data-testid="dashboard-tabs">
+        {TABS.map(t => {
+          const Icon = t.icon;
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 -mb-px text-sm font-semibold border-b-2 transition ${
+                active
+                  ? 'border-brand-main text-brand-main'
+                  : 'border-transparent text-txt-secondary hover:text-txt-primary'
+              }`}
+              data-testid={`tab-${t.key}`}
+            >
+              <Icon className="w-4 h-4" />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === 'online' && <OnlineTab data={data} />}
+      {tab === 'presencial' && <PresencialTab data={operyData} loading={loading} />}
+      {tab === 'total' && (
+        <TotalTab
+          online={data}
+          opery={operyData}
+          chartMode={chartMode}
+          onChartModeChange={setChartMode}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============ ABA VENDAS ONLINE ============ */
+
+function OnlineTab({ data }) {
+  const wc = data.weekly_comparison || {};
+  return (
+    <div className="space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiBig
           icon={DollarSign}
@@ -135,7 +189,6 @@ export default function AdminDashboard() {
         />
       </div>
 
-      {/* Linha 2: Receita por dia (chart) + Status pie */}
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl border border-border p-5 lg:col-span-2" data-testid="revenue-chart-card">
           <div className="flex items-center justify-between mb-3">
@@ -148,61 +201,16 @@ export default function AdminDashboard() {
               <div className="font-heading font-black text-lg">{formatCurrency(wc.current_revenue || 0)}</div>
             </div>
           </div>
-          <div style={{ width: '100%', height: 280 }}>
-            <ResponsiveContainer>
-              <LineChart data={data.revenue_by_day} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f97316" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(v) => v.slice(8, 10) + '/' + v.slice(5, 7)}
-                  tick={{ fontSize: 11, fill: '#94a3b8' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: '#94a3b8' }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}k` : v}
-                />
-                <Tooltip
-                  formatter={(val, name) => name === 'revenue' ? [formatCurrency(val), 'Receita'] : [val, 'Pedidos']}
-                  labelFormatter={(v) => v}
-                  contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="#f97316"
-                  strokeWidth={3}
-                  dot={false}
-                  activeDot={{ r: 5, fill: '#f97316' }}
-                  fill="url(#revGrad)"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <RevenueChart series={[{ key: 'revenue', label: 'Online', color: '#f97316', data: data.revenue_by_day }]} />
         </div>
-
         <StatusBreakdownCard items={data.orders_by_status} />
       </div>
 
-      {/* Linha 3: Top compradores + Top indicadores */}
       <div className="grid lg:grid-cols-2 gap-4">
         <TopBuyersCard items={data.top_buyers || []} />
         <TopAffiliatesCard items={data.top_affiliates || []} />
       </div>
-
-      {/* Iter 42o: Top 10 produtos vendidos */}
       <TopProductsCard items={data.top_products || []} />
-
-      {/* Linha 4: Cashbacks consolidadas + Pedidos recentes */}
       <div className="grid lg:grid-cols-3 gap-4">
         <CommissionsCard summary={data.commissions_summary || {}} />
         <RecentOrdersCard items={data.recent_orders || []} className="lg:col-span-2" />
@@ -211,7 +219,233 @@ export default function AdminDashboard() {
   );
 }
 
-/* ============ Componentes ============ */
+/* ============ ABA VENDAS PRESENCIAIS (Opery) ============ */
+
+function PresencialTab({ data, loading }) {
+  if (loading || !data) {
+    return (
+      <div className="flex items-center justify-center py-16" data-testid="opery-loading">
+        <Loader2 className="w-8 h-8 animate-spin text-brand-main" />
+      </div>
+    );
+  }
+  const hasData = (data.orders_count || 0) > 0;
+
+  return (
+    <div className="space-y-5" data-testid="presencial-tab">
+      {!hasData && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3" data-testid="opery-empty-state">
+          <Store className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <div className="font-semibold text-amber-900">Nenhuma venda presencial recebida ainda</div>
+            <div className="text-amber-800 mt-1">
+              A Opery ainda não enviou dados neste período. Confira a documentação de integração em{' '}
+              <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 font-mono text-xs">POST /api/opery/webhook/sales</code>.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiBig
+          icon={DollarSign}
+          label="Faturamento presencial"
+          value={formatCurrency(data.total_revenue || 0)}
+          hint={`${data.paid_orders_count || 0} pedidos pagos`}
+          accent
+          testId="opery-kpi-revenue"
+        />
+        <KpiBig
+          icon={ShoppingBag}
+          label="Valor total pedidos"
+          value={formatCurrency(data.total_orders_value || 0)}
+          hint="pagos + pendentes"
+          testId="opery-kpi-total-value"
+        />
+        <KpiBig
+          icon={Store}
+          label="Pedidos"
+          value={(data.orders_count || 0).toLocaleString('pt-BR')}
+          hint="loja física"
+          testId="opery-kpi-orders"
+        />
+        <KpiBig
+          icon={Receipt}
+          label="Ticket médio"
+          value={formatCurrency(data.avg_ticket || 0)}
+          hint="somente pagos"
+          testId="opery-kpi-ticket"
+        />
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl border border-border p-5 lg:col-span-2" data-testid="opery-revenue-chart">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="font-heading font-black text-lg">Faturamento presencial (últimos 30 dias)</h2>
+              <p className="text-xs text-txt-secondary">Vendas pagas registradas na Opery</p>
+            </div>
+          </div>
+          <RevenueChart series={[{ key: 'revenue', label: 'Presencial', color: '#0ea5e9', data: data.revenue_by_day || [] }]} />
+        </div>
+        <StatusBreakdownCard items={data.by_status || []} />
+      </div>
+    </div>
+  );
+}
+
+/* ============ ABA TOTAL CONSOLIDADO ============ */
+
+function TotalTab({ online, opery, chartMode, onChartModeChange }) {
+  const opRev = opery?.total_revenue || 0;
+  const opOrders = opery?.orders_count || 0;
+  const opPaidCount = opery?.paid_orders_count || 0;
+
+  const totalRevenue = (online.total_revenue || 0) + opRev;
+  const totalOrders = (online.total_orders || 0) + opOrders;
+  const totalPaidCount = (online.paid_orders || 0) + opPaidCount;
+  const totalTicket = totalPaidCount ? totalRevenue / totalPaidCount : 0;
+
+  // Junta series diarias por data
+  const combined = useMemo(() => {
+    const map = new Map();
+    (online.revenue_by_day || []).forEach(d => {
+      map.set(d.date, { date: d.date, online: d.revenue || 0, presencial: 0 });
+    });
+    (opery?.revenue_by_day || []).forEach(d => {
+      const cur = map.get(d.date) || { date: d.date, online: 0, presencial: 0 };
+      cur.presencial = d.revenue || 0;
+      map.set(d.date, cur);
+    });
+    const arr = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+    return arr.map(d => ({ ...d, total: (d.online || 0) + (d.presencial || 0) }));
+  }, [online.revenue_by_day, opery?.revenue_by_day]);
+
+  return (
+    <div className="space-y-5" data-testid="total-tab">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiBig
+          icon={DollarSign}
+          label="Faturamento consolidado"
+          value={formatCurrency(totalRevenue)}
+          hint={`Online + Presencial`}
+          accent
+          testId="total-kpi-revenue"
+        />
+        <KpiBig
+          icon={Globe}
+          label="Online"
+          value={formatCurrency(online.total_revenue || 0)}
+          hint={`${online.paid_orders || 0} pedidos pagos`}
+          testId="total-kpi-online"
+        />
+        <KpiBig
+          icon={Store}
+          label="Presencial"
+          value={formatCurrency(opRev)}
+          hint={`${opPaidCount} pedidos pagos`}
+          testId="total-kpi-presencial"
+        />
+        <KpiBig
+          icon={Receipt}
+          label="Ticket médio geral"
+          value={formatCurrency(totalTicket)}
+          hint={`${totalPaidCount} pagos · ${totalOrders} totais`}
+          testId="total-kpi-ticket"
+        />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-border p-5" data-testid="total-chart-card">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <div>
+            <h2 className="font-heading font-black text-lg">Faturamento consolidado (últimos 30 dias)</h2>
+            <p className="text-xs text-txt-secondary">Comparativo Online × Presencial</p>
+          </div>
+          <div className="inline-flex bg-bg-secondary rounded-lg p-0.5 border border-border" data-testid="chart-mode-toggle">
+            <button
+              type="button"
+              onClick={() => onChartModeChange('separate')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${chartMode === 'separate' ? 'bg-white text-brand-main shadow-sm' : 'text-txt-secondary'}`}
+              data-testid="chart-mode-separate"
+            >
+              Separadas
+            </button>
+            <button
+              type="button"
+              onClick={() => onChartModeChange('combined')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${chartMode === 'combined' ? 'bg-white text-brand-main shadow-sm' : 'text-txt-secondary'}`}
+              data-testid="chart-mode-combined"
+            >
+              Somada
+            </button>
+          </div>
+        </div>
+        {chartMode === 'separate' ? (
+          <RevenueChart
+            series={[
+              { key: 'online', label: 'Online', color: '#f97316', data: combined },
+              { key: 'presencial', label: 'Presencial', color: '#0ea5e9', data: combined },
+            ]}
+            showLegend
+          />
+        ) : (
+          <RevenueChart
+            series={[{ key: 'total', label: 'Total consolidado', color: '#8b5cf6', data: combined }]}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============ Chart helper ============ */
+
+function RevenueChart({ series, showLegend = false }) {
+  // Todas as series devem ter o mesmo array de dados; usamos o primeiro
+  const first = series[0]?.data || [];
+  return (
+    <div style={{ width: '100%', height: 280 }}>
+      <ResponsiveContainer>
+        <LineChart data={first} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={(v) => v.slice(8, 10) + '/' + v.slice(5, 7)}
+            tick={{ fontSize: 11, fill: '#94a3b8' }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            tick={{ fontSize: 11, fill: '#94a3b8' }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+          />
+          <Tooltip
+            formatter={(val, name) => [formatCurrency(val), name]}
+            labelFormatter={(v) => v}
+            contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+          />
+          {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
+          {series.map((s) => (
+            <Line
+              key={s.key}
+              type="monotone"
+              dataKey={s.key}
+              name={s.label}
+              stroke={s.color}
+              strokeWidth={3}
+              dot={false}
+              activeDot={{ r: 5, fill: s.color }}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ============ Componentes reutilizados ============ */
 
 function KpiBig({ icon: Icon, label, value, deltaPct, deltaLabel, hint, accent = false, testId }) {
   const trendUp = (deltaPct ?? 0) > 0;
@@ -264,7 +498,6 @@ function StatusBreakdownCard({ items }) {
   const pieData = items.map((it, i) => ({
     name: STATUS[it.status]?.label || it.status,
     value: it.count,
-    color: STATUS[it.status]?.color?.replace('bg-', '') ? null : palette[i % palette.length],
     raw: it,
   }));
   return (
@@ -543,6 +776,3 @@ function TopProductsCard({ items }) {
     </div>
   );
 }
-
-
-/* Recent orders card */

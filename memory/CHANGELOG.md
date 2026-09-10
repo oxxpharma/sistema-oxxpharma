@@ -416,3 +416,13 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 
 ## Iter 1–15 (2025) — MVP
 - Auth, catálogo, carrinho, checkout, MMN base, gift cards, dashboards, cartão de benefícios via cron.
+
+## 2026-02-10 · Iter 67 · Integração Opery Solutions
+- Backend `opery_service.py` + `opery_routes.py` — recebe vendas presenciais do ERP e envia pedidos pagos para emissão de NF-e
+- Endpoints INBOUND: `POST /api/opery/webhook/sales` (autenticado por `X-Opery-Api-Key`) + `POST /api/opery/webhook/health`
+- Endpoints ADMIN: `/api/admin/opery/dashboard`, `/sales`, `/dispatch-log`, `/dispatch/retry`, `/dispatch/{order_id}`, `/config`
+- Idempotência via `opery_order_id` único; retry até 5x em outbound; fila `pending_config` quando `OPERY_OUTBOUND_URL` não estiver setado
+- Frontend `AdminDashboard.jsx` refatorado com 3 abas: **Vendas Online** · **Vendas Presenciais** · **Total Consolidado**
+- Toggle na aba Total Consolidado: gráfico Separadas (2 linhas Online/Presencial) ou Somada (1 linha)
+- Documentação completa para equipe Opery em `/app/memory/OPERY_INTEGRATION_SPEC.md`
+- ENV novos: `OPERY_WEBHOOK_SECRET`, `OPERY_OUTBOUND_URL`, `OPERY_OUTBOUND_TOKEN`
