@@ -77,6 +77,8 @@ import CompanyMonthlyClosing from './pages/company/CompanyMonthlyClosing';
 import PropagandistaLayout from './layouts/PropagandistaLayout';
 import PropagandistaDashboard from './pages/propagandista/PropagandistaDashboard';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
+import AdminOpery from './pages/backoffice/AdminOpery';
+import OperyDocs from './pages/OperyDocs';
 import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
 import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
@@ -148,6 +150,9 @@ function AppRoutes() {
       <Route path="/primeiro-acesso" element={<ResetPasswordPage mode="first_access" />} />
       <Route path="/primeiro-acesso-solicitar" element={<ForgotPasswordPage mode="first_access" />} />
 
+      {/* Documentação pública da API Opery */}
+      <Route path="/docs/opery" element={<OperyDocs />} />
+
       {/* BACKOFFICE (ADMIN) */}
       <Route path="/backoffice" element={<Guard requireAuth requireAdmin><BackofficeLayout /></Guard>}>
         <Route index element={<DashboardOrPedidos />} />
@@ -183,6 +188,7 @@ function AppRoutes() {
         <Route path="bonus-garantia" element={<AdminWarrantyBonus />} />
         <Route path="igvd" element={<AdminIgvd />} />
         <Route path="melhor-envio" element={<AdminMelhorEnvio />} />
+        <Route path="opery" element={<AdminOpery />} />
         <Route path="programa-aprovados" element={<AdminReferralApproved />} />
         <Route path="aparencia" element={<AdminAppearance />} />
         <Route path="perfis" element={<AdminRoles />} />

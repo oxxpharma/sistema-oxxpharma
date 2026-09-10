@@ -426,3 +426,14 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 - Toggle na aba Total Consolidado: gráfico Separadas (2 linhas Online/Presencial) ou Somada (1 linha)
 - Documentação completa para equipe Opery em `/app/memory/OPERY_INTEGRATION_SPEC.md`
 - ENV novos: `OPERY_WEBHOOK_SECRET`, `OPERY_OUTBOUND_URL`, `OPERY_OUTBOUND_TOKEN`
+
+## 2026-02-10 · Iter 67.1 · Opery — Config no DB + Página Admin + NF por XML
+- Credenciais Opery migradas do `.env` para MongoDB (`opery_settings`) via `PUT /api/admin/opery/config`. Fallback automático para `.env` mantido.
+- Nova página admin `/backoffice/opery` com 4 abas: **Configuração** (form + gerador de secret), **Endpoints** (URLs com copiar), **Logs Entrada** (auditoria inbound), **Logs Saída** (dispatch + reenvio individual).
+- Todos os webhooks inbound agora gravam em `opery_inbound_log` (headers mascarados, body, response, erros).
+- Modal de Pedido no admin ganhou seção **Sincronização Opery**: status visual (sincronizado/aguardando/falhou/nunca), botão Sincronizar, botão Log detalhado (payload + response), download DANFE (PDF) e XML bruto.
+- Callback assíncrono `POST /api/opery/webhook/nf-issued` para Opery avisar quando emitir NF-e.
+- Geração de DANFE via **`brazilfiscalreport`** consumindo XML NF-e padrão SEFAZ. Se XML fora do padrão, retorna HTTP 422 e frontend exibe aviso "PDF indisponível" + link XML bruto.
+- Página pública `/docs/opery` com documentação Markdown estilizada (react-markdown + remark-gfm), com base URL clicável e tabelas formatadas — link acessível de dentro da página admin.
+- Novos endpoints: `GET/PUT /api/admin/opery/config`, `GET /api/admin/opery/inbound-log`, `GET /api/admin/opery/dispatch-log/{order_id}`, `GET /api/admin/opery/order/{order_id}/nf-status|nf.pdf|nf.xml`, `GET /api/opery/docs-spec`.
+- Deps: `brazilfiscalreport==1.0.2`, `fpdf2==2.8.8`, `react-markdown@8`, `remark-gfm@3`.

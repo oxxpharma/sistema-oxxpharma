@@ -61,6 +61,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/bonus-garantia', icon: Award, label: 'Bônus de Garantia', testId: 'nav-warranty-bonus', perm: 'commercial' },
       { to: '/backoffice/igvd', icon: Ticket, label: 'IGVD · Vouchers', testId: 'nav-igvd', perm: 'integrations' },
       { to: '/backoffice/melhor-envio', icon: Truck, label: 'Melhor Envio', testId: 'nav-melhor-envio', perm: 'integrations' },
+      { to: '/backoffice/opery', icon: Store, label: 'Opery (ERP)', testId: 'nav-opery', perm: 'integrations' },
     ],
   },
   {

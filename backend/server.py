@@ -667,6 +667,8 @@ twofa_routes.register_2fa_routes(app, {
 # ==================== OPERY (Iter 67 - ERP Loja Fisica) ====================
 opery_routes.register_opery_routes(app, {
     "require_admin": require_admin,
+    "get_current_user": get_current_user,
+    "is_admin_level": _is_admin_level,
 })
 
 

@@ -16,9 +16,11 @@
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "8",
     "react-router-dom": "^6.20.0",
     "react-scripts": "5.0.1",
     "recharts": "^3.8.1",
+    "remark-gfm": "3",
     "sonner": "^1.2.4",
     "tailwind-merge": "^2.1.0"
   },

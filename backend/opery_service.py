@@ -50,11 +50,65 @@ def _gen_id(prefix: str = "opery_") -> str:
 
 
 def verify_webhook_key(provided: Optional[str]) -> bool:
-    """Compara chave enviada pela Opery no header com a env de forma segura."""
-    expected = os.environ.get("OPERY_WEBHOOK_SECRET") or ""
+    """Compara chave enviada pela Opery no header com a config (DB > env)."""
+    expected = _CONFIG_CACHE.get("webhook_secret") or os.environ.get("OPERY_WEBHOOK_SECRET") or ""
     if not expected or not provided:
         return False
     return hmac.compare_digest(provided.strip(), expected.strip())
+
+
+# ==================== CONFIG (DB) ====================
+
+_CONFIG_CACHE: Dict[str, Any] = {}
+_CONFIG_DOC_KEY = "opery_config"
+
+
+def _config_from_env() -> Dict[str, Any]:
+    return {
+        "webhook_secret": os.environ.get("OPERY_WEBHOOK_SECRET") or "",
+        "outbound_url": os.environ.get("OPERY_OUTBOUND_URL") or "",
+        "outbound_token": os.environ.get("OPERY_OUTBOUND_TOKEN") or "",
+        "docs_url": "/docs/opery",  # rota interna pública
+        "source": "env",
+    }
+
+
+async def load_config(db) -> Dict[str, Any]:
+    """Carrega config do DB (fallback env). Popula cache."""
+    doc = await db.opery_settings.find_one({"key": _CONFIG_DOC_KEY}, {"_id": 0})
+    if doc:
+        cfg = {
+            "webhook_secret": doc.get("webhook_secret") or os.environ.get("OPERY_WEBHOOK_SECRET") or "",
+            "outbound_url": doc.get("outbound_url") or os.environ.get("OPERY_OUTBOUND_URL") or "",
+            "outbound_token": doc.get("outbound_token") or os.environ.get("OPERY_OUTBOUND_TOKEN") or "",
+            "docs_url": doc.get("docs_url") or "/docs/opery",
+            "source": "db",
+            "updated_at": doc.get("updated_at"),
+            "updated_by": doc.get("updated_by"),
+        }
+    else:
+        cfg = _config_from_env()
+    _CONFIG_CACHE.update(cfg)
+    return cfg
+
+
+async def save_config(db, updates: Dict[str, Any], actor: Optional[str] = None) -> Dict[str, Any]:
+    """Salva config no DB. Somente atualiza campos presentes em `updates`."""
+    allowed = {"webhook_secret", "outbound_url", "outbound_token", "docs_url"}
+    payload = {k: v for k, v in updates.items() if k in allowed and v is not None}
+    payload["updated_at"] = _now_iso()
+    payload["updated_by"] = actor
+    await db.opery_settings.update_one(
+        {"key": _CONFIG_DOC_KEY},
+        {"$set": payload, "$setOnInsert": {"key": _CONFIG_DOC_KEY, "created_at": _now_iso()}},
+        upsert=True,
+    )
+    _CONFIG_CACHE.clear()
+    return await load_config(db)
+
+
+def get_cached_config() -> Dict[str, Any]:
+    return dict(_CONFIG_CACHE) if _CONFIG_CACHE else _config_from_env()
 
 
 # ==================== INDICES ====================
@@ -68,8 +122,33 @@ async def ensure_indexes(db):
         await db.opery_dispatch_log.create_index("order_id")
         await db.opery_dispatch_log.create_index("created_at")
         await db.opery_dispatch_log.create_index([("status", 1), ("next_retry_at", 1)])
+        await db.opery_settings.create_index("key", unique=True)
+        await db.opery_inbound_log.create_index("created_at")
     except Exception as e:
         logger.warning(f"opery_service.ensure_indexes falhou: {e}")
+    # popula cache de config na inicializacao
+    try:
+        await load_config(db)
+    except Exception as e:
+        logger.warning(f"opery_service.load_config falhou: {e}")
+
+
+async def log_inbound(db, kind: str, ok: bool, headers_sample: Dict[str, Any], body: Any, response: Any, error: Optional[str] = None):
+    """Grava log de requisicao inbound (auditoria). kind='sales'|'health'|'nf_callback'."""
+    try:
+        doc = {
+            "log_id": _gen_id("opin_"),
+            "kind": kind,
+            "ok": ok,
+            "headers": headers_sample,
+            "body": body,
+            "response": response,
+            "error": error,
+            "created_at": _now_iso(),
+        }
+        await db.opery_inbound_log.insert_one(doc)
+    except Exception as e:
+        logger.warning(f"opery.log_inbound falhou: {e}")
 
 
 # ==================== INBOUND (Opery -> OxxPharma) ====================
@@ -334,10 +413,18 @@ async def _post_to_opery(url: str, token: str, body: Dict[str, Any]) -> Dict[str
     }
     async with httpx.AsyncClient(timeout=DISPATCH_TIMEOUT_SEC) as client:
         resp = await client.post(url, json=body, headers=headers)
+        raw_text = resp.text or ""
+        rjson = None
+        try:
+            if "application/json" in (resp.headers.get("content-type") or ""):
+                rjson = resp.json()
+        except Exception:
+            rjson = None
         return {
             "status_code": resp.status_code,
-            "response_text": (resp.text or "")[:4000],
-            "response_json": (resp.json() if "application/json" in resp.headers.get("content-type", "") else None),
+            "response_text": raw_text[:20000],  # aumentado p/ suportar XML da NF
+            "response_headers": dict(resp.headers),
+            "response_json": rjson,
         }
 
 
@@ -362,8 +449,9 @@ async def dispatch_paid_order(db, order: Dict[str, Any]) -> Optional[Dict[str, A
     user = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) if order.get("user_id") else None
     payload = _build_outbound_payload(order, user)
 
-    outbound_url = os.environ.get("OPERY_OUTBOUND_URL")
-    outbound_token = os.environ.get("OPERY_OUTBOUND_TOKEN") or ""
+    cfg = await load_config(db)
+    outbound_url = cfg.get("outbound_url")
+    outbound_token = cfg.get("outbound_token") or ""
 
     if not outbound_url:
         # armazena payload para reprocessamento futuro
@@ -419,15 +507,26 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
 
         # se a Opery devolveu numero de NF, guardamos no pedido
         rjson = result.get("response_json") or {}
-        nf = rjson.get("nf_number") or rjson.get("invoice_number") or rjson.get("numero_nf")
-        if nf and ok:
+        # Extrai possiveis campos comuns
+        nf = rjson.get("nf_number") or rjson.get("invoice_number") or rjson.get("numero_nf") or rjson.get("nfe_number")
+        nf_pdf_url = rjson.get("nf_url") or rjson.get("pdf_url") or rjson.get("danfe_url")
+        nf_xml = rjson.get("nf_xml") or rjson.get("xml") or rjson.get("nfe_xml")
+        nf_chave = rjson.get("chave") or rjson.get("access_key") or rjson.get("nf_chave")
+
+        # Se retornou XML na resposta (texto ou base64), tenta detectar tambem no response_body plain-text
+        if not nf_xml and result.get("response_text") and result["response_text"].strip().startswith("<?xml"):
+            nf_xml = result["response_text"]
+
+        if ok and (nf or nf_xml or nf_pdf_url):
+            update: Dict[str, Any] = {"opery_nf_issued_at": _now_iso()}
+            if nf: update["opery_nf_number"] = str(nf)
+            if nf_pdf_url: update["opery_nf_pdf_url"] = nf_pdf_url
+            if nf_xml: update["opery_nf_xml"] = nf_xml
+            if nf_chave: update["opery_nf_chave"] = str(nf_chave)
             try:
-                await db.orders.update_one(
-                    {"order_id": order_id},
-                    {"$set": {"opery_nf_number": str(nf), "opery_nf_url": rjson.get("nf_url") or rjson.get("pdf_url"), "opery_nf_issued_at": _now_iso()}},
-                )
+                await db.orders.update_one({"order_id": order_id}, {"$set": update})
             except Exception as e:
-                logger.warning(f"opery: nao consegui gravar nf_number no order {order_id}: {e}")
+                logger.warning(f"opery: nao consegui gravar nf_* no order {order_id}: {e}")
 
         logger.info(f"opery.dispatch order={order_id} status={doc['status']} http={result['status_code']}")
         return doc
@@ -454,10 +553,11 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
 
 async def retry_failed_dispatches(db, limit: int = 20) -> Dict[str, Any]:
     """Reprocessa logs 'failed' ou 'pending_config'. Retorna contadores."""
-    outbound_url = os.environ.get("OPERY_OUTBOUND_URL")
-    outbound_token = os.environ.get("OPERY_OUTBOUND_TOKEN") or ""
+    cfg = await load_config(db)
+    outbound_url = cfg.get("outbound_url")
+    outbound_token = cfg.get("outbound_token") or ""
     if not outbound_url:
-        return {"success": 0, "failed": 0, "skipped": 0, "reason": "OPERY_OUTBOUND_URL nao configurado"}
+        return {"success": 0, "failed": 0, "skipped": 0, "reason": "outbound_url nao configurado"}
 
     cursor = db.opery_dispatch_log.find(
         {"status": {"$in": ["failed", "pending_config"]}, "attempts": {"$lt": DISPATCH_MAX_RETRIES}},

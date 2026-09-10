@@ -419,6 +419,9 @@ export default function AdminOrders() {
                 }} data-testid="issue-invoice-btn">Emitir nota de faturamento</Button>
               ) : null}
 
+              {/* Opery Sync section */}
+              <OperySyncSection order={selected} onRefresh={async () => { await load(page); const u = orders.find(x => x.order_id === selected.order_id); if (u) setSelected(u); }} />
+
               <div className="space-y-1 text-sm pt-3 border-t border-border">
                 <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(selected.subtotal)}</span></div>
                 <div className="flex justify-between"><span>Frete</span><span>{formatCurrency(selected.shipping_cost)}</span></div>
@@ -751,3 +754,167 @@ function FixOrderModal({ order, onClose, onSaved }) {
     </div>
   );
 }
+
+
+/* ============ OPERY SYNC SECTION ============ */
+function OperySyncSection({ order, onRefresh }) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const s = await api.get(`/api/admin/opery/order/${order.order_id}/nf-status`);
+      setStatus(s);
+    } catch (e) { /* silencioso */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [order.order_id]);
+
+  const sync = async () => {
+    setSyncing(true);
+    try {
+      const r = await api.post(`/api/admin/opery/dispatch/${order.order_id}`);
+      if (r.status === 'success') toast.success('Sincronizado com Opery');
+      else if (r.status === 'pending_config') toast.info('Enfileirado (URL da Opery não configurada)');
+      else toast.error(`Falhou: ${r.error || 'erro desconhecido'}`);
+      await load();
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+    finally { setSyncing(false); }
+  };
+
+  if (loading) return <div className="border border-border rounded-lg p-3 flex items-center justify-center"><Loader2 className="w-4 h-4 animate-spin" /></div>;
+  if (!status) return null;
+
+  const disp = status.dispatch || {};
+  const statusInfo = {
+    success: { label: 'Sincronizado', color: 'bg-emerald-50 border-emerald-200 text-emerald-800', badge: 'bg-emerald-500' },
+    failed: { label: 'Falhou', color: 'bg-rose-50 border-rose-200 text-rose-800', badge: 'bg-rose-500' },
+    pending_config: { label: 'Aguardando config', color: 'bg-amber-50 border-amber-200 text-amber-800', badge: 'bg-amber-500' },
+    never_dispatched: { label: 'Não sincronizado', color: 'bg-slate-50 border-slate-200 text-slate-700', badge: 'bg-slate-400' },
+  }[disp.status] || { label: disp.status || '—', color: 'bg-slate-50 border-slate-200 text-slate-700', badge: 'bg-slate-400' };
+
+  return (
+    <div className={`rounded-lg border p-3 ${statusInfo.color}`} data-testid="opery-sync-section">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Store className="w-4 h-4" />
+          <div>
+            <div className="text-sm font-bold flex items-center gap-2">
+              Sincronização Opery
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold text-white px-1.5 py-0.5 rounded ${statusInfo.badge}`}>
+                <span className="w-1 h-1 rounded-full bg-white" />
+                {statusInfo.label}
+              </span>
+            </div>
+            <div className="text-[11px] opacity-80">
+              {disp.attempts ? `${disp.attempts} tentativa${disp.attempts > 1 ? 's' : ''} · ` : ''}
+              {disp.updated_at ? formatDateTime(disp.updated_at) : 'Nunca disparado'}
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          {disp.status && disp.status !== 'never_dispatched' && (
+            <Button size="sm" variant="outline" onClick={() => setShowLog(true)} data-testid="opery-view-log">
+              <FileText className="w-3.5 h-3.5" /> Log
+            </Button>
+          )}
+          <Button size="sm" onClick={sync} disabled={syncing || order.payment_status !== 'paid'} data-testid="opery-sync-btn" title={order.payment_status !== 'paid' ? 'Só pedidos pagos podem ser sincronizados' : ''}>
+            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+            {disp.status === 'success' ? 'Reenviar' : 'Sincronizar'}
+          </Button>
+        </div>
+      </div>
+
+      {/* NF info */}
+      {(status.nf_number || status.has_xml) && (
+        <div className="mt-3 pt-3 border-t border-current border-opacity-20">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-xs">
+              {status.nf_number && <div><span className="font-bold">NF-e:</span> <span className="font-mono">{status.nf_number}</span></div>}
+              {status.nf_chave && <div className="opacity-80"><span className="font-bold">Chave:</span> <span className="font-mono text-[10px]">{status.nf_chave}</span></div>}
+              {status.nf_issued_at && <div className="opacity-80">Emitida em {formatDateTime(status.nf_issued_at)}</div>}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {status.pdf_available && (
+                <a href={`/api/admin/opery/order/${order.order_id}/nf.pdf`} target="_blank" rel="noreferrer"
+                   className="inline-flex items-center gap-1 h-8 px-3 rounded-lg bg-white border border-current border-opacity-40 text-xs font-bold hover:bg-current hover:text-white transition"
+                   data-testid="opery-nf-pdf">
+                  <Download className="w-3.5 h-3.5" /> DANFE (PDF)
+                </a>
+              )}
+              {status.has_xml && (
+                <a href={`/api/admin/opery/order/${order.order_id}/nf.xml`}
+                   className="inline-flex items-center gap-1 h-8 px-3 rounded-lg bg-white border border-current border-opacity-40 text-xs font-bold hover:bg-current hover:text-white transition"
+                   data-testid="opery-nf-xml">
+                  <Download className="w-3.5 h-3.5" /> XML
+                </a>
+              )}
+              {status.nf_pdf_url && !status.pdf_available && (
+                <a href={status.nf_pdf_url} target="_blank" rel="noreferrer"
+                   className="inline-flex items-center gap-1 h-8 px-3 rounded-lg bg-white border border-current border-opacity-40 text-xs font-bold hover:bg-current hover:text-white transition">
+                  <Download className="w-3.5 h-3.5" /> NF (Opery)
+                </a>
+              )}
+            </div>
+          </div>
+          {status.has_xml && !status.pdf_available && (
+            <div className="mt-2 text-[11px] text-amber-800 bg-amber-100 border border-amber-200 rounded px-2 py-1 inline-flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" /> PDF indisponível — XML fora do padrão SEFAZ. Baixe o XML bruto para inspeção.
+            </div>
+          )}
+        </div>
+      )}
+
+      {showLog && <OperyLogModal orderId={order.order_id} onClose={() => setShowLog(false)} />}
+    </div>
+  );
+}
+
+function OperyLogModal({ orderId, onClose }) {
+  const [log, setLog] = useState(null);
+  useEffect(() => {
+    api.get(`/api/admin/opery/dispatch-log/${orderId}`).then(setLog).catch(() => setLog({ error: 'sem log' }));
+  }, [orderId]);
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose} data-testid="opery-order-log-modal">
+      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b border-border flex items-center justify-between sticky top-0 bg-white z-10">
+          <div>
+            <h3 className="font-heading font-black text-lg">Log de sincronização com Opery</h3>
+            <div className="text-xs text-txt-secondary font-mono">{orderId}</div>
+          </div>
+          <button onClick={onClose} className="text-txt-secondary hover:text-brand-main text-xl">✕</button>
+        </div>
+        <div className="p-4 space-y-3 text-sm">
+          {!log ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+            <>
+              <div><span className="font-bold">Status:</span> {log.status}</div>
+              {log.attempts != null && <div><span className="font-bold">Tentativas:</span> {log.attempts}</div>}
+              {log.updated_at && <div><span className="font-bold">Última atualização:</span> {formatDateTime(log.updated_at)}</div>}
+              {log.error && <div className="bg-rose-50 border border-rose-200 rounded p-2 text-rose-800 text-xs"><b>Erro:</b> {log.error}</div>}
+              {log.response_status != null && <div><span className="font-bold">HTTP:</span> {log.response_status}</div>}
+              {log.payload && (
+                <details open>
+                  <summary className="cursor-pointer font-bold text-xs uppercase tracking-wider text-txt-secondary">Payload enviado</summary>
+                  <pre className="bg-slate-900 text-slate-100 text-[11px] p-3 rounded mt-1 overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">{JSON.stringify(log.payload, null, 2)}</pre>
+                </details>
+              )}
+              {(log.response_json || log.response_body) && (
+                <details open>
+                  <summary className="cursor-pointer font-bold text-xs uppercase tracking-wider text-txt-secondary">Resposta da Opery</summary>
+                  <pre className="bg-slate-900 text-slate-100 text-[11px] p-3 rounded mt-1 overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">{log.response_json ? JSON.stringify(log.response_json, null, 2) : log.response_body}</pre>
+                </details>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
