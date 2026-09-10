@@ -183,13 +183,17 @@ async def nf_issued_callback(
 
 @router.get("/opery/docs-spec")
 async def opery_docs_spec():
-    """Retorna o conteudo Markdown da spec publica."""
-    path = "/app/memory/OPERY_INTEGRATION_SPEC.md"
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Documentacao nao encontrada")
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
-    return {"content": content, "path": path}
+    """Retorna o conteudo Markdown da spec publica.
+
+    Le do arquivo /app/backend/opery_docs.md (sobe junto com o backend em prod).
+    Fallback: /app/memory/OPERY_INTEGRATION_SPEC.md (ambiente dev).
+    """
+    for candidate in ("/app/backend/opery_docs.md", "/app/memory/OPERY_INTEGRATION_SPEC.md",
+                      os.path.join(os.path.dirname(__file__), "opery_docs.md")):
+        if candidate and os.path.exists(candidate):
+            with open(candidate, "r", encoding="utf-8") as f:
+                return {"content": f.read(), "path": candidate}
+    raise HTTPException(status_code=404, detail="Documentacao nao encontrada")
 
 
 # ==================== ADMIN ROUTES ====================
