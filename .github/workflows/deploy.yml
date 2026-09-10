@@ -69,39 +69,42 @@ jobs:
       - name: Show release size
         run: du -sh release/backend release/frontend/build
 
-      # ---------- Deploy via SSH ----------
-      - name: Deploy to production server (rsync)
-        uses: burnett01/rsync-deployments@7.0.1
-        with:
-          switches: -avz --delete --exclude='.env' --exclude='uploads' --exclude='__pycache__'
-          path: release/
-          remote_path: ${{ secrets.DEPLOY_PATH || '/app/' }}
-          remote_host: ${{ secrets.SSH_HOST }}
-          remote_user: ${{ secrets.SSH_USER }}
-          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          remote_port: ${{ secrets.SSH_PORT || '22' }}
+      # ---------- Deploy via SSH (com senha usando sshpass) ----------
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync
+
+      - name: Deploy files to production server
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/app/' }}
+        run: |
+          # Garante barra final no caminho
+          DEST="${DEPLOY_PATH%/}/"
+          echo "Enviando release/ para ${SSH_USER}@${SSH_HOST}:${DEST}"
+          sshpass -e rsync -avz --delete \
+            --exclude='.env' --exclude='uploads' --exclude='__pycache__' \
+            -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p ${SSH_PORT}" \
+            release/ "${SSH_USER}@${SSH_HOST}:${DEST}"
 
       - name: Restart services on remote
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ${{ secrets.DEPLOY_PATH || '/app' }}
-            # Instala/atualiza deps do backend (rápido se cache HIT)
-            if [ -f backend/requirements.txt ]; then
-              cd backend && pip install -q -r requirements.txt --break-system-packages 2>/dev/null || pip install -q -r requirements.txt || true
-              cd ..
-            fi
-            # Reinicia serviços (assume supervisor já configurado)
-            sudo supervisorctl restart backend || sudo systemctl restart oxxpharma-backend || true
-            sudo supervisorctl restart frontend || sudo systemctl restart oxxpharma-frontend || true
-            # Healthcheck rápido
-            sleep 3
-            curl -fsS http://localhost:8001/api/health || echo "⚠ Backend health check falhou"
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/app' }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
+            "cd ${DEPLOY_PATH} && \
+             if [ -f backend/requirements.txt ]; then cd backend && (pip install -q -r requirements.txt --break-system-packages 2>/dev/null || pip install -q -r requirements.txt || true) && cd ..; fi && \
+             (echo '${SSHPASS}' | sudo -S supervisorctl restart backend 2>/dev/null || echo '${SSHPASS}' | sudo -S systemctl restart oxxpharma-backend 2>/dev/null || supervisorctl restart backend || true) && \
+             (echo '${SSHPASS}' | sudo -S supervisorctl restart frontend 2>/dev/null || echo '${SSHPASS}' | sudo -S systemctl restart oxxpharma-frontend 2>/dev/null || supervisorctl restart frontend || true) && \
+             sleep 3 && \
+             (curl -fsS http://localhost:8001/api/health || echo '⚠ Backend health check falhou')"
 
       - name: Notify success
         if: success()
