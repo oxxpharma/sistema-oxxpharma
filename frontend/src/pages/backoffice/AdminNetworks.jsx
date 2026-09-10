@@ -83,8 +83,8 @@ export default function AdminNetworks() {
         ))}
       </div>
 
-      {/* Topo da Rede (só p/ redes MMN) */}
-      {(tab === 'network_1' || tab === 'network_2') && <NetworkTopLeaderCard network={tab} />}
+      {/* Topo da Rede (somente Rede 2 - Propagandistas). Rede 1 (Corporativa) não usa topo. */}
+      {tab === 'network_2' && <NetworkTopLeaderCard network={tab} />}
 
       {/* Search */}
       <div className="bg-white rounded-xl border border-border p-3 mb-4 flex gap-2">

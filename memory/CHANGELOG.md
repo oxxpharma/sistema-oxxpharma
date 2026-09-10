@@ -4,6 +4,15 @@ Histórico datado de iterações (mais recentes primeiro). Detalhes técnicos co
 
 ---
 
+## Iter 66.7 (Fev/2026) — Rede 1 (Corporativa) sem Topo de Rede
+
+- Revertida a exibição do card "Topo da Rede" na aba Rede 1 (Corporativa) em `AdminNetworks.jsx`.
+- `PUT /api/admin/network-top-leaders` rejeita `network_1` (HTTP 400).
+- `GET /api/admin/network-top-leaders` limpa automaticamente qualquer topo legado de `network_1` salvo em `platform_settings`.
+- Lógica de comissões do Convênio já usava apenas o topo da Rede 2 (Propagandistas) — nenhuma mudança funcional necessária no `convenio_routes.py`.
+
+
+
 ## Iter 66.6 (Fev/2026) — AdminProductForm: mostrar categorias/subcategorias inativas
 
 - `AdminProductForm.jsx` agora usa `GET /api/admin/categories` (que retorna TODAS: ativas + inativas) em vez do endpoint público. Fallback para `/api/categories` mantido.

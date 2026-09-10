@@ -5607,6 +5607,14 @@ async def get_network_top_leaders(request: Request, user: dict = Depends(require
     db = request.app.db
     doc = await db.platform_settings.find_one({"key": "network_top_leaders"}, {"_id": 0})
     leaders = (doc or {}).get("value") or {}
+    # Rede 1 (Corporativa) não usa topo - remove se existir (legado)
+    if leaders.get("network_1"):
+        leaders.pop("network_1", None)
+        await db.platform_settings.update_one(
+            {"key": "network_top_leaders"},
+            {"$set": {"value": leaders, "updated_at": now_iso()}},
+            upsert=True,
+        )
     # enriquece com dados basicos do usuario
     resolved = {}
     for net, uid in leaders.items():
@@ -5627,8 +5635,8 @@ async def set_network_top_leader(request: Request, user: dict = Depends(require_
     body = await request.json() or {}
     network = (body.get("network") or "").strip()
     target_user_id = body.get("user_id")
-    if network not in (NETWORK_1, NETWORK_2):
-        raise HTTPException(status_code=400, detail="Rede invalida")
+    if network not in (NETWORK_2,):
+        raise HTTPException(status_code=400, detail="Topo de rede aplica-se apenas a Rede 2 (Propagandistas). Rede 1 (Corporativa) não usa topo.")
     if target_user_id:
         target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0, "user_id": 1, "networks": 1, "network_type": 1})
         if not target:
