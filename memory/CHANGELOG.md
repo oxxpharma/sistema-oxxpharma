@@ -437,3 +437,9 @@ Suíte extensa de fixes (42a–42o) totalizando **60/60 testes PASS**. Principai
 - Página pública `/docs/opery` com documentação Markdown estilizada (react-markdown + remark-gfm), com base URL clicável e tabelas formatadas — link acessível de dentro da página admin.
 - Novos endpoints: `GET/PUT /api/admin/opery/config`, `GET /api/admin/opery/inbound-log`, `GET /api/admin/opery/dispatch-log/{order_id}`, `GET /api/admin/opery/order/{order_id}/nf-status|nf.pdf|nf.xml`, `GET /api/opery/docs-spec`.
 - Deps: `brazilfiscalreport==1.0.2`, `fpdf2==2.8.8`, `react-markdown@8`, `remark-gfm@3`.
+
+## 2026-02-10 · Iter 67.2 · Opery — 2 Ambientes (Sandbox + Produção)
+- Config `opery_settings` agora tem 3 campos de URL: `outbound_url_sandbox`, `outbound_url_production`, `outbound_token` (compartilhado). Novo campo `active_env` alterna qual URL o outbound usa (toggle na UI).
+- Backend expõe webhooks espelhados: `/api/opery/webhook/*` (produção) e `/api/opery/sandbox/webhook/*` (sandbox), aceitando o mesmo token. Health check sandbox retorna `environment: sandbox` no response.
+- UI: toggle 🧪 Sandbox / 🚀 Produção, alerta vermelho quando Produção ativa ("Modo produção — pedidos reais vão emitir NF-e"), badge "ATIVA" na URL escolhida, dois blocos separados na aba Endpoints.
+- Documentação pública `/docs/opery` atualizada com tabela de ambientes explicando que **URL muda mas token é o mesmo**, endpoints listados nas duas variantes em cada seção.

@@ -39,6 +39,8 @@ import opery_nf
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["opery"])
+# Router espelho para ambiente sandbox — mesmos endpoints com prefixo /api/opery/sandbox
+sandbox_router = APIRouter(prefix="/api/opery/sandbox", tags=["opery-sandbox"])
 
 _deps: Dict[str, Any] = {}
 
@@ -331,22 +333,30 @@ async def opery_config(request: Request, user: dict = Depends(admin_dep)):
         "source": cfg.get("source"),
         "webhook_secret_configured": bool(cfg.get("webhook_secret")),
         "webhook_secret_masked": _mask(cfg.get("webhook_secret")),
-        "outbound_url": cfg.get("outbound_url") or None,
+        "outbound_url_sandbox": cfg.get("outbound_url_sandbox") or None,
+        "outbound_url_production": cfg.get("outbound_url_production") or None,
+        "outbound_url_active": cfg.get("outbound_url") or None,  # derivada
+        "active_env": cfg.get("active_env") or "sandbox",
         "outbound_token_configured": bool(cfg.get("outbound_token")),
         "outbound_token_masked": _mask(cfg.get("outbound_token")),
         "docs_url": cfg.get("docs_url") or "/docs/opery",
         "updated_at": cfg.get("updated_at"),
         "updated_by": cfg.get("updated_by"),
         "webhook_endpoint": "/api/opery/webhook/sales",
+        "webhook_endpoint_sandbox": "/api/opery/sandbox/webhook/sales",
         "health_endpoint": "/api/opery/webhook/health",
+        "health_endpoint_sandbox": "/api/opery/sandbox/webhook/health",
         "nf_callback_endpoint": "/api/opery/webhook/nf-issued",
+        "nf_callback_endpoint_sandbox": "/api/opery/sandbox/webhook/nf-issued",
     }
 
 
 class ConfigUpdate(BaseModel):
     webhook_secret: Optional[str] = None
-    outbound_url: Optional[str] = None
+    outbound_url_sandbox: Optional[str] = None
+    outbound_url_production: Optional[str] = None
     outbound_token: Optional[str] = None
+    active_env: Optional[str] = None
     docs_url: Optional[str] = None
 
 
@@ -363,7 +373,9 @@ async def update_opery_config(body: ConfigUpdate, request: Request, user: dict =
     return {
         "ok": True,
         "webhook_secret_configured": bool(cfg.get("webhook_secret")),
-        "outbound_url": cfg.get("outbound_url"),
+        "outbound_url_sandbox": cfg.get("outbound_url_sandbox"),
+        "outbound_url_production": cfg.get("outbound_url_production"),
+        "active_env": cfg.get("active_env"),
         "outbound_token_configured": bool(cfg.get("outbound_token")),
         "updated_at": cfg.get("updated_at"),
     }
@@ -438,3 +450,27 @@ def register_opery_routes(app, deps: Dict[str, Any]):
     _deps["get_current_user"] = deps["get_current_user"]
     _deps["is_admin_level"] = deps["is_admin_level"]
     app.include_router(router)
+
+    # Registra endpoints inbound espelhados em /api/opery/sandbox/webhook/*
+    # (mesma logica, chave e handlers — permite Opery diferenciar ambientes na URL)
+    @sandbox_router.post("/webhook/sales")
+    async def sandbox_receive_sales(body: WebhookIn, request: Request,
+                                    x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
+        result = await receive_sales(body, request, x_opery_api_key)
+        return result
+
+    @sandbox_router.post("/webhook/health")
+    async def sandbox_webhook_health(request: Request,
+                                    x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
+        result = await webhook_health(request, x_opery_api_key)
+        # marca no response que veio pelo sandbox
+        if isinstance(result, dict):
+            result = {**result, "environment": "sandbox"}
+        return result
+
+    @sandbox_router.post("/webhook/nf-issued")
+    async def sandbox_nf_issued(body: NFIssuedIn, request: Request,
+                                x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
+        return await nf_issued_callback(body, request, x_opery_api_key)
+
+    app.include_router(sandbox_router)

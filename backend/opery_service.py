@@ -64,11 +64,15 @@ _CONFIG_DOC_KEY = "opery_config"
 
 
 def _config_from_env() -> Dict[str, Any]:
+    # Retrocompat: se so tem OPERY_OUTBOUND_URL, usa como sandbox
+    legacy_url = os.environ.get("OPERY_OUTBOUND_URL") or ""
     return {
         "webhook_secret": os.environ.get("OPERY_WEBHOOK_SECRET") or "",
-        "outbound_url": os.environ.get("OPERY_OUTBOUND_URL") or "",
+        "outbound_url_sandbox": os.environ.get("OPERY_OUTBOUND_URL_SANDBOX") or legacy_url,
+        "outbound_url_production": os.environ.get("OPERY_OUTBOUND_URL_PRODUCTION") or "",
         "outbound_token": os.environ.get("OPERY_OUTBOUND_TOKEN") or "",
-        "docs_url": "/docs/opery",  # rota interna pública
+        "active_env": os.environ.get("OPERY_ACTIVE_ENV") or "sandbox",
+        "docs_url": "/docs/opery",
         "source": "env",
     }
 
@@ -77,10 +81,15 @@ async def load_config(db) -> Dict[str, Any]:
     """Carrega config do DB (fallback env). Popula cache."""
     doc = await db.opery_settings.find_one({"key": _CONFIG_DOC_KEY}, {"_id": 0})
     if doc:
+        # Retrocompat: campo antigo `outbound_url` = sandbox
+        sandbox_url = doc.get("outbound_url_sandbox") or doc.get("outbound_url") or os.environ.get("OPERY_OUTBOUND_URL_SANDBOX") or os.environ.get("OPERY_OUTBOUND_URL") or ""
+        prod_url = doc.get("outbound_url_production") or os.environ.get("OPERY_OUTBOUND_URL_PRODUCTION") or ""
         cfg = {
             "webhook_secret": doc.get("webhook_secret") or os.environ.get("OPERY_WEBHOOK_SECRET") or "",
-            "outbound_url": doc.get("outbound_url") or os.environ.get("OPERY_OUTBOUND_URL") or "",
+            "outbound_url_sandbox": sandbox_url,
+            "outbound_url_production": prod_url,
             "outbound_token": doc.get("outbound_token") or os.environ.get("OPERY_OUTBOUND_TOKEN") or "",
+            "active_env": doc.get("active_env") or "sandbox",
             "docs_url": doc.get("docs_url") or "/docs/opery",
             "source": "db",
             "updated_at": doc.get("updated_at"),
@@ -88,14 +97,20 @@ async def load_config(db) -> Dict[str, Any]:
         }
     else:
         cfg = _config_from_env()
+    # Deriva outbound_url atual conforme active_env
+    cfg["outbound_url"] = cfg.get("outbound_url_production") if cfg.get("active_env") == "production" else cfg.get("outbound_url_sandbox")
+    _CONFIG_CACHE.clear()
     _CONFIG_CACHE.update(cfg)
     return cfg
 
 
 async def save_config(db, updates: Dict[str, Any], actor: Optional[str] = None) -> Dict[str, Any]:
     """Salva config no DB. Somente atualiza campos presentes em `updates`."""
-    allowed = {"webhook_secret", "outbound_url", "outbound_token", "docs_url"}
+    allowed = {"webhook_secret", "outbound_url_sandbox", "outbound_url_production",
+               "outbound_token", "active_env", "docs_url"}
     payload = {k: v for k, v in updates.items() if k in allowed and v is not None}
+    if "active_env" in payload and payload["active_env"] not in {"sandbox", "production"}:
+        raise ValueError("active_env deve ser 'sandbox' ou 'production'")
     payload["updated_at"] = _now_iso()
     payload["updated_by"] = actor
     await db.opery_settings.update_one(

@@ -82,24 +82,32 @@ export default function AdminOpery() {
 /* ============ CONFIG ============ */
 
 function ConfigForm({ config, onSaved }) {
-  const [form, setForm] = useState({ webhook_secret: '', outbound_url: config?.outbound_url || '', outbound_token: '', docs_url: config?.docs_url || '/docs/opery' });
+  const [form, setForm] = useState({
+    webhook_secret: '',
+    outbound_url_sandbox: config?.outbound_url_sandbox || '',
+    outbound_url_production: config?.outbound_url_production || '',
+    outbound_token: '',
+    active_env: config?.active_env || 'sandbox',
+    docs_url: config?.docs_url || '/docs/opery',
+  });
   const [showSecret, setShowSecret] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     const payload = {};
-    // Só envia campos preenchidos (não sobrescreve com mask)
     if (form.webhook_secret && !form.webhook_secret.includes('*')) payload.webhook_secret = form.webhook_secret;
-    if (form.outbound_url !== config?.outbound_url) payload.outbound_url = form.outbound_url;
+    if (form.outbound_url_sandbox !== config?.outbound_url_sandbox) payload.outbound_url_sandbox = form.outbound_url_sandbox;
+    if (form.outbound_url_production !== config?.outbound_url_production) payload.outbound_url_production = form.outbound_url_production;
     if (form.outbound_token && !form.outbound_token.includes('*')) payload.outbound_token = form.outbound_token;
+    if (form.active_env !== config?.active_env) payload.active_env = form.active_env;
     if (form.docs_url !== config?.docs_url) payload.docs_url = form.docs_url;
     if (!Object.keys(payload).length) { toast.info('Nada foi alterado'); return; }
     setSaving(true);
     try {
       await api.put('/api/admin/opery/config', payload);
       toast.success('Configuração salva no banco');
-      setForm({ webhook_secret: '', outbound_url: form.outbound_url, outbound_token: '', docs_url: form.docs_url });
+      setForm({ ...form, webhook_secret: '', outbound_token: '' });
       onSaved();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
@@ -121,7 +129,7 @@ function ConfigForm({ config, onSaved }) {
 
         <div>
           <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Webhook Secret (Opery → OxxPharma)</label>
-          <p className="text-[11px] text-txt-secondary mb-1">Chave que a Opery deve enviar no header <code>X-Opery-Api-Key</code>.</p>
+          <p className="text-[11px] text-txt-secondary mb-1">Chave única usada nos dois ambientes. A Opery envia no header <code>X-Opery-Api-Key</code>.</p>
           <div className="flex gap-2">
             <div className="flex-1 relative">
               <input
@@ -143,22 +151,62 @@ function ConfigForm({ config, onSaved }) {
           )}
         </div>
 
+        {/* Ambiente Ativo */}
+        <div className="pt-2 border-t border-border">
+          <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Ambiente ativo (saída)</label>
+          <p className="text-[11px] text-txt-secondary mb-2">Escolhe qual URL o OxxPharma vai chamar quando disparar pedidos pagos pra Opery.</p>
+          <div className="inline-flex bg-bg-secondary rounded-lg p-1 border border-border" data-testid="opery-env-toggle">
+            <button type="button" onClick={() => setForm({ ...form, active_env: 'sandbox' })}
+              className={`px-4 py-1.5 text-xs font-bold rounded-md transition ${form.active_env === 'sandbox' ? 'bg-amber-500 text-white shadow-sm' : 'text-txt-secondary hover:text-txt-primary'}`}
+              data-testid="opery-env-sandbox">
+              🧪 Sandbox
+            </button>
+            <button type="button" onClick={() => setForm({ ...form, active_env: 'production' })}
+              className={`px-4 py-1.5 text-xs font-bold rounded-md transition ${form.active_env === 'production' ? 'bg-emerald-600 text-white shadow-sm' : 'text-txt-secondary hover:text-txt-primary'}`}
+              data-testid="opery-env-production">
+              🚀 Produção
+            </button>
+          </div>
+          {form.active_env === 'production' && (
+            <div className="mt-2 text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 inline-flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" /> Modo produção — pedidos reais vão emitir NF-e de verdade
+            </div>
+          )}
+        </div>
+
         <div>
-          <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Outbound URL (OxxPharma → Opery)</label>
-          <p className="text-[11px] text-txt-secondary mb-1">Endpoint que a Opery vai expor para receber nossos pedidos pagos e emitir NF-e.</p>
+          <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider flex items-center gap-2">
+            🧪 Outbound URL — Sandbox
+            {form.active_env === 'sandbox' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">Ativa</span>}
+          </label>
           <input
             type="url"
-            value={form.outbound_url}
-            onChange={e => setForm({ ...form, outbound_url: e.target.value })}
-            placeholder="https://opery.example.com/api/nfe/receber"
+            value={form.outbound_url_sandbox}
+            onChange={e => setForm({ ...form, outbound_url_sandbox: e.target.value })}
+            placeholder="https://opery.example.com/sandbox/api/nfe/receber"
             className="w-full h-10 px-3 border border-border rounded-lg text-sm font-mono"
-            data-testid="opery-outbound-url"
+            data-testid="opery-outbound-url-sandbox"
           />
         </div>
 
         <div>
-          <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Outbound Token</label>
-          <p className="text-[11px] text-txt-secondary mb-1">Bearer token para autenticar contra a URL acima.</p>
+          <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider flex items-center gap-2">
+            🚀 Outbound URL — Produção
+            {form.active_env === 'production' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">Ativa</span>}
+          </label>
+          <input
+            type="url"
+            value={form.outbound_url_production}
+            onChange={e => setForm({ ...form, outbound_url_production: e.target.value })}
+            placeholder="https://opery.example.com/api/nfe/receber"
+            className="w-full h-10 px-3 border border-border rounded-lg text-sm font-mono"
+            data-testid="opery-outbound-url-production"
+          />
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Outbound Token (compartilhado)</label>
+          <p className="text-[11px] text-txt-secondary mb-1">Mesmo token vale para sandbox e produção. Enviado como <code>Authorization: Bearer</code>.</p>
           <div className="relative">
             <input
               type={showToken ? 'text' : 'password'}
@@ -192,9 +240,10 @@ function ConfigForm({ config, onSaved }) {
         <div className="bg-white rounded-2xl border border-border p-5">
           <h3 className="font-heading font-black text-base mb-2">Como funciona</h3>
           <ol className="text-sm space-y-1.5 text-txt-secondary list-decimal list-inside">
-            <li>Configure a chave <code>Webhook Secret</code> aqui e passe pra Opery.</li>
-            <li>A Opery envia vendas presenciais via <code>POST /api/opery/webhook/sales</code>.</li>
-            <li>Quando um pedido é pago no e-commerce, disparamos para a URL da Opery.</li>
+            <li>Configure o <b>token único</b> e as duas URLs (sandbox + produção).</li>
+            <li>Escolha o <b>ambiente ativo</b> — o OxxPharma dispara apenas para esse.</li>
+            <li>A Opery envia vendas para <code>/api/opery/sandbox/webhook/sales</code> ou <code>/api/opery/webhook/sales</code>.</li>
+            <li>Quando um pedido é pago, disparamos para a URL do ambiente ativo.</li>
             <li>A Opery retorna XML da NF-e ou callback → geramos o DANFE (PDF).</li>
           </ol>
         </div>
@@ -212,7 +261,9 @@ function genSecret() {
 
 function StatusCards({ config }) {
   const inboundOk = !!config?.webhook_secret_configured;
-  const outboundOk = !!(config?.outbound_url && config?.outbound_token_configured);
+  const activeUrl = config?.outbound_url_active;
+  const outboundOk = !!(activeUrl && config?.outbound_token_configured);
+  const env = config?.active_env || 'sandbox';
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className={`rounded-2xl border p-4 ${inboundOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`} data-testid="opery-inbound-status">
@@ -223,7 +274,7 @@ function StatusCards({ config }) {
       <div className={`rounded-2xl border p-4 ${outboundOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`} data-testid="opery-outbound-status">
         <ArrowUpRight className={`w-5 h-5 ${outboundOk ? 'text-emerald-600' : 'text-amber-600'}`} />
         <div className="mt-2 font-heading font-black text-lg">{outboundOk ? 'OK' : 'Pendente'}</div>
-        <div className="text-xs">Saída (nós → Opery)</div>
+        <div className="text-xs">Saída (nós → Opery) · <b>{env === 'sandbox' ? '🧪 Sandbox' : '🚀 Produção'}</b></div>
       </div>
     </div>
   );
@@ -234,6 +285,7 @@ function StatusCards({ config }) {
 function EndpointsCard({ config }) {
   const [copied, setCopied] = useState(null);
   const base = window.location.origin;
+  const activeEnv = config?.active_env || 'sandbox';
 
   const copy = async (v, key) => {
     await navigator.clipboard.writeText(v);
@@ -242,41 +294,88 @@ function EndpointsCard({ config }) {
     setTimeout(() => setCopied(null), 1500);
   };
 
-  const items = [
-    { key: 'sales', label: 'Recebimento de vendas', url: `${base}/api/opery/webhook/sales`, method: 'POST', desc: 'A Opery envia vendas presenciais aqui.' },
-    { key: 'health', label: 'Health check', url: `${base}/api/opery/webhook/health`, method: 'POST', desc: 'Teste de autenticação/conectividade.' },
-    { key: 'nf', label: 'Callback NF emitida', url: `${base}/api/opery/webhook/nf-issued`, method: 'POST', desc: 'Opery avisa que emitiu NF-e (opcional).' },
+  const inboundEnvs = [
+    {
+      key: 'sandbox',
+      title: '🧪 Ambiente Sandbox',
+      subtitle: 'Para testes e homologação. Aparece como environment: sandbox no health check.',
+      color: 'border-amber-200 bg-amber-50/40',
+      badge: 'bg-amber-100 text-amber-800',
+      items: [
+        { key: 'sb-sales', label: 'Recebimento de vendas', url: `${base}/api/opery/sandbox/webhook/sales`, method: 'POST' },
+        { key: 'sb-health', label: 'Health check', url: `${base}/api/opery/sandbox/webhook/health`, method: 'POST' },
+        { key: 'sb-nf', label: 'Callback NF emitida', url: `${base}/api/opery/sandbox/webhook/nf-issued`, method: 'POST' },
+      ],
+    },
+    {
+      key: 'production',
+      title: '🚀 Ambiente Produção',
+      subtitle: 'URLs oficiais. Vendas aqui alimentam o dashboard real.',
+      color: 'border-emerald-200 bg-emerald-50/40',
+      badge: 'bg-emerald-100 text-emerald-800',
+      items: [
+        { key: 'pr-sales', label: 'Recebimento de vendas', url: `${base}/api/opery/webhook/sales`, method: 'POST' },
+        { key: 'pr-health', label: 'Health check', url: `${base}/api/opery/webhook/health`, method: 'POST' },
+        { key: 'pr-nf', label: 'Callback NF emitida', url: `${base}/api/opery/webhook/nf-issued`, method: 'POST' },
+      ],
+    },
   ];
 
   return (
     <div className="space-y-4" data-testid="opery-endpoints-card">
-      <div className="bg-white rounded-2xl border border-border p-5">
-        <h2 className="font-heading font-black text-lg mb-3">Endpoints públicos (Opery → OxxPharma)</h2>
-        <p className="text-xs text-txt-secondary mb-4">Todos exigem o header <code className="bg-bg-secondary px-1 rounded font-mono">X-Opery-Api-Key: &lt;webhook_secret&gt;</code>.</p>
-        <div className="space-y-3">
-          {items.map(it => (
-            <div key={it.key} className="border border-border rounded-lg p-3">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">{it.method}</span>
-                  <span className="font-semibold text-sm">{it.label}</span>
-                </div>
-                <button onClick={() => copy(it.url, it.key)} className="text-txt-secondary hover:text-brand-main text-xs font-semibold inline-flex items-center gap-1" data-testid={`copy-${it.key}`}>
-                  {copied === it.key ? <><Check className="w-3.5 h-3.5" /> Copiado</> : <><Copy className="w-3.5 h-3.5" /> Copiar</>}
-                </button>
-              </div>
-              <div className="font-mono text-xs bg-bg-secondary p-2 rounded break-all">{it.url}</div>
-              <div className="text-xs text-txt-secondary mt-1">{it.desc}</div>
-            </div>
-          ))}
+      <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+        <div className="text-sky-900">
+          <b>Mesmo token pra tudo.</b> O header <code className="bg-white px-1 rounded border border-sky-200">X-Opery-Api-Key</code> é único — o que muda entre sandbox e produção é apenas a URL.
         </div>
       </div>
 
+      {inboundEnvs.map(env => (
+        <div key={env.key} className={`rounded-2xl border p-5 ${env.color}`} data-testid={`endpoint-block-${env.key}`}>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 className="font-heading font-black text-lg">{env.title}</h2>
+              <p className="text-xs text-txt-secondary">{env.subtitle}</p>
+            </div>
+            {activeEnv === env.key && (
+              <span className={`text-[10px] font-black px-2 py-1 rounded-full ${env.badge}`}>Ambiente ativo</span>
+            )}
+          </div>
+          <div className="space-y-2.5">
+            {env.items.map(it => (
+              <div key={it.key} className="bg-white border border-border rounded-lg p-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">{it.method}</span>
+                    <span className="font-semibold text-sm">{it.label}</span>
+                  </div>
+                  <button onClick={() => copy(it.url, it.key)} className="text-txt-secondary hover:text-brand-main text-xs font-semibold inline-flex items-center gap-1" data-testid={`copy-${it.key}`}>
+                    {copied === it.key ? <><Check className="w-3.5 h-3.5" /> Copiado</> : <><Copy className="w-3.5 h-3.5" /> Copiar</>}
+                  </button>
+                </div>
+                <div className="font-mono text-xs bg-bg-secondary p-2 rounded break-all">{it.url}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
       <div className="bg-white rounded-2xl border border-border p-5">
         <h2 className="font-heading font-black text-lg mb-2">Saída (OxxPharma → Opery)</h2>
-        <p className="text-xs text-txt-secondary mb-3">Quando um pedido é pago, disparamos automaticamente para:</p>
-        <div className="font-mono text-xs bg-bg-secondary p-2 rounded break-all">
-          {config?.outbound_url || <span className="text-amber-700">⚠ URL da Opery ainda não configurada</span>}
+        <p className="text-xs text-txt-secondary mb-3">Quando um pedido é pago, disparamos automaticamente para a URL do ambiente ativo (<b>{activeEnv === 'sandbox' ? '🧪 Sandbox' : '🚀 Produção'}</b>):</p>
+        <div className="space-y-2">
+          <div>
+            <div className="text-[11px] font-bold text-amber-800 mb-1">🧪 Sandbox</div>
+            <div className="font-mono text-xs bg-bg-secondary p-2 rounded break-all">
+              {config?.outbound_url_sandbox || <span className="text-amber-700">⚠ Não configurada</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] font-bold text-emerald-800 mb-1">🚀 Produção</div>
+            <div className="font-mono text-xs bg-bg-secondary p-2 rounded break-all">
+              {config?.outbound_url_production || <span className="text-amber-700">⚠ Não configurada</span>}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -284,7 +383,7 @@ function EndpointsCard({ config }) {
         <FileText className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
         <div className="text-sm">
           <div className="font-semibold text-sky-900">Documentação completa para a equipe Opery</div>
-          <div className="text-sky-800 mt-0.5">Compartilhe este link com o time deles para eles implementarem a integração:</div>
+          <div className="text-sky-800 mt-0.5">Compartilhe este link com o time deles:</div>
           <a href="/docs/opery" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 font-mono text-xs text-sky-700 hover:underline">
             {base}/docs/opery <ExternalLink className="w-3 h-3" />
           </a>
