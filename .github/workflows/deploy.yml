@@ -79,15 +79,26 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/app/' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/var/www/oxxpharma' }}
         run: |
-          # Garante barra final no caminho
-          DEST="${DEPLOY_PATH%/}/"
-          echo "Enviando release/ para ${SSH_USER}@${SSH_HOST}:${DEST}"
+          DEST_ROOT="${DEPLOY_PATH%/}"
+          SSH_OPTS="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p ${SSH_PORT}"
+
+          echo "→ Sincronizando backend/ para ${DEST_ROOT}/backend/"
+          sshpass -e rsync -avz \
+            --exclude='.env' --exclude='uploads' --exclude='__pycache__' --exclude='*.pyc' \
+            -e "${SSH_OPTS}" \
+            release/backend/ "${SSH_USER}@${SSH_HOST}:${DEST_ROOT}/backend/"
+
+          echo "→ Sincronizando frontend/build/ para ${DEST_ROOT}/frontend/build/"
           sshpass -e rsync -avz --delete \
-            --exclude='.env' --exclude='uploads' --exclude='__pycache__' \
-            -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p ${SSH_PORT}" \
-            release/ "${SSH_USER}@${SSH_HOST}:${DEST}"
+            -e "${SSH_OPTS}" \
+            release/frontend/build/ "${SSH_USER}@${SSH_HOST}:${DEST_ROOT}/frontend/build/"
+
+          echo "→ Copiando RELEASE.txt"
+          sshpass -e rsync -avz \
+            -e "${SSH_OPTS}" \
+            release/RELEASE.txt "${SSH_USER}@${SSH_HOST}:${DEST_ROOT}/RELEASE.txt"
 
       - name: Restart services on remote
         env:
@@ -95,16 +106,36 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/app' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/var/www/oxxpharma' }}
+          BACKEND_PROCESS: ${{ secrets.BACKEND_PROCESS || 'oxxpharma-backend' }}
         run: |
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
-            "cd ${DEPLOY_PATH} && \
-             if [ -f backend/requirements.txt ]; then cd backend && (pip install -q -r requirements.txt --break-system-packages 2>/dev/null || pip install -q -r requirements.txt || true) && cd ..; fi && \
-             (echo '${SSHPASS}' | sudo -S supervisorctl restart backend 2>/dev/null || echo '${SSHPASS}' | sudo -S systemctl restart oxxpharma-backend 2>/dev/null || supervisorctl restart backend || true) && \
-             (echo '${SSHPASS}' | sudo -S supervisorctl restart frontend 2>/dev/null || echo '${SSHPASS}' | sudo -S systemctl restart oxxpharma-frontend 2>/dev/null || supervisorctl restart frontend || true) && \
-             sleep 3 && \
-             (curl -fsS http://localhost:8001/api/health || echo '⚠ Backend health check falhou')"
+            -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" bash -s <<REMOTE_EOF
+          set -e
+          cd "${DEPLOY_PATH}"
+
+          # 1) Instala/atualiza deps do backend dentro do venv
+          if [ -d venv ] && [ -f backend/requirements.txt ]; then
+            echo "→ Instalando deps no venv..."
+            ./venv/bin/pip install -q -r backend/requirements.txt
+          else
+            echo "⚠ Venv não encontrado em ${DEPLOY_PATH}/venv — pulei instalação de deps"
+          fi
+
+          # 2) Reinicia o backend
+          echo "→ Reiniciando ${BACKEND_PROCESS}..."
+          sudo supervisorctl restart "${BACKEND_PROCESS}"
+
+          # 3) Frontend é estático (nginx serve /frontend/build) — nada pra reiniciar
+
+          # 4) Healthcheck
+          sleep 3
+          if curl -fsS http://localhost:8001/api/health >/dev/null; then
+            echo "✅ Backend respondendo"
+          else
+            echo "⚠ Backend health check falhou — confira: sudo supervisorctl tail -f ${BACKEND_PROCESS}"
+          fi
+          REMOTE_EOF
 
       - name: Notify success
         if: success()
