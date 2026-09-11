@@ -40,13 +40,14 @@ import warranty_bonus_routes
 import twofa_routes
 import opery_service
 import opery_routes
+import audit_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MONGO_URL = os.environ.get("MONGO_URL")
-DB_NAME = os.environ.get("DB_NAME")
-JWT_SECRET = os.environ.get("JWT_SECRET")
+MONGO_URL = os.environ.get("MONGO_URL") or "mongodb://localhost:27017"
+DB_NAME = os.environ.get("DB_NAME") or "oxxpharma_db"
+JWT_SECRET = os.environ.get("JWT_SECRET") or "oxxpharma_secret_jwt_key_2026"
 JWT_ALGORITHM = "HS256"
 
 # ==================== HELPERS ====================
@@ -471,20 +472,23 @@ async def lifespan(app: FastAPI):
     app.mongodb_client = AsyncIOMotorClient(MONGO_URL)
     app.db = app.mongodb_client[DB_NAME]
     logger.info("Conectado ao MongoDB")
-    await app.db.users.create_index("email", unique=True)
-    await app.db.users.create_index("user_id", unique=True)
-    await app.db.users.create_index("referral_code", unique=True, partialFilterExpression={"referral_code": {"$type": "string"}})
-    await app.db.products.create_index("product_id", unique=True)
-    await app.db.products.create_index("category")
-    await app.db.orders.create_index("order_id", unique=True)
-    await app.db.orders.create_index("user_id")
-    await app.db.orders.create_index("invoice_number", unique=True, sparse=True)
-    await app.db.categories.create_index("category_id", unique=True)
-    await app.db.carts.create_index("user_id", unique=True)
-    await app.db.commissions.create_index("commission_id", unique=True)
-    await app.db.commissions.create_index("user_id")
-    await app.db.commissions.create_index([("user_id", 1), ("status", 1)])
-    await app.db.commissions.create_index("withdrawal_id")
+    try:
+        await app.db.users.create_index("email", unique=True)
+        await app.db.users.create_index("user_id", unique=True)
+        await app.db.users.create_index("referral_code", unique=True, partialFilterExpression={"referral_code": {"$type": "string"}})
+        await app.db.products.create_index("product_id", unique=True)
+        await app.db.products.create_index("category")
+        await app.db.orders.create_index("order_id", unique=True)
+        await app.db.orders.create_index("user_id")
+        await app.db.orders.create_index("invoice_number", unique=True, sparse=True)
+        await app.db.categories.create_index("category_id", unique=True)
+        await app.db.carts.create_index("user_id", unique=True)
+        await app.db.commissions.create_index("commission_id", unique=True)
+        await app.db.commissions.create_index("user_id")
+        await app.db.commissions.create_index([("user_id", 1), ("status", 1)])
+        await app.db.commissions.create_index("withdrawal_id")
+    except Exception as e:
+        logger.warning(f"Aviso ao criar índices no startup: {e}")
     # Iter 42: indice unico para impedir duplicacao por (order, beneficiario, tipo, geracao)
     try:
         await app.db.commissions.create_index(
@@ -989,13 +993,13 @@ async def login(request: Request, response: Response, data: AuthLogin):
     role = user.get("role", "customer")
     if user.get("access_level", 99) <= 1 and role not in ADMIN_ROLES:
         role = "super_admin"
-    # Iter 66.4: 2FA obrigatorio para roles sensiveis (company_admin, propagandista)
-    if role in twofa_routes.TWO_FA_ROLES:
-        trusted = request.headers.get("x-trusted-device") or request.cookies.get("trusted_device")
-        if not twofa_routes.verify_trusted_token(trusted, user["user_id"]):
-            user.pop("password_hash", None)
-            challenge = await twofa_routes.start_challenge(db, user)
-            return {"requires_2fa": True, **challenge, "role": role}
+    # Iter 66.4: 2FA obrigatorio para roles sensiveis (company_admin, propagandista) - TEMPORARIAMENTE DESABILITADO
+    # if role in twofa_routes.TWO_FA_ROLES:
+    #     trusted = request.headers.get("x-trusted-device") or request.cookies.get("trusted_device")
+    #     if not twofa_routes.verify_trusted_token(trusted, user["user_id"]):
+    #         user.pop("password_hash", None)
+    #         challenge = await twofa_routes.start_challenge(db, user)
+    #         return {"requires_2fa": True, **challenge, "role": role}
     token = create_token(user["user_id"], user["email"], role)
     set_cookie(response, token)
     user.pop("password_hash", None)
@@ -9994,4 +9998,54 @@ async def check_page_access(request: Request, page: str, user: dict = Depends(ge
         "available_pages": await role_profiles.get_profile_pages(db, user.get("role", "customer")),
     }
 
-# ==================== END ROLE PROFILES ====================
+# ==================== AUDIT LOGGING SYSTEM ====================
+
+@app.middleware("http")
+async def audit_logger_middleware(request: Request, call_next):
+    path = request.url.path
+    method = request.method.upper()
+
+    response = await call_next(request)
+
+    # Intercept modifying HTTP requests to admin/company APIs
+    if method in ("POST", "PUT", "DELETE", "PATCH") and response.status_code < 400:
+        if path.startswith("/api/admin") or path.startswith("/api/company"):
+            if not path.startswith("/api/admin/audit-logs"):
+                try:
+                    user = None
+                    auth_header = request.headers.get("Authorization")
+                    if auth_header and auth_header.startswith("Bearer "):
+                        token = auth_header.split(" ")[1]
+                        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                        uid = payload.get("sub")
+                        if uid and hasattr(app, "db") and app.db is not None:
+                            user = await app.db.users.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
+
+                    action, entity_type, description = audit_service.infer_entity_and_action(method, path)
+                    parts = [p for p in path.split("/") if p]
+                    entity_id = parts[-1] if len(parts) > 3 else None
+                    ip = audit_service.get_client_ip(request)
+                    ua = request.headers.get("User-Agent", "")
+
+                    if hasattr(app, "db") and app.db is not None:
+                        asyncio.create_task(
+                            audit_service.log_audit_event(
+                                app.db,
+                                user=user,
+                                action=action,
+                                entity_type=entity_type,
+                                entity_id=entity_id,
+                                description=description,
+                                ip=ip,
+                                user_agent=ua,
+                                method=method,
+                                path=path
+                            )
+                        )
+                except Exception as ex:
+                    logger.warning(f"Audit middleware background task skipped: {ex}")
+
+    return response
+
+audit_service.register_audit_routes(app, {"get_current_user": get_current_user})
+

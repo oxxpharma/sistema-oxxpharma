@@ -77,6 +77,7 @@ import CompanyMonthlyClosing from './pages/company/CompanyMonthlyClosing';
 import PropagandistaLayout from './layouts/PropagandistaLayout';
 import PropagandistaDashboard from './pages/propagandista/PropagandistaDashboard';
 import PropagandistaCompanies from './pages/propagandista/PropagandistaCompanies';
+import PropagandistaCompanyCreatePage from './pages/propagandista/PropagandistaCompanyCreatePage';
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminOpery from './pages/backoffice/AdminOpery';
 import OperyDocs from './pages/OperyDocs';
@@ -92,6 +93,7 @@ import AdminReferralEnrollments from './pages/backoffice/AdminReferralEnrollment
 import AdminMergeUsers from './pages/backoffice/AdminMergeUsers';
 import AdminRecalcCommissions from './pages/backoffice/AdminRecalcCommissions';
 import AdminRoles from './pages/backoffice/AdminRoles';
+import AdminAuditLogs from './pages/backoffice/AdminAuditLogs';
 
 function Guard({ children, requireAuth = false, requireAdmin = false, requireCompanyAdmin = false }) {
   const { isAuthenticated, isAdmin, loading, user } = useAuth();
@@ -201,6 +203,7 @@ function AppRoutes() {
         <Route path="marcas" element={<AdminTenants />} />
         <Route path="page-builder" element={<AdminPageBuilder />} />
         <Route path="webhook" element={<AdminWebhook />} />
+        <Route path="auditoria" element={<AdminAuditLogs />} />
         <Route path="configuracoes" element={<AdminSettings />} />
       </Route>
 
@@ -218,6 +221,7 @@ function AppRoutes() {
         <Route index element={<PropagandistaDashboard />} />
         <Route path="comissoes" element={<PropagandistaDashboard />} />
         <Route path="empresas" element={<PropagandistaCompanies />} />
+        <Route path="empresas/nova" element={<PropagandistaCompanyCreatePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

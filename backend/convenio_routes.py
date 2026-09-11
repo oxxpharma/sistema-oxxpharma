@@ -59,6 +59,47 @@ class CompanyCreate(BaseModel):
     active: bool = True
 
 
+class PropagandistaCompanyCreate(BaseModel):
+    name: str
+    cnpj: str
+    ie: Optional[str] = None
+    status: Optional[str] = "ativa"
+    slug: Optional[str] = None
+    email: EmailStr
+    whatsapp: Optional[str] = None
+    # Endereço
+    cep: Optional[str] = None
+    street: Optional[str] = None
+    number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    address: Optional[Dict] = None
+    # Representante Legal
+    rep_name: Optional[str] = None
+    rep_role: Optional[str] = None
+    rep_cpf: Optional[str] = None
+    rep_rg: Optional[str] = None
+    rep_phone: Optional[str] = None
+    rep_email: Optional[EmailStr] = None
+    # Dados Bancários
+    bank_name: Optional[str] = None
+    account_type: Optional[str] = None
+    agency: Optional[str] = None
+    account_number: Optional[str] = None
+    pix_type: Optional[str] = None
+    pix_key: Optional[str] = None
+    bank_favored_name: Optional[str] = None
+    # Configurações Comerciais / Convênio
+    password: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    employee_discount_pct: float = 0.0  # 0 a 15%
+    payroll_enabled: bool = True
+    payroll_limit_percent: float = 35.0
+
+
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     cnpj: Optional[str] = None
@@ -369,14 +410,49 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
         raise HTTPException(status_code=409, detail="Funcionario com este email ja existe na empresa")
     payload["email"] = payload["email"].lower()
     payload["company_id"] = cid
-    # tenta linkar ao user existente (por email/cpf) — best-effort
+    # tenta linkar ao user existente ou cria conta na Rede 2 abaixo da empresa
+    company_doc = await db.companies.find_one({"company_id": cid}, {"_id": 0})
+    company_rep_id = company_doc.get("representative_user_id") if company_doc else None
+
     linked_user = None
     if payload["email"]:
-        linked_user = await db.users.find_one({"email": payload["email"]}, {"_id": 0, "user_id": 1})
+        linked_user = await db.users.find_one({"email": payload["email"]}, {"_id": 0})
     if not linked_user and payload["cpf_digits"]:
-        linked_user = await db.users.find_one({"cpf_digits": payload["cpf_digits"]}, {"_id": 0, "user_id": 1})
-    if linked_user:
+        linked_user = await db.users.find_one({"cpf_digits": payload["cpf_digits"]}, {"_id": 0})
+
+    if not linked_user:
+        import bcrypt
+        pwd_hash = bcrypt.hashpw("123456".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        emp_user_id = _gen_id("usr_")
+        user_doc = {
+            "user_id": emp_user_id,
+            "name": payload["name"],
+            "email": payload["email"],
+            "cpf_digits": payload.get("cpf_digits"),
+            "phone": payload.get("phone"),
+            "password_hash": pwd_hash,
+            "role": "customer",
+            "networks": ["network_2"],
+            "network_type": "network_2",
+            "sponsor_id": company_rep_id,
+            "sponsor_id_net2": company_rep_id,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        await db.users.insert_one(user_doc)
+        payload["user_id"] = emp_user_id
+    else:
         payload["user_id"] = linked_user["user_id"]
+        upd_u = {}
+        if not linked_user.get("sponsor_id") and company_rep_id:
+            upd_u["sponsor_id"] = company_rep_id
+            upd_u["sponsor_id_net2"] = company_rep_id
+        current_nets = linked_user.get("networks") or []
+        if "network_2" not in current_nets:
+            upd_u["networks"] = list(set(current_nets + ["network_2"]))
+        if upd_u:
+            await db.users.update_one({"user_id": linked_user["user_id"]}, {"$set": upd_u})
+
     doc = {"employee_id": _gen_id("emp_"), **payload, "created_at": _now_iso()}
     await db.company_employees.insert_one(doc)
     return await db.company_employees.find_one({"employee_id": doc["employee_id"]}, {"_id": 0})
@@ -501,23 +577,59 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
             item = {"name": name, "email": email, "cpf": cpf_dig, "phone": phone_dig, "position": position, "salary": salary, "status": row_status}
             preview.append(item)
             if row_status == "ready" and not dry_run:
-                # link com user existente (best-effort)
+                # busca dados da empresa para obter representante
+                company_doc = await db.companies.find_one({"company_id": cid}, {"_id": 0})
+                company_rep_id = company_doc.get("representative_user_id") if company_doc else None
+
                 linked = None
                 if email:
-                    linked = await db.users.find_one({"email": email}, {"_id": 0, "user_id": 1})
+                    linked = await db.users.find_one({"email": email}, {"_id": 0})
                 if not linked and cpf_dig:
-                    linked = await db.users.find_one({"cpf_digits": cpf_dig}, {"_id": 0, "user_id": 1})
+                    linked = await db.users.find_one({"cpf_digits": cpf_dig}, {"_id": 0})
+
+                if not linked:
+                    import bcrypt
+                    pwd_hash = bcrypt.hashpw("123456".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                    emp_user_id = _gen_id("usr_")
+                    user_doc = {
+                        "user_id": emp_user_id,
+                        "name": name,
+                        "email": email,
+                        "cpf_digits": cpf_dig,
+                        "phone_digits": phone_dig,
+                        "password_hash": pwd_hash,
+                        "role": "customer",
+                        "networks": ["network_2"],
+                        "network_type": "network_2",
+                        "sponsor_id": company_rep_id,
+                        "sponsor_id_net2": company_rep_id,
+                        "created_at": _now_iso(),
+                        "updated_at": _now_iso(),
+                    }
+                    await db.users.insert_one(user_doc)
+                    linked_user_id = emp_user_id
+                else:
+                    linked_user_id = linked["user_id"]
+                    upd_u = {}
+                    if not linked.get("sponsor_id") and company_rep_id:
+                        upd_u["sponsor_id"] = company_rep_id
+                        upd_u["sponsor_id_net2"] = company_rep_id
+                    current_nets = linked.get("networks") or []
+                    if "network_2" not in current_nets:
+                        upd_u["networks"] = list(set(current_nets + ["network_2"]))
+                    if upd_u:
+                        await db.users.update_one({"user_id": linked["user_id"]}, {"$set": upd_u})
+
                 doc = {
                     "employee_id": _gen_id("emp_"),
                     "company_id": cid,
+                    "user_id": linked_user_id,
                     "name": name, "email": email,
                     "cpf": cpf_dig, "cpf_digits": cpf_dig,
                     "phone": phone_dig, "phone_digits": phone_dig,
                     "position": position, "salary": salary,
                     "active": True, "created_at": _now_iso(),
                 }
-                if linked:
-                    doc["user_id"] = linked["user_id"]
                 await db.company_employees.insert_one(doc)
                 inserted += 1
         except Exception as e:
@@ -796,6 +908,167 @@ async def propagandista_commissions(request: Request, month: Optional[str] = Non
     gen1_total = sum(float(x["amount"]) for x in items if x.get("generation") == 1)
     gen2_total = sum(float(x["amount"]) for x in items if x.get("generation") == 2)
     return {"period": month, "commissions": items, "gen1_total": round(gen1_total, 2), "gen2_total": round(gen2_total, 2), "grand_total": round(gen1_total + gen2_total, 2)}
+
+
+@router.post("/propagandista/companies")
+async def propagandista_create_company(request: Request, data: PropagandistaCompanyCreate, user: dict = Depends(_current_user_lazy)):
+    """Permite ao propagandista cadastrar uma nova empresa credenciada no sistema.
+    A empresa entra como usuario representante na Rede 2 abaixo do propagandista.
+    """
+    if not _is_propagandista_user(user):
+        raise HTTPException(status_code=403, detail="Acesso restrito a Propagandistas")
+    db = request.app.db
+    payload = data.model_dump()
+    cnpj_digits = _digits(payload.get("cnpj"))
+    if cnpj_digits:
+        exists = await db.companies.find_one({"cnpj_digits": cnpj_digits}, {"_id": 0, "company_id": 1})
+        if exists:
+            raise HTTPException(status_code=409, detail="Já existe empresa cadastrada com este CNPJ")
+
+    comp_email = (payload.get("rep_email") or payload["email"]).lower()
+    rep_name = payload.get("rep_name") or payload.get("contact_name") or payload["name"]
+    rep_phone = payload.get("rep_phone") or payload.get("contact_phone") or payload.get("whatsapp")
+    rep_cpf = payload.get("rep_cpf")
+
+    user_exists = await db.users.find_one({"email": comp_email}, {"_id": 0})
+
+    plain_password = payload.get("password") or "123456"
+    import bcrypt
+    pwd_hash = bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    propagandista_id = user["user_id"]
+
+    if user_exists:
+        rep_user_id = user_exists["user_id"]
+        current_nets = user_exists.get("networks") or []
+        upd_user = {
+            "name": rep_name,
+            "role": "company_admin",
+            "networks": list(set(current_nets + ["network_2"])),
+            "sponsor_id": user_exists.get("sponsor_id") or propagandista_id,
+            "sponsor_id_net2": user_exists.get("sponsor_id_net2") or propagandista_id,
+            "updated_at": _now_iso(),
+        }
+        if rep_cpf: upd_user["cpf_digits"] = _digits(rep_cpf)
+        if rep_phone: upd_user["phone_digits"] = _digits(rep_phone)
+        await db.users.update_one({"user_id": rep_user_id}, {"$set": upd_user})
+    else:
+        rep_user_id = _gen_id("usr_")
+        rep_user_doc = {
+            "user_id": rep_user_id,
+            "name": rep_name,
+            "email": comp_email,
+            "cpf_digits": _digits(rep_cpf),
+            "phone_digits": _digits(rep_phone),
+            "password_hash": pwd_hash,
+            "role": "company_admin",
+            "networks": ["network_2"],
+            "network_type": "network_2",
+            "sponsor_id": propagandista_id,
+            "sponsor_id_net2": propagandista_id,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        await db.users.insert_one(rep_user_doc)
+
+    address_doc = payload.get("address") or {
+        "cep": payload.get("cep"),
+        "street": payload.get("street"),
+        "number": payload.get("number"),
+        "complement": payload.get("complement"),
+        "neighborhood": payload.get("neighborhood"),
+        "city": payload.get("city"),
+        "state": payload.get("state"),
+    }
+
+    company_id = _gen_id("cmp_")
+    company_doc = {
+        "company_id": company_id,
+        "name": payload["name"],
+        "cnpj": payload["cnpj"],
+        "cnpj_digits": cnpj_digits,
+        "ie": payload.get("ie"),
+        "status": payload.get("status") or "ativa",
+        "slug": payload.get("slug"),
+        "email": payload["email"].lower(),
+        "whatsapp": payload.get("whatsapp") or payload.get("contact_phone"),
+        "address": address_doc,
+        # Representante Legal
+        "rep_name": rep_name,
+        "rep_role": payload.get("rep_role"),
+        "rep_cpf": rep_cpf,
+        "rep_rg": payload.get("rep_rg"),
+        "rep_phone": rep_phone,
+        "rep_email": comp_email,
+        # Dados Bancários
+        "bank_name": payload.get("bank_name"),
+        "account_type": payload.get("account_type"),
+        "agency": payload.get("agency"),
+        "account_number": payload.get("account_number"),
+        "pix_type": payload.get("pix_type"),
+        "pix_key": payload.get("pix_key"),
+        "bank_favored_name": payload.get("bank_favored_name"),
+        # Regras Comerciais
+        "discount_percent": 0.0,
+        "employee_discount_pct": float(payload.get("employee_discount_pct") or 0.0),
+        "payroll_enabled": bool(payload.get("payroll_enabled", True)),
+        "payroll_limit_percent": float(payload.get("payroll_limit_percent") or 35.0),
+        "propagandista_id": propagandista_id,
+        "representative_user_id": rep_user_id,
+        "active": True,
+        "created_at": _now_iso(),
+    }
+    await db.companies.insert_one(company_doc)
+
+    await db.users.update_one(
+        {"user_id": rep_user_id},
+        {"$set": {"company_admin_of": company_id}}
+    )
+
+    res = await db.companies.find_one({"company_id": company_id}, {"_id": 0})
+    res["representative_credentials"] = {"email": comp_email, "password": plain_password}
+    return res
+
+
+@router.get("/company/billings")
+async def company_list_billings(request: Request, user: dict = Depends(_company_admin_lazy)):
+    """Retorna os faturamentos consolidados da empresa do usuario logado."""
+    db = request.app.db
+    c = await _get_user_company(db, user)
+    items = await db.company_billings.find({"company_id": c["company_id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"billings": items}
+
+
+@router.post("/company/billings/{billing_id}/pay")
+async def company_billing_create_payment(request: Request, billing_id: str, user: dict = Depends(_company_admin_lazy)):
+    """Gera cobrança MercadoPago (PIX / Boleto / Cartão) para a fatura consolidada da empresa."""
+    import payments_service
+    db = request.app.db
+    c = await _get_user_company(db, user)
+    billing = await db.company_billings.find_one({"billing_id": billing_id, "company_id": c["company_id"]}, {"_id": 0})
+    if not billing:
+        raise HTTPException(status_code=404, detail="Faturamento não encontrado para a sua empresa")
+    if billing.get("status") == "paid":
+        raise HTTPException(status_code=400, detail="Faturamento já se encontra pago")
+
+    frontend = os.environ.get("FRONTEND_URL") or os.environ.get("APP_URL") or ""
+    backend = os.environ.get("BACKEND_URL") or ""
+    if not frontend:
+        frontend = str(request.base_url).rstrip("/").replace("/api", "")
+    if not backend:
+        backend = str(request.base_url).rstrip("/")
+
+    try:
+        pref = await payments_service.create_billing_preference(db, billing, frontend, backend)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha ao gerar cobrança MercadoPago: {e}")
+
+    init_point = pref.get("init_point") if pref.get("environment") == "prod" else (pref.get("sandbox_init_point") or pref.get("init_point"))
+    await db.company_billings.update_one(
+        {"billing_id": billing_id},
+        {"$set": {"payment_preference_id": pref["preference_id"], "payment_url": init_point, "status": "awaiting_payment"}},
+    )
+    return {"preference_id": pref["preference_id"], "payment_url": init_point, "environment": pref["environment"]}
 
 
 async def create_propagandista_commissions_for_order(db, order: Dict):

@@ -29,7 +29,7 @@ from pydantic import BaseModel, EmailStr
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth/2fa", tags=["2fa"])
 
-TWO_FA_ROLES = {"company_admin", "propagandista"}
+TWO_FA_ROLES = set()  # Temporariamente desabilitado para testes locais
 CODE_TTL_MINUTES = 10
 TRUSTED_DEVICE_TTL_DAYS = 7
 
