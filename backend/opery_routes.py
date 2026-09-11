@@ -240,11 +240,11 @@ async def nf_issued_callback(
 async def opery_docs_spec():
     """Retorna o conteudo Markdown da spec publica.
 
-    Le do arquivo /app/backend/opery_docs.md (sobe junto com o backend em prod).
-    Fallback: /app/memory/OPERY_INTEGRATION_SPEC.md (ambiente dev).
+    Le do arquivo opery_docs.md ao lado deste modulo (sobe junto com o backend em prod).
     """
-    for candidate in ("/app/backend/opery_docs.md", "/app/memory/OPERY_INTEGRATION_SPEC.md",
-                      os.path.join(os.path.dirname(__file__), "opery_docs.md")):
+    # Prioriza o path relativo ao próprio arquivo (funciona em qualquer instalação: /app/backend, /var/www/oxxpharma/backend, etc.)
+    for candidate in (os.path.join(os.path.dirname(__file__), "opery_docs.md"),
+                      "/app/backend/opery_docs.md"):
         if candidate and os.path.exists(candidate):
             with open(candidate, "r", encoding="utf-8") as f:
                 return {"content": f.read(), "path": candidate}
