@@ -2010,6 +2010,21 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
         ]}]
     total = await db.orders.count_documents(q)
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
+
+    # Enrich customer_cpf and customer_phone from user record if missing on order
+    uids = list({o.get("user_id") for o in orders if o.get("user_id")})
+    if uids:
+        u_list = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1, "cpf": 1, "cpf_digits": 1, "phone": 1, "phone_digits": 1}).to_list(len(uids))
+        users_map = {u["user_id"]: u for u in u_list}
+        for o in orders:
+            u = users_map.get(o.get("user_id")) or {}
+            if not o.get("customer_cpf") and not o.get("customer_cpf_digits"):
+                if u.get("cpf"): o["customer_cpf"] = u["cpf"]
+                elif u.get("cpf_digits"): o["customer_cpf_digits"] = u["cpf_digits"]
+            if not o.get("customer_phone"):
+                phone_val = u.get("phone") or u.get("phone_digits") or (o.get("shipping_address") or {}).get("phone") or (o.get("pickup_snapshot") or {}).get("phone") or ""
+                if phone_val: o["customer_phone"] = phone_val
+
     return {"orders": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
 

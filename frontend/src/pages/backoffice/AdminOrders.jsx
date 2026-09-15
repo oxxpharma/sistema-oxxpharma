@@ -41,6 +41,25 @@ const isMissingCep = (o) => {
 };
 const orderHasGaps = (o) => isMissingCpf(o) || isMissingCep(o);
 
+const formatCpf = (val) => {
+  if (!val) return null;
+  const digits = String(val).replace(/\D/g, '');
+  if (digits.length !== 11) return val;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+};
+
+const formatPhone = (val) => {
+  if (!val) return null;
+  const digits = String(val).replace(/\D/g, '');
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return val;
+};
+
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -265,6 +284,12 @@ export default function AdminOrders() {
                       <td className="p-3">
                         <div className="font-semibold">{o.customer_name}</div>
                         <div className="text-xs text-txt-secondary">{o.customer_email}</div>
+                        {(o.customer_cpf || o.customer_cpf_digits || o.customer_phone || o.shipping_address?.phone || o.pickup_snapshot?.phone) && (
+                          <div className="text-[11px] text-txt-secondary font-mono mt-0.5">
+                            {formatCpf(o.customer_cpf || o.customer_cpf_digits) && <span className="mr-2">CPF: {formatCpf(o.customer_cpf || o.customer_cpf_digits)}</span>}
+                            {formatPhone(o.customer_phone || o.shipping_address?.phone || o.pickup_snapshot?.phone) && <span>Tel: {formatPhone(o.customer_phone || o.shipping_address?.phone || o.pickup_snapshot?.phone)}</span>}
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-xs">{formatDateTime(o.created_at)}</td>
                       <td className="p-3 text-right font-bold">{formatCurrency(o.total)}</td>
@@ -338,7 +363,15 @@ export default function AdminOrders() {
             </div>
             <div className="p-5 space-y-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><div className="text-txt-secondary text-xs">Cliente</div><div className="font-bold">{selected.customer_name}</div><div className="text-xs">{selected.customer_email}</div></div>
+                <div>
+                  <div className="text-txt-secondary text-xs">Cliente</div>
+                  <div className="font-bold">{selected.customer_name}</div>
+                  <div className="text-xs text-txt-secondary">{selected.customer_email}</div>
+                  <div className="text-xs text-txt-secondary mt-1 space-y-0.5 font-mono">
+                    <div><span className="font-sans font-semibold text-txt-primary">CPF:</span> {formatCpf(selected.customer_cpf || selected.customer_cpf_digits) || '—'}</div>
+                    <div><span className="font-sans font-semibold text-txt-primary">Telefone:</span> {formatPhone(selected.customer_phone || selected.shipping_address?.phone || selected.pickup_snapshot?.phone) || '—'}</div>
+                  </div>
+                </div>
                 <div><div className="text-txt-secondary text-xs">Pagamento</div><div className="font-bold">{selected.payment_method}</div><div className="text-xs">{selected.payment_status}</div></div>
               </div>
 
