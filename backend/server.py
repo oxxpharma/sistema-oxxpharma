@@ -1987,7 +1987,7 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
 # ==================== ADMIN ORDERS ====================
 
 @app.get("/api/admin/orders")
-async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, pickup: Optional[bool] = False, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, pickup: Optional[bool] = False, missing_nf: Optional[bool] = False, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
     q = {}
     if status:
@@ -2007,6 +2007,12 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
             {"customer_cpf_digits": {"$exists": False}},
             {"shipping_address.zip_code": {"$in": [None, ""]}},
             {"shipping_address.zip_code": {"$not": {"$regex": r"\d{5}-?\d{3}"}}},
+        ]}]
+    if missing_nf:
+        q["$and"] = (q.get("$and") or []) + [{"$or": [
+            {"nf_meta": None},
+            {"nf_meta": {"$exists": False}},
+            {"nf_meta": {}}
         ]}]
     total = await db.orders.count_documents(q)
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)

@@ -67,6 +67,7 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [missingOnly, setMissingOnly] = useState(false);
   const [pickupOnly, setPickupOnly] = useState(false);
+  const [missingNfOnly, setMissingNfOnly] = useState(false);
   const [selected, setSelected] = useState(null);
   const [fixing, setFixing] = useState(null);
   const [page, setPage] = useState(1);
@@ -98,6 +99,7 @@ export default function AdminOrders() {
       if (search) q.set('search', search);
       if (missingOnly) q.set('missing_data', 'true');
       if (pickupOnly) q.set('pickup', 'true');
+      if (missingNfOnly) q.set('missing_nf', 'true');
       q.set('page', String(targetPage));
       q.set('limit', String(PAGE_LIMIT));
       const d = await api.get(`/api/admin/orders?${q}`);
@@ -107,7 +109,7 @@ export default function AdminOrders() {
       setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly, pickupOnly]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly, pickupOnly, missingNfOnly]);
 
   const updateStatus = async (orderId, newStatus) => {
     // Se o novo status é "shipped", abre modal para adicionar tracking code
@@ -240,6 +242,11 @@ export default function AdminOrders() {
           <input type="checkbox" checked={pickupOnly} onChange={(e) => setPickupOnly(e.target.checked)} />
           <Store className="w-4 h-4" />
           Retirada no local
+        </label>
+        <label className={`h-10 px-3 inline-flex items-center gap-2 rounded-lg text-sm cursor-pointer border ${missingNfOnly ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-medium' : 'bg-bg-secondary border-border'}`} data-testid="missing-nf-filter">
+          <input type="checkbox" checked={missingNfOnly} onChange={(e) => setMissingNfOnly(e.target.checked)} />
+          <Paperclip className="w-4 h-4 text-indigo-600" />
+          Sem Nota Fiscal
         </label>
         <Button variant="outline" onClick={() => load(1)}>Buscar</Button>
       </div>
