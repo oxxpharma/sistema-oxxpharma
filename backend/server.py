@@ -10020,45 +10020,75 @@ async def audit_logger_middleware(request: Request, call_next):
     path = request.url.path
     method = request.method.upper()
 
+    # Safely capture request body for modifying operations
+    payload_dict = {}
+    if method in ("POST", "PUT", "DELETE", "PATCH") and (path.startswith("/api/admin") or path.startswith("/api/company") or path.startswith("/api/propagandista")):
+        if not path.startswith("/api/admin/audit-logs"):
+            try:
+                body_bytes = await request.body()
+                if body_bytes:
+                    try:
+                        import json as _json
+                        payload_dict = _json.loads(body_bytes.decode("utf-8"))
+                    except Exception:
+                        payload_dict = {}
+
+                # Re-wrap receive function so route handler can read body again
+                async def receive():
+                    return {"type": "http.request", "body": body_bytes}
+
+                request = Request(request.scope, receive=receive)
+            except Exception as e:
+                logger.warning(f"Audit middleware body capture error: {e}")
+
     response = await call_next(request)
 
-    # Intercept modifying HTTP requests to admin/company APIs
+    # Intercept modifying HTTP requests to admin/company/propagandista APIs
     if method in ("POST", "PUT", "DELETE", "PATCH") and response.status_code < 400:
-        if path.startswith("/api/admin") or path.startswith("/api/company"):
+        if path.startswith("/api/admin") or path.startswith("/api/company") or path.startswith("/api/propagandista"):
             if not path.startswith("/api/admin/audit-logs"):
                 try:
                     user = None
                     auth_header = request.headers.get("Authorization")
                     if auth_header and auth_header.startswith("Bearer "):
                         token = auth_header.split(" ")[1]
-                        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-                        uid = payload.get("sub")
+                        payload_jwt = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                        uid = payload_jwt.get("sub")
                         if uid and hasattr(app, "db") and app.db is not None:
                             user = await app.db.users.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
 
-                    action, entity_type, description = audit_service.infer_entity_and_action(method, path)
-                    parts = [p for p in path.split("/") if p]
-                    entity_id = parts[-1] if len(parts) > 3 else None
+                    action, entity_type, entity_id, action_subpath = audit_service.parse_path_and_action(method, path)
                     ip = audit_service.get_client_ip(request)
                     ua = request.headers.get("User-Agent", "")
 
                     if hasattr(app, "db") and app.db is not None:
-                        asyncio.create_task(
-                            audit_service.log_audit_event(
-                                app.db,
-                                user=user,
-                                action=action,
-                                entity_type=entity_type,
-                                entity_id=entity_id,
-                                description=description,
-                                ip=ip,
-                                user_agent=ua,
-                                method=method,
-                                path=path
-                            )
-                        )
+                        async def _async_audit():
+                            try:
+                                description, entity_name, changes_summary = await audit_service.enrich_audit_details(
+                                    app.db, method, path, action, entity_type, entity_id, action_subpath, payload_dict
+                                )
+                                await audit_service.log_audit_event(
+                                    app.db,
+                                    user=user,
+                                    action=action,
+                                    entity_type=entity_type,
+                                    entity_id=entity_id,
+                                    description=description,
+                                    ip=ip,
+                                    user_agent=ua,
+                                    method=method,
+                                    path=path,
+                                    payload=payload_dict,
+                                    action_subpath=action_subpath,
+                                    entity_name=entity_name,
+                                    changes_summary=changes_summary
+                                )
+                            except Exception as err:
+                                logger.warning(f"Audit log enrichment error: {err}")
+
+                        asyncio.create_task(_async_audit())
                 except Exception as ex:
-                    logger.warning(f"Audit middleware background task skipped: {ex}")
+                    logger.warning(f"Audit middleware task skipped: {ex}")
 
     return response
 

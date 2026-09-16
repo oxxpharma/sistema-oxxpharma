@@ -4,10 +4,38 @@ import { toast } from 'sonner';
 import {
   ShieldAlert, Search, Download, Filter, Calendar,
   Loader2, Trash2, Edit, PlusCircle, Users, Activity,
-  Eye, RefreshCw, X, Copy, Check
+  Eye, RefreshCw, X, Copy, Check, Info, FileText, User, ShoppingBag, Building2, Package
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+
+const ENTITY_LABELS = {
+  orders: 'Pedido',
+  pedidos: 'Pedido',
+  users: 'Usuário',
+  usuarios: 'Usuário',
+  products: 'Produto',
+  produtos: 'Produto',
+  companies: 'Empresa',
+  empresas: 'Empresa',
+  'company-billings': 'Fatura Convênio',
+  billings: 'Fatura Convênio',
+  categories: 'Categoria',
+  coupons: 'Cupom',
+  settings: 'Configurações',
+  roles: 'Perfil de Acesso',
+  'role-profiles': 'Perfil de Acesso',
+  igvd: 'Vouchers IGVD',
+  sistema: 'Sistema'
+};
+
+const ENTITY_ICONS = {
+  orders: ShoppingBag,
+  users: User,
+  products: Package,
+  companies: Building2,
+  'company-billings': FileText,
+};
 
 export default function AdminAuditLogs() {
   const [data, setData] = useState(null);
@@ -98,6 +126,16 @@ export default function AdminAuditLogs() {
     active_admins: 0
   };
 
+  // Helper para sanitizar exibições legadas de ID (ex: esconder #nf ou #status)
+  const sanitizeEntityId = (id) => {
+    if (!id) return null;
+    const lower = id.toLowerCase();
+    if (['nf', 'status', 'issue-invoice', 'impersonate', 'contract', 'limit'].includes(lower)) {
+      return null;
+    }
+    return id.length > 12 ? `#${id.slice(-8).toUpperCase()}` : `#${id}`;
+  };
+
   return (
     <div data-testid="admin-audit-logs-page" className="space-y-6">
       {/* Cabeçalho */}
@@ -107,7 +145,7 @@ export default function AdminAuditLogs() {
             <ShieldAlert className="w-7 h-7 text-brand-main" /> Auditoria & Log de Operações
           </h1>
           <p className="text-sm text-txt-secondary mt-1">
-            Registro de todas as ações de criação, edição e exclusão realizadas pela equipe administrativa.
+            Registro detalhado de todas as ações de criação, edição e exclusão realizadas no sistema.
           </p>
         </div>
 
@@ -190,13 +228,13 @@ export default function AdminAuditLogs() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="lg:col-span-2">
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-txt-secondary mb-1">
-              Buscar (Nome, E-mail, IP, Descrição)
+              Buscar (Nome, E-mail, Recurso, IP)
             </label>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-3 text-txt-secondary" />
               <input
                 type="text"
-                placeholder="Ex: João, prod_123, 192.168..."
+                placeholder="Ex: Jocilene, Paracetamol, 192.168..."
                 value={search}
                 onChange={e => { setSearch(e.target.value); setPage(1); }}
                 className="w-full h-10 pl-9 pr-3 text-sm bg-white border border-border rounded-xl focus:outline-none focus:border-brand-main"
@@ -217,7 +255,7 @@ export default function AdminAuditLogs() {
               <option value="CREATE">Criação (CREATE)</option>
               <option value="UPDATE">Edição (UPDATE)</option>
               <option value="DELETE">Exclusão (DELETE)</option>
-              <option value="OTHER">Outras Operações</option>
+              <option value="EXECUTE">Execução (EXECUTE)</option>
             </select>
           </div>
 
@@ -231,15 +269,15 @@ export default function AdminAuditLogs() {
               className="w-full h-10 px-3 text-sm bg-white border border-border rounded-xl focus:outline-none focus:border-brand-main"
             >
               <option value="">Todas as Entidades</option>
+              <option value="orders">Pedidos</option>
               <option value="products">Produtos</option>
-              <option value="categories">Categorias</option>
               <option value="companies">Empresas Convênio</option>
               <option value="users">Usuários</option>
-              <option value="orders">Pedidos</option>
               <option value="company-billings">Faturamentos</option>
+              <option value="categories">Categorias</option>
               <option value="coupons">Cupons</option>
               <option value="settings">Configurações</option>
-              <option value="roles">Perfis</option>
+              <option value="roles">Perfis de Acesso</option>
             </select>
           </div>
 
@@ -292,61 +330,78 @@ export default function AdminAuditLogs() {
                   <th className="p-3.5">Administrador</th>
                   <th className="p-3.5">Ação</th>
                   <th className="p-3.5">Entidade</th>
-                  <th className="p-3.5">Descrição da Atividade</th>
+                  <th className="p-3.5">Descrição da Operação</th>
                   <th className="p-3.5">IP</th>
                   <th className="p-3.5 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {data.items.map(log => (
-                  <tr key={log.log_id} className="hover:bg-bg-secondary/40 transition-colors">
-                    <td className="p-3.5 text-xs font-mono whitespace-nowrap text-txt-secondary">
-                      {log.created_at ? log.created_at.slice(0, 19).replace('T', ' ') : '—'}
-                    </td>
+                {data.items.map(log => {
+                  const entLabel = ENTITY_LABELS[log.entity_type] || log.entity_type;
+                  const cleanId = sanitizeEntityId(log.entity_id);
 
-                    <td className="p-3.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-brand-light text-brand-main font-black text-xs flex items-center justify-center shrink-0 uppercase">
-                          {log.user_name ? log.user_name.slice(0, 2) : 'AD'}
+                  return (
+                    <tr key={log.log_id} className="hover:bg-bg-secondary/40 transition-colors">
+                      <td className="p-3.5 text-xs font-mono whitespace-nowrap text-txt-secondary">
+                        {log.created_at ? log.created_at.slice(0, 19).replace('T', ' ') : '—'}
+                      </td>
+
+                      <td className="p-3.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-brand-light text-brand-main font-black text-xs flex items-center justify-center shrink-0 uppercase">
+                            {log.user_name ? log.user_name.slice(0, 2) : 'AD'}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-txt-primary truncate text-xs">{log.user_name}</div>
+                            <div className="text-[11px] text-txt-secondary truncate">{log.user_email}</div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-txt-primary truncate text-xs">{log.user_name}</div>
-                          <div className="text-[11px] text-txt-secondary truncate">{log.user_email}</div>
+                      </td>
+
+                      <td className="p-3.5 whitespace-nowrap">
+                        <ActionBadge action={log.action} />
+                      </td>
+
+                      <td className="p-3.5 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-bg-secondary px-2.5 py-1 rounded-lg text-txt-primary border border-border">
+                          <span>{entLabel}</span>
+                          {log.entity_name ? (
+                            <span className="text-brand-main font-bold">· {log.entity_name.split(' ')[0]}</span>
+                          ) : cleanId ? (
+                            <span className="font-mono text-txt-secondary">{cleanId}</span>
+                          ) : null}
+                        </span>
+                      </td>
+
+                      <td className="p-3.5 max-w-sm">
+                        <div className="font-medium text-xs text-txt-primary truncate" title={log.description}>
+                          {log.description}
                         </div>
-                      </div>
-                    </td>
+                        {log.changes_summary && (
+                          <div className="text-[11px] text-txt-secondary truncate mt-0.5 font-mono" title={log.changes_summary}>
+                            {log.changes_summary}
+                          </div>
+                        )}
+                      </td>
 
-                    <td className="p-3.5 whitespace-nowrap">
-                      <ActionBadge action={log.action} />
-                    </td>
+                      <td className="p-3.5 text-xs font-mono text-txt-secondary whitespace-nowrap">
+                        {log.ip}
+                      </td>
 
-                    <td className="p-3.5 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-xs font-mono bg-bg-secondary px-2.5 py-1 rounded-lg text-txt-primary border border-border">
-                        {log.entity_type} {log.entity_id ? `#${log.entity_id.slice(-6)}` : ''}
-                      </span>
-                    </td>
-
-                    <td className="p-3.5 font-medium text-xs text-txt-primary max-w-xs truncate" title={log.description}>
-                      {log.description}
-                    </td>
-
-                    <td className="p-3.5 text-xs font-mono text-txt-secondary whitespace-nowrap">
-                      {log.ip}
-                    </td>
-
-                    <td className="p-3.5 text-right whitespace-nowrap">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSelectedLog(log)}
-                        className="text-xs h-8 px-2.5"
-                        title="Ver detalhes da auditoria"
-                      >
-                        <Eye className="w-3.5 h-3.5 mr-1" /> Detalhes
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                      <td className="p-3.5 text-right whitespace-nowrap">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedLog(log)}
+                          className="text-xs h-8 px-2.5"
+                          title="Ver detalhes da auditoria"
+                        >
+                          <Eye className="w-3.5 h-3.5 mr-1" /> Detalhes
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -395,11 +450,12 @@ export default function AdminAuditLogs() {
             className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
+            {/* Modal Header */}
             <div className="p-5 border-b border-border flex items-center justify-between shrink-0 bg-bg-secondary/30">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <ShieldAlert className="w-5 h-5 text-brand-main" />
                 <div>
-                  <h2 className="font-heading font-black text-lg text-txt-primary">Detalhe do Log de Auditoria</h2>
+                  <h2 className="font-heading font-black text-lg text-txt-primary">Detalhes da Operação</h2>
                   <p className="text-xs font-mono text-txt-secondary">{selectedLog.log_id}</p>
                 </div>
               </div>
@@ -411,11 +467,75 @@ export default function AdminAuditLogs() {
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto space-y-4 text-sm">
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 text-sm">
+
+              {/* CARD DE RESUMO DETALHADO */}
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl p-5 shadow-md">
+                <div className="flex items-center justify-between gap-3 mb-3 border-b border-slate-700 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ActionBadge action={selectedLog.action} />
+                    <span className="font-heading font-bold text-sm text-slate-200">
+                      {ENTITY_LABELS[selectedLog.entity_type] || selectedLog.entity_type}
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono text-slate-400">
+                    {selectedLog.created_at ? selectedLog.created_at.slice(0, 19).replace('T', ' ') : ''}
+                  </span>
+                </div>
+
+                {/* Recurso Afetado */}
+                {(selectedLog.entity_name || selectedLog.entity_id) && (
+                  <div className="mb-3">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Item / Recurso Afetado</div>
+                    <div className="text-base font-heading font-black text-white mt-0.5">
+                      {selectedLog.entity_name || `#${selectedLog.entity_id}`}
+                    </div>
+                  </div>
+                )}
+
+                {/* Descrição em Português */}
+                <div className="mb-3">
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Descrição da Atividade</div>
+                  <div className="text-sm font-medium text-slate-100 mt-0.5">
+                    {selectedLog.description}
+                  </div>
+                </div>
+
+                {/* Resumo de Campos Modificados */}
+                {selectedLog.payload && Object.keys(selectedLog.payload).length > 0 && (
+                  <div className="pt-3 border-t border-slate-700">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-2">
+                      Parâmetros / Campos Enviados
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(selectedLog.payload).map(([k, v]) => {
+                        if (k === 'password' || k === 'password_hash' || k === '_id') return null;
+                        const strVal = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                        return (
+                          <div key={k} className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs">
+                            <span className="text-slate-400 font-mono">{k}:</span>{' '}
+                            <span className="font-semibold text-emerald-300">{strVal}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* GRID DE METADADOS */}
               <div className="grid grid-cols-2 gap-4 bg-bg-secondary/40 p-4 rounded-xl border border-border">
                 <div>
-                  <div className="text-xs text-txt-secondary">Data e Hora:</div>
-                  <div className="font-semibold text-txt-primary font-mono mt-0.5">{selectedLog.created_at}</div>
+                  <div className="text-xs text-txt-secondary">Administrador Responsável:</div>
+                  <div className="font-semibold text-txt-primary mt-0.5">{selectedLog.user_name}</div>
+                  <div className="text-xs text-txt-secondary">{selectedLog.user_email}</div>
+                </div>
+
+                <div>
+                  <div className="text-xs text-txt-secondary">Cargo / Perfil:</div>
+                  <div className="font-semibold text-txt-primary mt-0.5 capitalize">{selectedLog.user_role}</div>
+                  <div className="text-xs text-txt-secondary">ID: {selectedLog.user_id}</div>
                 </div>
 
                 <div>
@@ -424,36 +544,12 @@ export default function AdminAuditLogs() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-txt-secondary">Administrador:</div>
-                  <div className="font-semibold text-txt-primary mt-0.5">{selectedLog.user_name} ({selectedLog.user_email})</div>
-                </div>
-
-                <div>
-                  <div className="text-xs text-txt-secondary">Cargo / Função:</div>
-                  <div className="font-semibold text-txt-primary mt-0.5 capitalize">{selectedLog.user_role}</div>
-                </div>
-
-                <div>
-                  <div className="text-xs text-txt-secondary">Método & Rota HTTP:</div>
+                  <div className="text-xs text-txt-secondary">Método & Rota API:</div>
                   <div className="font-mono text-xs font-semibold text-txt-primary mt-0.5">{selectedLog.method} {selectedLog.path}</div>
                 </div>
-
-                <div>
-                  <div className="text-xs text-txt-secondary">Tipo de Ação & Entidade:</div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <ActionBadge action={selectedLog.action} />
-                    <span className="font-mono text-xs font-semibold text-txt-primary">{selectedLog.entity_type}</span>
-                  </div>
-                </div>
               </div>
 
-              <div>
-                <div className="text-xs font-semibold text-txt-secondary mb-1">Descrição da Atividade:</div>
-                <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm font-medium">
-                  {selectedLog.description}
-                </div>
-              </div>
-
+              {/* USER AGENT */}
               <div>
                 <div className="text-xs text-txt-secondary mb-1">Navegador / User Agent:</div>
                 <div className="bg-bg-secondary text-txt-secondary font-mono text-xs p-2.5 rounded-lg border border-border truncate">
@@ -461,13 +557,14 @@ export default function AdminAuditLogs() {
                 </div>
               </div>
 
+              {/* RAW JSON PAYLOAD */}
               {selectedLog.payload && Object.keys(selectedLog.payload).length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-semibold text-txt-secondary">Payload / Dados Enviados (JSON):</div>
+                    <div className="text-xs font-semibold text-txt-secondary">Payload JSON Completo:</div>
                     <button
                       onClick={() => handleCopyPayload(selectedLog.payload)}
-                      className="text-xs text-brand-main hover:underline flex items-center gap-1"
+                      className="text-xs text-brand-main hover:underline flex items-center gap-1 font-semibold"
                     >
                       {copiedPayload ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                       {copiedPayload ? 'Copiado!' : 'Copiar JSON'}
@@ -480,6 +577,7 @@ export default function AdminAuditLogs() {
               )}
             </div>
 
+            {/* Modal Footer */}
             <div className="p-4 border-t border-border flex justify-end shrink-0 bg-bg-secondary/20">
               <Button onClick={() => setSelectedLog(null)}>Fechar</Button>
             </div>
