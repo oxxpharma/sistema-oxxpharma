@@ -239,8 +239,8 @@ export default function AdminOrders() {
           <option value="">Todos os tipos (Clientes e Redes)</option>
           <option value="customer">👤 Cliente Final (Consumidor)</option>
           <option value="distributor">🏢 Todos os Distribuidores (Redes)</option>
-          <option value="network_1">💜 Rede 1 (Equipe Corporativa)</option>
-          <option value="network_2">💙 Rede 2 (Equipe Propagandista)</option>
+          <option value="network_1">💼 Rede 1 (Equipe Corporativa)</option>
+          <option value="network_2">👔 Rede 2 (Equipe Propagandista)</option>
         </select>
         <label className={`h-10 px-3 inline-flex items-center gap-2 rounded-lg text-sm cursor-pointer border ${missingOnly ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-bg-secondary border-border'}`} data-testid="missing-data-filter">
           <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
