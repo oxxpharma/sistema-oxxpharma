@@ -68,6 +68,7 @@ export default function AdminOrders() {
   const [missingOnly, setMissingOnly] = useState(false);
   const [pickupOnly, setPickupOnly] = useState(false);
   const [missingNfOnly, setMissingNfOnly] = useState(false);
+  const [networkFilter, setNetworkFilter] = useState('');
   const [selected, setSelected] = useState(null);
   const [fixing, setFixing] = useState(null);
   const [page, setPage] = useState(1);
@@ -100,6 +101,7 @@ export default function AdminOrders() {
       if (missingOnly) q.set('missing_data', 'true');
       if (pickupOnly) q.set('pickup', 'true');
       if (missingNfOnly) q.set('missing_nf', 'true');
+      if (networkFilter) q.set('network_type', networkFilter);
       q.set('page', String(targetPage));
       q.set('limit', String(PAGE_LIMIT));
       const d = await api.get(`/api/admin/orders?${q}`);
@@ -109,7 +111,7 @@ export default function AdminOrders() {
       setPage(d.page || targetPage);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly, pickupOnly, missingNfOnly]);
+  useEffect(() => { load(1); /* eslint-disable-next-line */ }, [status, missingOnly, pickupOnly, missingNfOnly, networkFilter]);
 
   const updateStatus = async (orderId, newStatus) => {
     // Se o novo status é "shipped", abre modal para adicionar tracking code
@@ -233,6 +235,13 @@ export default function AdminOrders() {
         <select value={status} onChange={e => setStatus(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm" data-testid="status-filter">
           {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
+        <select value={networkFilter} onChange={e => setNetworkFilter(e.target.value)} className="h-10 px-3 bg-bg-secondary border border-border rounded-lg text-sm font-medium" data-testid="network-type-filter">
+          <option value="">Todos os tipos (Clientes e Redes)</option>
+          <option value="customer">👤 Cliente Final (Consumidor)</option>
+          <option value="distributor">🏢 Todos os Distribuidores (Redes)</option>
+          <option value="network_1">💜 Rede 1 (Equipe Corporativa)</option>
+          <option value="network_2">💙 Rede 2 (Equipe Propagandista)</option>
+        </select>
         <label className={`h-10 px-3 inline-flex items-center gap-2 rounded-lg text-sm cursor-pointer border ${missingOnly ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-bg-secondary border-border'}`} data-testid="missing-data-filter">
           <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
           <AlertTriangle className="w-4 h-4" />
@@ -258,7 +267,7 @@ export default function AdminOrders() {
               <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
                 <tr>
                   <th className="text-left p-3">Pedido</th>
-                  <th className="text-left p-3">Cliente</th>
+                  <th className="text-left p-3">Cliente / Origem</th>
                   <th className="text-left p-3">Data</th>
                   <th className="text-right p-3">Total</th>
                   <th className="text-center p-3">Status</th>
@@ -271,6 +280,7 @@ export default function AdminOrders() {
                   const s = STATUS_LABELS[o.order_status] || STATUS_LABELS.pending;
                   const gaps = orderHasGaps(o);
                   const isPickup = !!o.is_pickup;
+                  const netType = o.customer_network_type || 'customer';
                   return (
                     <tr key={o.order_id} className={`border-t border-border hover:bg-bg-secondary/50 ${isPickup ? 'bg-orange-50/50' : ''} ${gaps ? 'bg-rose-50/40' : ''}`} data-testid={`order-row-${o.order_id}`}>
                       <td className="p-3 font-mono text-xs">
@@ -289,7 +299,22 @@ export default function AdminOrders() {
                         )}
                       </td>
                       <td className="p-3">
-                        <div className="font-semibold">{o.customer_name}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold">{o.customer_name}</span>
+                          {netType === 'network_1' ? (
+                            <span className="inline-flex items-center text-[10px] font-bold uppercase text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded" title="Distribuidor - Rede 1 (Corporativa)" data-testid={`net-badge-${o.order_id}`}>
+                              Rede 1
+                            </span>
+                          ) : netType === 'network_2' ? (
+                            <span className="inline-flex items-center text-[10px] font-bold uppercase text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded" title="Distribuidor - Rede 2 (Propagandista)" data-testid={`net-badge-${o.order_id}`}>
+                              Rede 2
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center text-[10px] font-medium uppercase text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded" title="Cliente Final (Consumidor)" data-testid={`net-badge-${o.order_id}`}>
+                              Cliente Final
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-txt-secondary">{o.customer_email}</div>
                         {(o.customer_cpf || o.customer_cpf_digits || o.customer_phone || o.shipping_address?.phone || o.pickup_snapshot?.phone) && (
                           <div className="text-[11px] text-txt-secondary font-mono mt-0.5">

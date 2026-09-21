@@ -2002,7 +2002,7 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
 # ==================== ADMIN ORDERS ====================
 
 @app.get("/api/admin/orders")
-async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, pickup: Optional[bool] = False, missing_nf: Optional[bool] = False, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+async def admin_list_orders(request: Request, status: Optional[str] = None, search: Optional[str] = None, tenant: Optional[str] = None, missing_data: Optional[bool] = False, pickup: Optional[bool] = False, missing_nf: Optional[bool] = False, network_type: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
     db = request.app.db
     q = {}
     if status:
@@ -2029,13 +2029,25 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
             {"nf_meta": {"$exists": False}},
             {"nf_meta": {}}
         ]}]
+    if network_type:
+        net_val = network_type.strip().lower()
+        if net_val == "distributor":
+            dist_uids = await db.users.distinct("user_id", {"$or": [{"network_type": {"$in": ["network_1", "network_2"]}}, {"networks": {"$in": ["network_1", "network_2"]}}]})
+            q["user_id"] = {"$in": dist_uids}
+        elif net_val == "customer":
+            dist_uids = await db.users.distinct("user_id", {"$or": [{"network_type": {"$in": ["network_1", "network_2"]}}, {"networks": {"$in": ["network_1", "network_2"]}}]})
+            q["user_id"] = {"$nin": dist_uids}
+        elif net_val in {"network_1", "network_2"}:
+            net_uids = await db.users.distinct("user_id", {"$or": [{"network_type": net_val}, {"networks": net_val}]})
+            q["user_id"] = {"$in": net_uids}
+
     total = await db.orders.count_documents(q)
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
 
-    # Enrich customer_cpf and customer_phone from user record if missing on order
+    # Enrich customer_cpf, customer_phone, and customer_network_type from user record
     uids = list({o.get("user_id") for o in orders if o.get("user_id")})
     if uids:
-        u_list = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1, "cpf": 1, "cpf_digits": 1, "phone": 1, "phone_digits": 1}).to_list(len(uids))
+        u_list = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1, "cpf": 1, "cpf_digits": 1, "phone": 1, "phone_digits": 1, "network_type": 1, "networks": 1}).to_list(len(uids))
         users_map = {u["user_id"]: u for u in u_list}
         for o in orders:
             u = users_map.get(o.get("user_id")) or {}
@@ -2045,6 +2057,12 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
             if not o.get("customer_phone"):
                 phone_val = u.get("phone") or u.get("phone_digits") or (o.get("shipping_address") or {}).get("phone") or (o.get("pickup_snapshot") or {}).get("phone") or ""
                 if phone_val: o["customer_phone"] = phone_val
+            o["customer_network_type"] = u.get("network_type") or "customer"
+            o["customer_networks"] = u.get("networks") or [o["customer_network_type"]]
+    else:
+        for o in orders:
+            o["customer_network_type"] = "customer"
+            o["customer_networks"] = ["customer"]
 
     return {"orders": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
