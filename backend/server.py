@@ -341,7 +341,12 @@ class ProductCreate(BaseModel):
     consumption_days: Optional[int] = None  # tempo de consumo estimado (dias)
     features: List[str] = []  # bullet points de caracteristicas (mostrado abaixo do nome)
     custom_fields: List[Dict] = []  # [{id?, title, text}] - quadros abaixo do botao comprar
-    combo_pricing: List[Dict] = []  # [{qty, price, discount_pct}] - preco por quantidade combinada
+    # SEO (Search Engine Optimization)
+    slug: Optional[str] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    seo_keywords: Optional[str] = None
+    canonical_url: Optional[str] = None
 
 class CategoryCreate(BaseModel):
     name: str
@@ -350,10 +355,12 @@ class CategoryCreate(BaseModel):
     parent: Optional[str] = None
     order: int = 0
     active: bool = True
-    # Iter 62 (SEO)
+    # SEO (Search Engine Optimization)
     slug: Optional[str] = None
     seo_title: Optional[str] = None
     seo_description: Optional[str] = None
+    seo_keywords: Optional[str] = None
+    canonical_url: Optional[str] = None
 
 class CartItemAdd(BaseModel):
     product_id: str
@@ -1251,10 +1258,12 @@ class SubcategoryCreate(BaseModel):
     category_ids: List[str] = []  # muitos-para-muitos com categorias
     order: int = 0
     active: bool = True
-    # Iter 62 (SEO)
+    # SEO (Search Engine Optimization)
     slug: Optional[str] = None
     seo_title: Optional[str] = None
     seo_description: Optional[str] = None
+    seo_keywords: Optional[str] = None
+    canonical_url: Optional[str] = None
 
 
 @app.get("/api/subcategories")
@@ -1416,10 +1425,11 @@ async def featured_products(request: Request, limit: int = 8):
 @app.get("/api/products/{product_id}")
 async def get_product(request: Request, product_id: str):
     db = request.app.db
-    p = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    p = await db.products.find_one({"$or": [{"product_id": product_id}, {"slug": product_id}]}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
-    related = await db.products.find({"category": p.get("category"), "product_id": {"$ne": product_id}, "active": True}, {"_id": 0}).limit(4).to_list(4)
+    real_pid = p.get("product_id")
+    related = await db.products.find({"category": p.get("category"), "product_id": {"$ne": real_pid}, "active": True}, {"_id": 0}).limit(4).to_list(4)
     user = await get_optional_user(request)
     _tenant = tenant_service.get_tenant(request)
     p = store_extras.apply_pricing_to_product(p, user, tenant=_tenant)
@@ -1434,9 +1444,9 @@ async def get_product(request: Request, product_id: str):
 
 @app.get("/api/admin/products/{product_id}")
 async def admin_get_product(request: Request, product_id: str, user: dict = Depends(require_admin())):
-    """Iter 62: retorna produto por ID para edicao no admin (inclui inativos)."""
+    """Iter 62: retorna produto por ID ou Slug para edicao no admin (inclui inativos)."""
     db = request.app.db
-    p = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    p = await db.products.find_one({"$or": [{"product_id": product_id}, {"slug": product_id}]}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
     return p
@@ -1462,7 +1472,10 @@ async def admin_list_products(request: Request, category: Optional[str] = None, 
 @app.post("/api/admin/products")
 async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
-    prod = {"product_id": gen_id("prod_"), **data.model_dump(), "created_at": now_iso()}
+    payload = data.model_dump()
+    base = _slugify(payload.get("slug") or payload["name"])
+    payload["slug"] = await _ensure_unique_slug(db, "products", base)
+    prod = {"product_id": gen_id("prod_"), **payload, "created_at": now_iso()}
     await db.products.insert_one(prod)
     return await db.products.find_one({"product_id": prod["product_id"]}, {"_id": 0})
 
@@ -1470,6 +1483,8 @@ async def create_product(request: Request, data: ProductCreate, user: dict = Dep
 async def update_product(request: Request, product_id: str, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     update = data.model_dump()
+    base = _slugify(update.get("slug") or update["name"])
+    update["slug"] = await _ensure_unique_slug(db, "products", base, exclude_id_field="product_id", exclude_id=product_id)
     update["updated_at"] = now_iso()
     r = await db.products.update_one({"product_id": product_id}, {"$set": update})
     if r.matched_count == 0:

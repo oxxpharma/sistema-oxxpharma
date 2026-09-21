@@ -80,16 +80,17 @@ export default function ProductDetails() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6" data-testid="product-details">
       <SEOHead
-        title={`${product.name}${product.brand ? ' - ' + product.brand : ''} | OxxPharma`}
-        description={(product.description || product.name || '').slice(0, 160)}
-        canonical={`/produto/${product.product_id}`}
+        title={product.seo_title || `${product.name}${product.brand ? ' - ' + product.brand : ''} | OxxPharma`}
+        description={product.seo_description || (product.description || product.name || '').slice(0, 160)}
+        keywords={product.seo_keywords}
+        canonical={product.canonical_url || `/produto/${product.slug || product.product_id}`}
         image={img}
         type="product"
         jsonLd={{
           "@context": "https://schema.org",
           "@type": "Product",
           "name": product.name,
-          "description": (product.description || '').slice(0, 500),
+          "description": (product.seo_description || product.description || '').slice(0, 500),
           "image": product.images || [],
           "sku": product.sku || product.product_id,
           "brand": product.brand ? { "@type": "Brand", "name": product.brand } : undefined,

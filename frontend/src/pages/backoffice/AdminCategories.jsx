@@ -4,9 +4,10 @@ import { Button } from '../../components/ui/Button';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Plus, Edit, Trash2, X, Loader2, Layers } from 'lucide-react';
 import { toast } from 'sonner';
+import SEOFormFields from '../../components/admin/SEOFormFields';
 
-const empty = { name: '', description: '', image_url: '', parent: null, order: 0, active: true, slug: '', seo_title: '', seo_description: '' };
-const emptySub = { name: '', description: '', category_ids: [], order: 0, active: true, slug: '', seo_title: '', seo_description: '' };
+const empty = { name: '', description: '', image_url: '', parent: null, order: 0, active: true, slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '' };
+const emptySub = { name: '', description: '', category_ids: [], order: 0, active: true, slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '' };
 
 export default function AdminCategories() {
   const [cats, setCats] = useState([]);
@@ -133,22 +134,38 @@ export default function AdminCategories() {
 
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="border-b border-border p-5 flex items-center justify-between shrink-0">
               <h2 className="font-heading font-black text-lg">{editing ? 'Editar categoria' : 'Nova categoria'}</h2>
               <button onClick={() => setShowForm(false)} className="p-1 hover:bg-bg-secondary rounded"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={submit} className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 <Input label="Nome*" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
                 <Textarea label="Descrição" rows={2} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} />
                 <Input label="Ordem" type="number" value={form.order} onChange={e => setForm({ ...form, order: e.target.value })} />
-                <div className="border-t border-border pt-3 mt-2">
-                  <div className="text-xs font-bold text-txt-secondary uppercase mb-2">SEO (Google)</div>
-                  <Input label="Slug (URL)" value={form.slug || ''} onChange={e => setForm({ ...form, slug: e.target.value })} placeholder="deixe em branco para gerar automaticamente" hint="Ex: cuidados-com-a-pele → /categoria/cuidados-com-a-pele" data-testid="cat-slug" />
-                  <Input label="Título SEO" value={form.seo_title || ''} onChange={e => setForm({ ...form, seo_title: e.target.value })} placeholder="Título mostrado no Google (até 60 caracteres)" className="mt-2" />
-                  <Textarea label="Descrição SEO" rows={2} value={form.seo_description || ''} onChange={e => setForm({ ...form, seo_description: e.target.value })} placeholder="Descrição mostrada no Google (até 160 caracteres)" className="mt-2" />
-                </div>
+                
+                <SEOFormFields
+                  values={form}
+                  onChange={(key, val) => setForm(f => ({ ...f, [key]: val }))}
+                  onAutoGenerate={() => {
+                    const catName = form.name || 'categoria';
+                    const autoSlug = catName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                    const autoTitle = `${catName} | OxxPharma`;
+                    const autoDesc = form.description ? form.description.slice(0, 155) : `Confira os melhores produtos da categoria ${catName} na OxxPharma com entrega rápida e ótimos preços.`;
+                    const autoKeywords = [catName, 'oxxpharma', 'produtos', 'farmacia'].join(', ');
+
+                    setForm(prev => ({
+                      ...prev,
+                      slug: prev.slug || autoSlug,
+                      seo_title: prev.seo_title || autoTitle,
+                      seo_description: prev.seo_description || autoDesc,
+                      seo_keywords: prev.seo_keywords || autoKeywords,
+                    }));
+                  }}
+                  defaultType="categoria"
+                />
+
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Ativa</label>
               </div>
               <div className="flex gap-2 p-5 border-t border-border shrink-0 bg-white">
@@ -162,13 +179,13 @@ export default function AdminCategories() {
 
       {showSubForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSubForm(false)}>
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="border-b border-border p-5 flex items-center justify-between shrink-0">
               <h2 className="font-heading font-black text-lg">{editingSub ? 'Editar subcategoria' : 'Nova subcategoria'}</h2>
               <button onClick={() => setShowSubForm(false)} className="p-1 hover:bg-bg-secondary rounded"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={submitSub} className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 <Input label="Nome*" required value={subForm.name} onChange={e => setSubForm({ ...subForm, name: e.target.value })} data-testid="subcat-name" />
                 <Textarea label="Descrição" rows={2} value={subForm.description || ''} onChange={e => setSubForm({ ...subForm, description: e.target.value })} />
                 <div>
@@ -194,12 +211,28 @@ export default function AdminCategories() {
                   </div>
                 </div>
                 <Input label="Ordem" type="number" value={subForm.order} onChange={e => setSubForm({ ...subForm, order: e.target.value })} />
-                <div className="border-t border-border pt-3 mt-2">
-                  <div className="text-xs font-bold text-txt-secondary uppercase mb-2">SEO (Google)</div>
-                  <Input label="Slug (URL)" value={subForm.slug || ''} onChange={e => setSubForm({ ...subForm, slug: e.target.value })} placeholder="deixe em branco para gerar automaticamente" hint="Ex: hidratantes → /subcategoria/hidratantes" data-testid="subcat-slug" />
-                  <Input label="Título SEO" value={subForm.seo_title || ''} onChange={e => setSubForm({ ...subForm, seo_title: e.target.value })} placeholder="Título no Google" className="mt-2" />
-                  <Textarea label="Descrição SEO" rows={2} value={subForm.seo_description || ''} onChange={e => setSubForm({ ...subForm, seo_description: e.target.value })} placeholder="Descrição no Google" className="mt-2" />
-                </div>
+                
+                <SEOFormFields
+                  values={subForm}
+                  onChange={(key, val) => setSubForm(f => ({ ...f, [key]: val }))}
+                  onAutoGenerate={() => {
+                    const subName = subForm.name || 'subcategoria';
+                    const autoSlug = subName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                    const autoTitle = `${subName} | OxxPharma`;
+                    const autoDesc = subForm.description ? subForm.description.slice(0, 155) : `Produtos da subcategoria ${subName} na OxxPharma com ótimas condições e pronta entrega.`;
+                    const autoKeywords = [subName, 'oxxpharma', 'subcategoria'].join(', ');
+
+                    setSubForm(prev => ({
+                      ...prev,
+                      slug: prev.slug || autoSlug,
+                      seo_title: prev.seo_title || autoTitle,
+                      seo_description: prev.seo_description || autoDesc,
+                      seo_keywords: prev.seo_keywords || autoKeywords,
+                    }));
+                  }}
+                  defaultType="subcategoria"
+                />
+
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={subForm.active} onChange={e => setSubForm({ ...subForm, active: e.target.checked })} /> Ativa</label>
               </div>
               <div className="flex gap-2 p-5 border-t border-border shrink-0 bg-white">

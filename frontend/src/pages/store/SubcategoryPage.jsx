@@ -61,7 +61,13 @@ export default function SubcategoryPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 md:py-10" data-testid="subcategory-page">
-      <SEOHead title={title} description={description} canonical={`/subcategoria/${sc.slug}`} jsonLd={jsonLd} />
+      <SEOHead
+        title={title}
+        description={description}
+        keywords={sc.seo_keywords}
+        canonical={sc.canonical_url || `/subcategoria/${sc.slug}`}
+        jsonLd={jsonLd}
+      />
 
       <nav className="text-xs text-txt-secondary mb-4 flex items-center gap-1 flex-wrap" aria-label="Trilha">
         <Link to="/" className="hover:text-brand-main">Início</Link>

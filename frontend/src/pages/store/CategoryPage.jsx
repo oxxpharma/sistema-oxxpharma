@@ -65,7 +65,8 @@ export default function CategoryPage() {
       <SEOHead
         title={title}
         description={description}
-        canonical={`/categoria/${cat.slug}`}
+        keywords={cat.seo_keywords}
+        canonical={cat.canonical_url || `/categoria/${cat.slug}`}
         image={cat.image_url || undefined}
         type="website"
         jsonLd={jsonLd}

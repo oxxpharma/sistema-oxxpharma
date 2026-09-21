@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/Input';
 import { Plus, Trash2, Upload, Loader2, ArrowLeft, Save, GripVertical, PlusCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import RichTextEditor from '../../components/admin/RichTextEditor';
+import SEOFormFields from '../../components/admin/SEOFormFields';
 
 const emptyForm = {
   name: '', description: '', description_html: '', price: 0, discount_price: null,
@@ -19,6 +20,7 @@ const emptyForm = {
   features: [],
   custom_fields: [],
   combo_pricing: [],
+  slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '',
 };
 
 export default function AdminProductForm() {
@@ -90,6 +92,11 @@ export default function AdminProductForm() {
               features: Array.isArray(prod.features) ? prod.features : [],
               custom_fields: Array.isArray(prod.custom_fields) ? prod.custom_fields : [],
               combo_pricing: Array.isArray(prod.combo_pricing) ? prod.combo_pricing : [],
+              slug: prod.slug || '',
+              seo_title: prod.seo_title || '',
+              seo_description: prod.seo_description || '',
+              seo_keywords: prod.seo_keywords || '',
+              canonical_url: prod.canonical_url || '',
             });
           } else {
             toast.error('Produto nao encontrado');
@@ -479,6 +486,29 @@ export default function AdminProductForm() {
             })}
           </div>
         </div>
+
+        <SEOFormFields
+          values={form}
+          onChange={(key, val) => setForm(f => ({ ...f, [key]: val }))}
+          onAutoGenerate={() => {
+            const prodName = form.name || 'produto';
+            const brandName = form.brand ? ` - ${form.brand}` : '';
+            const priceVal = form.price ? ` - R$ ${form.price.toFixed(2)}` : '';
+            const autoSlug = prodName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const autoTitle = `${prodName}${brandName}${priceVal}`;
+            const autoDesc = form.description ? form.description.slice(0, 155) : `Compre ${prodName}${brandName} na OxxPharma com os melhores preços e entrega rápida.`;
+            const autoKeywords = [prodName, form.brand, form.category, 'oxxpharma', 'farmacia'].filter(Boolean).join(', ');
+
+            setForm(prev => ({
+              ...prev,
+              slug: prev.slug || autoSlug,
+              seo_title: prev.seo_title || autoTitle,
+              seo_description: prev.seo_description || autoDesc,
+              seo_keywords: prev.seo_keywords || autoKeywords,
+            }));
+          }}
+          defaultType="produto"
+        />
 
         <div className="grid grid-cols-4 gap-3">
           <Input label="Peso (kg)" type="number" step="0.001" value={form.weight ?? ''} onChange={e => setForm({ ...form, weight: e.target.value ? parseFloat(e.target.value) : null })} placeholder="0.300" data-testid="prod-weight" />
