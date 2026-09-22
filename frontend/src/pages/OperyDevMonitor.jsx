@@ -93,7 +93,7 @@ export default function OperyDevMonitor() {
 
   if (loading && !config) {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center p-4">
         <div className="flex items-center gap-3">
           <RefreshCcw className="w-6 h-6 animate-spin text-orange-400" />
           <span className="font-mono text-sm text-slate-300">Carregando painel do desenvolvedor...</span>
