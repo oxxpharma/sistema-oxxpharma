@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Link } from 'react-router-dom';
 import {
   Loader2, Copy, Check, ExternalLink, Save, RefreshCcw, Eye, EyeOff,
   Store, CheckCircle2, XCircle, Clock, ArrowUpRight, ArrowDownLeft,
@@ -466,6 +465,7 @@ function InboundLogs() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const perPage = 20;
   const [kind, setKind] = useState('');
   const [ok, setOk] = useState('');
   const [loading, setLoading] = useState(true);
@@ -474,7 +474,7 @@ function InboundLogs() {
   const load = async (p = page) => {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ page: p, per_page: 30 });
+      const q = new URLSearchParams({ page: p, per_page: perPage });
       if (kind) q.set('kind', kind);
       if (ok) q.set('ok', ok);
       const d = await api.get(`/api/admin/opery/inbound-log?${q}`);
@@ -483,6 +483,9 @@ function InboundLogs() {
   };
 
   useEffect(() => { load(1); setPage(1); /* eslint-disable-next-line */ }, [kind, ok]);
+  useEffect(() => { load(page); /* eslint-disable-next-line */ }, [page]);
+
+  const totalPages = Math.ceil(total / perPage) || 1;
 
   return (
     <div className="space-y-3" data-testid="opery-inbound-logs">
@@ -509,38 +512,67 @@ function InboundLogs() {
         ) : items.length === 0 ? (
           <div className="p-8 text-center text-sm text-txt-secondary">Sem logs de entrada ainda.</div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
-              <tr>
-                <th className="p-2 text-left">Quando</th>
-                <th className="p-2 text-left">Tipo</th>
-                <th className="p-2 text-center">Status</th>
-                <th className="p-2 text-left">User-Agent / Origem</th>
-                <th className="p-2 text-left">Resumo</th>
-                <th className="p-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(log => (
-                <tr key={log.log_id} className="border-t border-border hover:bg-bg-secondary/40">
-                  <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(log.created_at)}</td>
-                  <td className="p-2"><span className="text-xs font-semibold">{log.kind}</span></td>
-                  <td className="p-2 text-center">
-                    {log.ok
-                      ? <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-bold"><CheckCircle2 className="w-3.5 h-3.5" /> OK</span>
-                      : <span className="inline-flex items-center gap-1 text-rose-700 text-xs font-bold"><XCircle className="w-3.5 h-3.5" /> Erro</span>}
-                  </td>
-                  <td className="p-2 text-xs truncate max-w-[220px]">{log.headers?.['user-agent'] || '—'}</td>
-                  <td className="p-2 text-xs text-txt-secondary truncate max-w-[280px]">
-                    {log.error || (log.response ? JSON.stringify(log.response).slice(0, 100) : '—')}
-                  </td>
-                  <td className="p-2">
-                    <button onClick={() => setSelected(log)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`view-inbound-${log.log_id}`}>Ver</button>
-                  </td>
+          <>
+            <table className="w-full text-sm">
+              <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
+                <tr>
+                  <th className="p-2 text-left">Quando</th>
+                  <th className="p-2 text-left">Tipo</th>
+                  <th className="p-2 text-center">Status</th>
+                  <th className="p-2 text-left">User-Agent / Origem</th>
+                  <th className="p-2 text-left">Resumo</th>
+                  <th className="p-2"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {items.map(log => (
+                  <tr key={log.log_id} className="border-t border-border hover:bg-bg-secondary/40">
+                    <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(log.created_at)}</td>
+                    <td className="p-2"><span className="text-xs font-semibold">{log.kind}</span></td>
+                    <td className="p-2 text-center">
+                      {log.ok
+                        ? <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-bold"><CheckCircle2 className="w-3.5 h-3.5" /> OK</span>
+                        : <span className="inline-flex items-center gap-1 text-rose-700 text-xs font-bold"><XCircle className="w-3.5 h-3.5" /> Erro</span>}
+                    </td>
+                    <td className="p-2 text-xs truncate max-w-[220px]">{log.headers?.['user-agent'] || '—'}</td>
+                    <td className="p-2 text-xs text-txt-secondary truncate max-w-[280px]">
+                      {log.error || (log.response ? JSON.stringify(log.response).slice(0, 100) : '—')}
+                    </td>
+                    <td className="p-2">
+                      <button onClick={() => setSelected(log)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`view-inbound-${log.log_id}`}>Ver</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-bg-secondary border-t border-border text-xs">
+              <span className="text-txt-secondary">
+                Página <b className="text-txt-primary">{page}</b> de <b className="text-txt-primary">{totalPages}</b> ({total} registros)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  data-testid="inbound-prev-page"
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  data-testid="inbound-next-page"
+                >
+                  Próxima
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -554,16 +586,18 @@ function InboundLogs() {
 function OutboundLogs() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const perPage = 20;
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [retrying, setRetrying] = useState(false);
 
-  const load = async () => {
+  const load = async (p = page) => {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ per_page: 50 });
+      const q = new URLSearchParams({ page: p, per_page: perPage });
       if (status) q.set('status', status);
       const d = await api.get(`/api/admin/opery/dispatch-log?${q}`);
       setItems(d.items || []); setTotal(d.total || 0);
@@ -581,7 +615,7 @@ function OutboundLogs() {
     try {
       const r = await api.post('/api/admin/opery/dispatch/retry?limit=100');
       toast.success(`Reprocessados: ${r.success} sucesso, ${r.failed} falhas${r.reason ? ` (${r.reason})` : ''}`);
-      load();
+      load(page);
     } catch (e) { toast.error(e.message); }
     finally { setRetrying(false); }
   };
@@ -590,12 +624,15 @@ function OutboundLogs() {
     try {
       await api.post(`/api/admin/opery/dispatch/${order_id}`);
       toast.success('Reenviado');
-      load();
+      load(page);
       if (selectedId === order_id) openDetail(order_id);
     } catch (e) { toast.error(e.message); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(1); setPage(1); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(page); /* eslint-disable-next-line */ }, [page]);
+
+  const totalPages = Math.ceil(total / perPage) || 1;
 
   return (
     <div className="space-y-3" data-testid="opery-outbound-logs">
@@ -606,7 +643,7 @@ function OutboundLogs() {
           <option value="failed">Falha</option>
           <option value="pending_config">Aguardando config</option>
         </select>
-        <Button variant="outline" size="sm" onClick={load}><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
+        <Button variant="outline" size="sm" onClick={() => load(page)}><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
         <Button size="sm" onClick={retry} disabled={retrying} data-testid="opery-retry-all">
           {retrying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />} Reprocessar falhas
         </Button>
@@ -619,49 +656,78 @@ function OutboundLogs() {
         ) : items.length === 0 ? (
           <div className="p-8 text-center text-sm text-txt-secondary">Sem envios registrados ainda.</div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
-              <tr>
-                <th className="p-2 text-left">Última tentativa</th>
-                <th className="p-2 text-left">Pedido</th>
-                <th className="p-2 text-center">Status</th>
-                <th className="p-2 text-center">Tentativas</th>
-                <th className="p-2 text-left">Erro / Response</th>
-                <th className="p-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(log => {
-                const s = DISPATCH_STATUS[log.status] || DISPATCH_STATUS.failed;
-                const Icon = s.icon;
-                return (
-                  <tr key={log.log_id} className="border-t border-border hover:bg-bg-secondary/40">
-                    <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(log.updated_at)}</td>
-                    <td className="p-2 font-mono text-xs">
-                      <a href={`/backoffice/pedidos?highlight=${log.order_id}`} className="text-brand-main hover:underline">
-                        #{log.order_id.slice(-8).toUpperCase()}
-                      </a>
-                    </td>
-                    <td className="p-2 text-center">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${s.color}`}>
-                        <Icon className="w-3 h-3" /> {s.label}
-                      </span>
-                    </td>
-                    <td className="p-2 text-center text-xs">{log.attempts}</td>
-                    <td className="p-2 text-xs text-txt-secondary truncate max-w-[280px]">
-                      {log.error || (log.response_body ? String(log.response_body).slice(0, 100) : '—')}
-                    </td>
-                    <td className="p-2 flex gap-2 whitespace-nowrap">
-                      <button onClick={() => openDetail(log.order_id)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`view-outbound-${log.order_id}`}>Ver</button>
-                      {log.status !== 'success' && (
-                        <button onClick={() => retrySingle(log.order_id)} className="text-emerald-600 font-semibold text-xs hover:underline">Reenviar</button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <>
+            <table className="w-full text-sm">
+              <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
+                <tr>
+                  <th className="p-2 text-left">Última tentativa</th>
+                  <th className="p-2 text-left">Pedido</th>
+                  <th className="p-2 text-center">Status</th>
+                  <th className="p-2 text-center">Tentativas</th>
+                  <th className="p-2 text-left">Erro / Response</th>
+                  <th className="p-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(log => {
+                  const s = DISPATCH_STATUS[log.status] || DISPATCH_STATUS.failed;
+                  const Icon = s.icon;
+                  return (
+                    <tr key={log.log_id} className="border-t border-border hover:bg-bg-secondary/40">
+                      <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(log.updated_at)}</td>
+                      <td className="p-2 font-mono text-xs">
+                        <a href={`/backoffice/pedidos?highlight=${log.order_id}`} className="text-brand-main hover:underline">
+                          #{log.order_id.slice(-8).toUpperCase()}
+                        </a>
+                      </td>
+                      <td className="p-2 text-center">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${s.color}`}>
+                          <Icon className="w-3 h-3" /> {s.label}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center text-xs">{log.attempts}</td>
+                      <td className="p-2 text-xs text-txt-secondary truncate max-w-[280px]">
+                        {log.error || (log.response_body ? String(log.response_body).slice(0, 100) : '—')}
+                      </td>
+                      <td className="p-2 flex gap-2 whitespace-nowrap">
+                        <button onClick={() => openDetail(log.order_id)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`view-outbound-${log.order_id}`}>Ver</button>
+                        {log.status !== 'success' && (
+                          <button onClick={() => retrySingle(log.order_id)} className="text-emerald-600 font-semibold text-xs hover:underline">Reenviar</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-bg-secondary border-t border-border text-xs">
+              <span className="text-txt-secondary">
+                Página <b className="text-txt-primary">{page}</b> de <b className="text-txt-primary">{totalPages}</b> ({total} envios)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  data-testid="outbound-prev-page"
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  data-testid="outbound-next-page"
+                >
+                  Próxima
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -748,16 +814,18 @@ function CodeBlock({ title, content }) {
 function SnapshotsTab() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const perPage = 20;
   const [loading, setLoading] = useState(true);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [envFilter, setEnvFilter] = useState('');
   const [history, setHistory] = useState(null);
 
-  const load = async () => {
+  const load = async (p = page) => {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ per_page: 90 });
+      const q = new URLSearchParams({ page: p, per_page: perPage });
       if (start) q.set('start', start);
       if (end) q.set('end', end);
       if (envFilter) q.set('environment', envFilter);
@@ -766,7 +834,10 @@ function SnapshotsTab() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [start, end, envFilter]);
+  useEffect(() => { load(1); setPage(1); /* eslint-disable-next-line */ }, [start, end, envFilter]);
+  useEffect(() => { load(page); /* eslint-disable-next-line */ }, [page]);
+
+  const totalPages = Math.ceil(total / perPage) || 1;
 
   const showHistory = async (date) => {
     // Busca todos os inbound-logs de 'revenue' que contêm essa data
@@ -789,7 +860,7 @@ function SnapshotsTab() {
     try {
       const res = await api.post('/api/admin/opery/snapshots/convert-legacy', { target_env: 'sandbox' });
       toast.success(`${res.modified_count} snapshots antigos foram convertidos para Sandbox!`);
-      load();
+      load(page);
     } catch (e) {
       toast.error(e.message);
     }
@@ -828,7 +899,7 @@ function SnapshotsTab() {
             Limpar
           </button>
         )}
-        <Button variant="outline" size="sm" onClick={load}><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
+        <Button variant="outline" size="sm" onClick={() => load(page)}><RefreshCcw className="w-4 h-4" /> Atualizar</Button>
         <div className="ml-auto text-xs text-txt-secondary">{total} snapshots</div>
       </div>
 
@@ -840,51 +911,80 @@ function SnapshotsTab() {
             Nenhum snapshot recebido ainda. Assim que a Opery começar a enviar, eles aparecem aqui.
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
-              <tr>
-                <th className="p-2 text-left">Data</th>
-                <th className="p-2 text-center">Ambiente</th>
-                <th className="p-2 text-right">Faturamento</th>
-                <th className="p-2 text-right">Total pedidos</th>
-                <th className="p-2 text-right">Qtd</th>
-                <th className="p-2 text-right">Pagos</th>
-                <th className="p-2 text-right">Ticket médio</th>
-                <th className="p-2 text-left">Última atualização</th>
-                <th className="p-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(s => {
-                const paid = s.paid_orders_count || s.orders_count || 0;
-                const ticket = paid ? (s.total_revenue || 0) / paid : 0;
-                const isSandbox = s.environment === 'sandbox';
-                return (
-                  <tr key={`${s.date}-${s.environment || 'prod'}`} className="border-t border-border hover:bg-bg-secondary/40" data-testid={`snap-row-${s.date}`}>
-                    <td className="p-2 font-mono text-xs font-bold">{s.date}</td>
-                    <td className="p-2 text-center whitespace-nowrap">
-                      {isSandbox ? (
-                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">🧪 Sandbox</span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">🚀 Produção</span>
-                      )}
-                    </td>
-                    <td className="p-2 text-right font-bold text-emerald-700">{currency(s.total_revenue)}</td>
-                    <td className="p-2 text-right">{currency(s.total_orders_value)}</td>
-                    <td className="p-2 text-right">{s.orders_count || 0}</td>
-                    <td className="p-2 text-right">{paid}</td>
-                    <td className="p-2 text-right">{currency(ticket)}</td>
-                    <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(s.updated_at)}</td>
-                    <td className="p-2">
-                      <button onClick={() => showHistory(s.date)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`snap-history-${s.date}`}>
-                        Histórico
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <>
+            <table className="w-full text-sm">
+              <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
+                <tr>
+                  <th className="p-2 text-left">Data</th>
+                  <th className="p-2 text-center">Ambiente</th>
+                  <th className="p-2 text-right">Faturamento</th>
+                  <th className="p-2 text-right">Total pedidos</th>
+                  <th className="p-2 text-right">Qtd</th>
+                  <th className="p-2 text-right">Pagos</th>
+                  <th className="p-2 text-right">Ticket médio</th>
+                  <th className="p-2 text-left">Última atualização</th>
+                  <th className="p-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(s => {
+                  const paid = s.paid_orders_count || s.orders_count || 0;
+                  const ticket = paid ? (s.total_revenue || 0) / paid : 0;
+                  const isSandbox = s.environment === 'sandbox';
+                  return (
+                    <tr key={`${s.date}-${s.environment || 'prod'}`} className="border-t border-border hover:bg-bg-secondary/40" data-testid={`snap-row-${s.date}`}>
+                      <td className="p-2 font-mono text-xs font-bold">{s.date}</td>
+                      <td className="p-2 text-center whitespace-nowrap">
+                        {isSandbox ? (
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">🧪 Sandbox</span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">🚀 Produção</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-right font-bold text-emerald-700">{currency(s.total_revenue)}</td>
+                      <td className="p-2 text-right">{currency(s.total_orders_value)}</td>
+                      <td className="p-2 text-right">{s.orders_count || 0}</td>
+                      <td className="p-2 text-right">{paid}</td>
+                      <td className="p-2 text-right">{currency(ticket)}</td>
+                      <td className="p-2 text-xs text-txt-secondary whitespace-nowrap">{formatDateTime(s.updated_at)}</td>
+                      <td className="p-2">
+                        <button onClick={() => showHistory(s.date)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`snap-history-${s.date}`}>
+                          Histórico
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-bg-secondary border-t border-border text-xs">
+              <span className="text-txt-secondary">
+                Página <b className="text-txt-primary">{page}</b> de <b className="text-txt-primary">{totalPages}</b> ({total} snapshots)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  data-testid="snapshots-prev-page"
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  data-testid="snapshots-next-page"
+                >
+                  Próxima
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
