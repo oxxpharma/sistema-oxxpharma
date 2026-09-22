@@ -134,7 +134,11 @@ async def ensure_indexes(db):
         await db.opery_sales.create_index("opery_order_id", unique=True)
         await db.opery_sales.create_index("order_date")
         await db.opery_sales.create_index("status")
-        await db.opery_revenue_snapshots.create_index("date", unique=True)
+        try:
+            await db.opery_revenue_snapshots.drop_index("date_1")
+        except Exception:
+            pass
+        await db.opery_revenue_snapshots.create_index([("date", 1), ("environment", 1)], unique=True)
         await db.opery_dispatch_log.create_index("order_id")
         await db.opery_dispatch_log.create_index("created_at")
         await db.opery_dispatch_log.create_index([("status", 1), ("next_retry_at", 1)])
@@ -226,7 +230,7 @@ def _parse_date(raw: Any) -> str:
     return _now_iso()
 
 
-async def upsert_sale(db, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def upsert_sale(db, payload: Dict[str, Any], environment: str = "production") -> Dict[str, Any]:
     """(Deprecated) Grava/atualiza uma venda presencial (pedido individual).
 
     Mantido apenas para retrocompatibilidade. O modelo agora usa snapshots
@@ -251,6 +255,7 @@ async def upsert_sale(db, payload: Dict[str, Any]) -> Dict[str, Any]:
         "metadata": payload.get("metadata") or {},
         "tenant": "oxxpharma",
         "source": "opery",
+        "environment": environment,
         "updated_at": _now_iso(),
     }
     existing = await db.opery_sales.find_one({"opery_order_id": opery_order_id}, {"_id": 0})
@@ -288,11 +293,11 @@ def _parse_iso_date(raw: Any) -> Optional[str]:
         return None
 
 
-async def upsert_revenue_snapshot(db, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def upsert_revenue_snapshot(db, payload: Dict[str, Any], environment: str = "production") -> Dict[str, Any]:
     """Grava/atualiza 1 snapshot diario de faturamento vindo da Opery.
 
     Payload aceito:
-      - date (str, obrigatorio) — 'YYYY-MM-DD' (chave de idempotencia)
+      - date (str, obrigatorio) — 'YYYY-MM-DD' (chave de idempotencia por data + ambiente)
       - total_revenue (num) — faturamento (somente pedidos PAGOS)
       - total_orders_value (num) — valor total dos pedidos (pagos + pendentes)
       - orders_count (int) — quantidade total de pedidos no dia
@@ -316,16 +321,17 @@ async def upsert_revenue_snapshot(db, payload: Dict[str, Any]) -> Dict[str, Any]
         "paid_orders_count": paid_orders_count,
         "tenant": "oxxpharma",
         "source": "opery",
+        "environment": environment,
         "updated_at": _now_iso(),
     }
-    existing = await db.opery_revenue_snapshots.find_one({"date": date}, {"_id": 0})
+    existing = await db.opery_revenue_snapshots.find_one({"date": date, "environment": environment}, {"_id": 0})
     if existing:
-        await db.opery_revenue_snapshots.update_one({"date": date}, {"$set": doc})
-        return {"created": False, "date": date}
+        await db.opery_revenue_snapshots.update_one({"date": date, "environment": environment}, {"$set": doc})
+        return {"created": False, "date": date, "environment": environment}
     doc["snapshot_id"] = _gen_id("opsnap_")
     doc["created_at"] = _now_iso()
     await db.opery_revenue_snapshots.insert_one(doc)
-    return {"created": True, "date": date, "snapshot_id": doc["snapshot_id"]}
+    return {"created": True, "date": date, "environment": environment, "snapshot_id": doc["snapshot_id"]}
 
 
 # ==================== DASHBOARD STATS ====================
@@ -334,20 +340,13 @@ async def upsert_revenue_snapshot(db, payload: Dict[str, Any]) -> Dict[str, Any]
 async def aggregate_stats(db, start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
     """Calcula KPIs de vendas presenciais somando os snapshots diarios da Opery.
 
-    Retorna:
-      - total_orders_value: soma de total_orders_value no periodo
-      - total_revenue: soma de total_revenue (faturamento pago) no periodo
-      - orders_count: soma de orders_count no periodo
-      - paid_orders_count: soma de paid_orders_count (fallback orders_count)
-      - avg_ticket: total_revenue / paid_orders_count
-      - revenue_by_day: 30 dias (usa snapshots quando existem)
-      - by_status: [] (nao ha mais status individual — modelo agregado)
+    Ignora snapshots do ambiente 'sandbox' para contabilizar apenas dados reais de Producao.
     """
     from datetime import timedelta
 
     start_date = _parse_iso_date(start) if start else None
     end_date = _parse_iso_date(end) if end else None
-    match: Dict[str, Any] = {}
+    match: Dict[str, Any] = {"environment": {"$ne": "sandbox"}}
     if start_date:
         match.setdefault("date", {})["$gte"] = start_date
     if end_date:
@@ -376,12 +375,12 @@ async def aggregate_stats(db, start: Optional[str] = None, end: Optional[str] = 
 
     avg_ticket = round(total_revenue / paid_orders_count, 2) if paid_orders_count else 0.0
 
-    # Serie diaria dos ultimos 30 dias (sempre fixo, independente do filtro)
+    # Serie diaria dos ultimos 30 dias (somente producao / $ne sandbox)
     n = datetime.now(timezone.utc)
     today = n.replace(hour=0, minute=0, second=0, microsecond=0).date()
     last_30_start = (today - timedelta(days=29)).isoformat()
     daily = await db.opery_revenue_snapshots.find(
-        {"date": {"$gte": last_30_start}},
+        {"date": {"$gte": last_30_start}, "environment": {"$ne": "sandbox"}},
         {"_id": 0, "date": 1, "total_revenue": 1, "orders_count": 1},
     ).sort("date", 1).to_list(60)
     daily_map = {d["date"]: {"revenue": round(d.get("total_revenue") or 0, 2), "orders": int(d.get("orders_count") or 0)} for d in daily}

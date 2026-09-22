@@ -4661,8 +4661,23 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
             )
             return {"order_id": order_id, "payment_id": payment_id, "payment_url": None, "provider": "mock"}
 
+        pm = str(order.get("payment_method") or "pix").lower()
+        payment_type = "pix"
+        if pm in ("credit_card", "card"):
+            payment_type = "card"
+        elif pm == "boleto":
+            payment_type = "boleto"
+
         try:
-            res = await ipag_service.create_ipag_payment(db, order, user, items_full, frontend_url, backend_url)
+            res = await ipag_service.create_ipag_payment(
+                db=db,
+                order=order,
+                user=user,
+                payment_type=payment_type,
+                payment_method=pm,
+                frontend_url=frontend_url,
+                backend_url=backend_url,
+            )
         except Exception as e:
             logger.exception(f"Falha criando pagamento iPag para {order_id}: {e}")
             raise HTTPException(status_code=502, detail=f"Erro iPag: {e}")
@@ -5429,9 +5444,40 @@ async def ipag_webhook(request: Request):
     query_params = dict(request.query_params)
     payload = {**query_params, **body}
 
-    order_id = payload.get("order_id") or payload.get("reference") or payload.get("custom_id")
-    trans_id = payload.get("id") or payload.get("transaction_id")
-    status = str(payload.get("status") or payload.get("status_code") or "").lower()
+    data_obj = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    attr_obj = payload.get("attributes") if isinstance(payload.get("attributes"), dict) else {}
+
+    order_id = (
+        payload.get("external_code")
+        or payload.get("order_id")
+        or payload.get("reference")
+        or payload.get("custom_id")
+        or data_obj.get("external_code")
+        or data_obj.get("order_id")
+        or attr_obj.get("external_code")
+        or attr_obj.get("order_id")
+    )
+    trans_id = (
+        payload.get("id")
+        or payload.get("transaction_id")
+        or payload.get("uuid")
+        or data_obj.get("id")
+        or attr_obj.get("uuid")
+    )
+    event_type = str(
+        payload.get("event")
+        or payload.get("event_name")
+        or payload.get("type")
+        or payload.get("action")
+        or ""
+    )
+    status = str(
+        payload.get("status")
+        or payload.get("status_code")
+        or data_obj.get("status")
+        or attr_obj.get("status")
+        or ""
+    ).lower()
 
     log_entry = {
         "log_id": gen_id("ipaghook_"),
@@ -5439,20 +5485,33 @@ async def ipag_webhook(request: Request):
         "provider": "ipag",
         "data_id": trans_id,
         "order_id": order_id,
+        "event_type": event_type,
         "status": status,
         "raw_body": body,
         "query": query_params,
     }
 
-    # iPag status: 2 = Paid/Approved ("2", "paid", "approved", "captured", "capturado")
-    is_paid = status in ["2", "paid", "approved", "captured", "capturado"]
+    # Eventos ou status que confirmam pagamento efetuado
+    paid_events = {
+        "paymentlinkpaymentsucceeded",
+        "transactioncaptured",
+        "chargepaymentsucceeded",
+        "transactionapproved",
+    }
+    is_paid = (
+        event_type.lower() in paid_events
+        or status in ["2", "paid", "approved", "captured", "capturado", "succeeded"]
+    )
 
     if order_id and is_paid:
         await mark_order_paid(db, str(order_id), payment_id=str(trans_id) if trans_id else None, source="ipag")
         log_entry["action"] = "marked_paid"
+    elif order_id and (status in ["3", "denied", "canceled", "cancelled"] or "failed" in event_type.lower()):
+        await db.orders.update_one({"order_id": str(order_id)}, {"$set": {"payment_status": "rejected"}})
+        log_entry["action"] = "marked_rejected"
 
     await db.payment_webhook_logs.insert_one(log_entry)
-    return {"status": "ok", "order_id": order_id, "payment_status": status}
+    return {"status": "ok", "order_id": order_id, "payment_status": status, "event": event_type}
 
 # ==================== SETTINGS (ADMIN) ====================
 

@@ -137,14 +137,22 @@ async def create_ipag_payment(
     db,
     order: Dict[str, Any],
     user: Dict[str, Any],
-    payment_type: str = "pix",
-    payment_method: str = "pix",
+    payment_type: str = "card",
+    payment_method: str = "card",
     card_data: Optional[Dict[str, Any]] = None,
     installments: int = 1,
     frontend_url: str = "",
     backend_url: str = "",
 ) -> Dict[str, Any]:
-    """Cria uma transação de pagamento no iPag (Pix, Cartão de Crédito ou Boleto)."""
+    """Cria um Link de Pagamento Hospedado no iPag para checkout seguro.
+
+    O cliente é redirecionado ao ambiente do iPag para escolher a forma de pagamento e digitar seus dados.
+    """
+    if not isinstance(payment_type, str):
+        payment_type = "card"
+    if not isinstance(payment_method, str):
+        payment_method = "card"
+
     env = await get_ipag_environment(db)
     api_id, api_key = await _get_ipag_credentials(db, env)
 
@@ -153,6 +161,7 @@ async def create_ipag_payment(
 
     base_url = _get_base_url(env)
     callback_url = f"{backend_url}/api/payments/webhook/ipag"
+    redirect_url = f"{frontend_url}/pedido/{order.get('order_id')}"
 
     amount = float(order.get("total") or order.get("amount") or 0)
     if amount <= 0:
@@ -162,7 +171,6 @@ async def create_ipag_payment(
     cpf_cnpj = _clean_digits(user.get("cpf") or user.get("cpf_digits") or order.get("customer_cpf"))
     phone = _clean_digits(user.get("phone") or user.get("phone_digits") or order.get("customer_phone"))
 
-    # Endereço de cobrança
     shipping = order.get("shipping_address") or {}
     zipcode = _clean_digits(shipping.get("zip_code"))
 
@@ -176,7 +184,6 @@ async def create_ipag_payment(
         "zipcode": zipcode if len(zipcode) == 8 else "01001000",
     }
 
-    # Produtos do pedido
     items_full = order.get("items") or []
     products_payload = []
     for it in items_full:
@@ -196,57 +203,6 @@ async def create_ipag_payment(
             "sku": order_id[-8:].upper(),
         })
 
-    # Estrutura do Pagamento conforme documentação iPag
-    payment_obj: Dict[str, Any] = {
-        "type": payment_type.lower(),
-        "method": payment_method.lower() if payment_method else payment_type.lower(),
-    }
-
-    if payment_type.lower() == "pix":
-        payment_obj["type"] = "pix"
-        payment_obj["method"] = "pix"
-        payment_obj["pix_expires_in"] = 60  # minutos
-    elif payment_type.lower() in {"card", "credit_card"}:
-        payment_obj["type"] = "card"
-        payment_obj["method"] = (payment_method or "visa").lower()
-        payment_obj["installments"] = max(1, int(installments))
-        payment_obj["capture"] = True
-        if card_data:
-            payment_obj["card"] = {
-                "holder": str(card_data.get("holder") or user.get("name") or "TITULAR").upper(),
-                "number": _clean_digits(card_data.get("number")),
-                "expiry_month": str(card_data.get("expiry_month") or "").zfill(2),
-                "expiry_year": str(card_data.get("expiry_year") or ""),
-                "cvv": str(card_data.get("cvv") or ""),
-            }
-    elif payment_type.lower() == "boleto":
-        payment_obj["type"] = "boleto"
-        payment_obj["method"] = "boletopagseguro"
-        due = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
-        payment_obj["boleto"] = {
-            "due_date": due,
-            "instructions": [
-                "Nao receber apos o vencimento.",
-                f"Referente ao pedido #{order_id[-8:].upper()}",
-            ],
-        }
-
-    body = {
-        "amount": round(amount, 2),
-        "callback_url": callback_url,
-        "order_id": order_id,
-        "payment": payment_obj,
-        "customer": {
-            "name": (user.get("name") or order.get("customer_name") or "Cliente OxxPharma")[:60],
-            "cpf_cnpj": cpf_cnpj if cpf_cnpj else "00000000000",
-            "email": user.get("email") or order.get("customer_email") or "cliente@oxxpharma.com",
-            "phone": phone if phone else "11999999999",
-            "billing_address": billing_address,
-        },
-        "products": products_payload,
-    }
-
-    # Cabeçalho HTTP Basic Auth + x-api-version: 2
     credentials = f"{api_id}:{api_key}"
     encoded = base64.b64encode(credentials.encode("ascii")).decode("ascii")
 
@@ -257,46 +213,62 @@ async def create_ipag_payment(
         "Accept": "application/json",
     }
 
-    url = f"{base_url}/service/payment"
-    logger.info(f"Enviando requisicao iPag ({env}): {url} para pedido {order_id}")
+    # Data de expiração do link (7 dias)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    link_body = {
+        "amount": round(amount, 2),
+        "external_code": order_id[:50],
+        "description": f"Pedido #{order_id[-8:].upper()} - OxxPharma",
+        "expires_at": expires_at,
+        "callback_url": callback_url,
+        "redirect_url": redirect_url,
+        "customer": {
+            "name": (user.get("name") or order.get("customer_name") or "Cliente OxxPharma")[:60],
+            "cpf_cnpj": cpf_cnpj if cpf_cnpj else "00000000000",
+            "email": user.get("email") or order.get("customer_email") or "cliente@oxxpharma.com",
+            "phone": phone if phone else "11999999999",
+            "billing_address": billing_address,
+        },
+        "products": products_payload,
+    }
+
+    link_url_endpoint = f"{base_url}/service/v2/payment_links"
+    logger.info(f"Criando Link de Pagamento iPag ({env}): {link_url_endpoint} para pedido {order_id}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.post(url, json=body, headers=headers)
+        res = await client.post(link_url_endpoint, json=link_body, headers=headers)
         if res.status_code not in (200, 201):
-            logger.error(f"Erro iPag HTTP {res.status_code}: {res.text}")
+            logger.error(f"Erro no iPag HTTP {res.status_code}: {res.text}")
             raise RuntimeError(f"Erro no iPag ({res.status_code}): {res.text}")
 
         res_data = res.json()
-        logger.info(f"Resposta iPag ({order_id}): {res_data}")
+        logger.info(f"Link iPag v2 criado com sucesso ({order_id}): {res_data}")
 
-        # Parsing dos dados de resposta da transação iPag
         tx = res_data.get("attributes") or res_data.get("data") or res_data
+        trans_id = str(res_data.get("id") or tx.get("id") or tx.get("payment_link_id") or "")
 
-        # Respostas de Pix
-        pix_info = tx.get("pix") or {}
-        pix_code = pix_info.get("qrcode_text") or pix_info.get("emv") or tx.get("pix_qrcode_text") or ""
-        pix_qr_image = pix_info.get("qrcode_image_url") or pix_info.get("qrcode_url") or tx.get("pix_qrcode_url") or ""
-
-        # Resposta de Boleto
-        boleto_info = tx.get("boleto") or {}
-        boleto_url = boleto_info.get("url") or tx.get("boleto_url") or ""
-        barcode = boleto_info.get("barcode") or tx.get("barcode") or ""
+        links_obj = res_data.get("links") or {}
+        pay_url = (
+            links_obj.get("payment")
+            or tx.get("url")
+            or tx.get("link_url")
+            or tx.get("payment_url")
+            or tx.get("checkout_url")
+            or res_data.get("url")
+            or res_data.get("link_url")
+            or (f"{base_url}/pay/{trans_id}" if trans_id else "")
+        )
 
         return {
             "provider": "ipag",
             "environment": env,
-            "transaction_id": str(tx.get("id") or tx.get("transaction_id") or res_data.get("id") or ""),
-            "tid": str(tx.get("tid") or ""),
-            "status": str(tx.get("status") or tx.get("status_code") or "1"),
-            "status_message": tx.get("message") or tx.get("status_message") or "Transacao criada",
+            "payment_id": trans_id,
+            "transaction_id": trans_id,
+            "payment_url": pay_url,
+            "status": "1",
             "amount": amount,
             "order_id": order_id,
-            # Dados Pix
-            "pix_qrcode": pix_code,
-            "pix_qrcode_url": pix_qr_image,
-            # Dados Boleto
-            "boleto_url": boleto_url,
-            "barcode": barcode,
             "raw_response": res_data,
         }
 

@@ -106,6 +106,7 @@ async def receive_sales(
     body: WebhookIn,
     request: Request,
     x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key"),
+    environment: str = "production",
 ):
     db = request.app.db
     if not opery_service.verify_webhook_key(x_opery_api_key):
@@ -129,14 +130,14 @@ async def receive_sales(
     created = 0; updated = 0; errors: List[Dict[str, Any]] = []
     for s in items:
         try:
-            r = await opery_service.upsert_sale(db, s.model_dump(exclude_none=True))
+            r = await opery_service.upsert_sale(db, s.model_dump(exclude_none=True), environment=environment)
             if r.get("created"): created += 1
             else: updated += 1
         except Exception as e:
             logger.error(f"opery.webhook: erro no item {s.opery_order_id}: {e}")
             errors.append({"opery_order_id": s.opery_order_id, "error": str(e)})
 
-    resp = {"received": len(items), "created": created, "updated": updated, "errors": errors}
+    resp = {"received": len(items), "created": created, "updated": updated, "errors": errors, "environment": environment}
     await opery_service.log_inbound(db, "sales", ok=True, headers_sample=_sample_headers(request),
                                     body=body.model_dump(exclude_none=True), response=resp)
     return resp
@@ -163,10 +164,11 @@ async def receive_revenue(
     body: RevenueWebhookIn,
     request: Request,
     x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key"),
+    environment: str = "production",
 ):
     """Recebe snapshots diarios de faturamento (modelo agregado — recomendado).
 
-    Aceita `snapshot` (1) ou `snapshots` (lote). Idempotente por `date`.
+    Aceita `snapshot` (1) ou `snapshots` (lote). Idempotente por `date` + `environment`.
     """
     db = request.app.db
     if not opery_service.verify_webhook_key(x_opery_api_key):
@@ -187,14 +189,14 @@ async def receive_revenue(
     created = 0; updated = 0; errors: List[Dict[str, Any]] = []
     for s in items:
         try:
-            r = await opery_service.upsert_revenue_snapshot(db, s.model_dump(exclude_none=True))
+            r = await opery_service.upsert_revenue_snapshot(db, s.model_dump(exclude_none=True), environment=environment)
             if r.get("created"): created += 1
             else: updated += 1
         except Exception as e:
             logger.error(f"opery.webhook.revenue: erro no item {s.date}: {e}")
             errors.append({"date": s.date, "error": str(e)})
 
-    resp = {"received": len(items), "created": created, "updated": updated, "errors": errors}
+    resp = {"received": len(items), "created": created, "updated": updated, "errors": errors, "environment": environment}
     await opery_service.log_inbound(db, "revenue", ok=True, headers_sample=_sample_headers(request),
                                     body=body.model_dump(exclude_none=True), response=resp)
     return resp
@@ -300,6 +302,7 @@ async def opery_dashboard(request: Request, start: Optional[str] = None, end: Op
 async def list_snapshots(
     request: Request,
     start: Optional[str] = None, end: Optional[str] = None,
+    environment: Optional[str] = None,
     page: int = Query(1, ge=1), per_page: int = Query(31, ge=1, le=366),
     user: dict = Depends(admin_dep),
 ):
@@ -308,6 +311,11 @@ async def list_snapshots(
     match: Dict[str, Any] = {}
     if start: match.setdefault("date", {})["$gte"] = start
     if end: match.setdefault("date", {})["$lte"] = end
+    if environment:
+        if environment == "production":
+            match["environment"] = {"$ne": "sandbox"}
+        else:
+            match["environment"] = environment
     total = await db.opery_revenue_snapshots.count_documents(match)
     cursor = db.opery_revenue_snapshots.find(match, {"_id": 0}).sort("date", -1).skip((page - 1) * per_page).limit(per_page)
     items = await cursor.to_list(per_page)
@@ -535,13 +543,13 @@ def register_opery_routes(app, deps: Dict[str, Any]):
     @sandbox_router.post("/webhook/sales")
     async def sandbox_receive_sales(body: WebhookIn, request: Request,
                                     x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
-        result = await receive_sales(body, request, x_opery_api_key)
+        result = await receive_sales(body, request, x_opery_api_key, environment="sandbox")
         return result
 
     @sandbox_router.post("/webhook/revenue")
     async def sandbox_receive_revenue(body: RevenueWebhookIn, request: Request,
                                       x_opery_api_key: Optional[str] = Header(None, alias="X-Opery-Api-Key")):
-        return await receive_revenue(body, request, x_opery_api_key)
+        return await receive_revenue(body, request, x_opery_api_key, environment="sandbox")
 
     @sandbox_router.post("/webhook/health")
     async def sandbox_webhook_health(request: Request,

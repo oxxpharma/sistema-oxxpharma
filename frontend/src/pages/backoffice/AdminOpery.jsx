@@ -686,6 +686,7 @@ function SnapshotsTab() {
   const [loading, setLoading] = useState(true);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [envFilter, setEnvFilter] = useState('');
   const [history, setHistory] = useState(null);
 
   const load = async () => {
@@ -694,12 +695,13 @@ function SnapshotsTab() {
       const q = new URLSearchParams({ per_page: 90 });
       if (start) q.set('start', start);
       if (end) q.set('end', end);
+      if (envFilter) q.set('environment', envFilter);
       const d = await api.get(`/api/admin/opery/snapshots?${q}`);
       setItems(d.items || []); setTotal(d.total || 0);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [start, end]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [start, end, envFilter]);
 
   const showHistory = async (date) => {
     // Busca todos os inbound-logs de 'revenue' que contêm essa data
@@ -724,20 +726,24 @@ function SnapshotsTab() {
       <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm flex items-start gap-2">
         <RefreshCcw className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
         <div className="text-sky-900">
-          <b>Idempotente por data.</b> Sempre que a Opery reenvia um dia já registrado, os valores são <b>sobrescritos</b> com os novos.
-          Cada linha mostra os valores mais recentes; clique em <b>Histórico</b> para ver todas as atualizações daquele dia.
+          <b>Separado por Ambiente.</b> Snapshots recebidos pelo endpoint de <b>Sandbox</b> são isolados e não afetam os KPIs do Dashboard. Apenas snapshots de <b>Produção</b> são contabilizados nos totais.
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <select value={envFilter} onChange={e => setEnvFilter(e.target.value)} className="h-9 px-2 border border-border rounded-lg text-sm" data-testid="snap-filter-env">
+          <option value="">Todos os ambientes</option>
+          <option value="production">🚀 Produção</option>
+          <option value="sandbox">🧪 Sandbox</option>
+        </select>
         <label className="text-xs font-bold text-txt-secondary">De:</label>
         <input type="date" value={start} onChange={e => setStart(e.target.value)}
           className="h-9 px-2 border border-border rounded-lg text-sm" data-testid="snap-filter-start" />
         <label className="text-xs font-bold text-txt-secondary">Até:</label>
         <input type="date" value={end} onChange={e => setEnd(e.target.value)}
           className="h-9 px-2 border border-border rounded-lg text-sm" data-testid="snap-filter-end" />
-        {(start || end) && (
-          <button onClick={() => { setStart(''); setEnd(''); }} className="text-xs font-semibold text-brand-main hover:underline">
+        {(start || end || envFilter) && (
+          <button onClick={() => { setStart(''); setEnd(''); setEnvFilter(''); }} className="text-xs font-semibold text-brand-main hover:underline">
             Limpar
           </button>
         )}
@@ -757,6 +763,7 @@ function SnapshotsTab() {
             <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
               <tr>
                 <th className="p-2 text-left">Data</th>
+                <th className="p-2 text-center">Ambiente</th>
                 <th className="p-2 text-right">Faturamento</th>
                 <th className="p-2 text-right">Total pedidos</th>
                 <th className="p-2 text-right">Qtd</th>
@@ -770,9 +777,17 @@ function SnapshotsTab() {
               {items.map(s => {
                 const paid = s.paid_orders_count || s.orders_count || 0;
                 const ticket = paid ? (s.total_revenue || 0) / paid : 0;
+                const isSandbox = s.environment === 'sandbox';
                 return (
-                  <tr key={s.date} className="border-t border-border hover:bg-bg-secondary/40" data-testid={`snap-row-${s.date}`}>
+                  <tr key={`${s.date}-${s.environment || 'prod'}`} className="border-t border-border hover:bg-bg-secondary/40" data-testid={`snap-row-${s.date}`}>
                     <td className="p-2 font-mono text-xs font-bold">{s.date}</td>
+                    <td className="p-2 text-center whitespace-nowrap">
+                      {isSandbox ? (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">🧪 Sandbox</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">🚀 Produção</span>
+                      )}
+                    </td>
                     <td className="p-2 text-right font-bold text-emerald-700">{currency(s.total_revenue)}</td>
                     <td className="p-2 text-right">{currency(s.total_orders_value)}</td>
                     <td className="p-2 text-right">{s.orders_count || 0}</td>
