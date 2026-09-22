@@ -110,14 +110,14 @@ export default function OperyDevMonitor() {
             <BrandLogo slot="auth_pages" variant="dark" />
             <div className="pt-2">
               <h1 className="font-heading font-black text-2xl text-white tracking-tight">Dev Monitor</h1>
-              <p className="text-xs text-slate-400">Acesso Restrito ao Desenvolvedor Opery</p>
+              <p className="text-xs text-slate-400">Acesso Restrito para Dev Externo</p>
             </div>
           </div>
 
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 text-xs text-amber-300 flex items-start gap-2.5">
             <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              Insira o <b>Token de Desenvolvedor Opery</b> fornecido pelo administrador para acompanhar os logs de integração em tempo real.
+              Insira o <b>Token DEV</b> fornecido pelo administrador para acompanhar os logs de integração em tempo real.
             </div>
           </div>
 
@@ -212,7 +212,7 @@ export default function OperyDevMonitor() {
       </main>
 
       <footer className="max-w-7xl w-full mx-auto px-6 py-4 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
-        <div>OxxPharma · Opery Dev Monitor</div>
+        <div>OxxPharma · Dev Monitor</div>
         <a href="/docs/opery" target="_blank" rel="noreferrer" className="hover:text-orange-600 font-semibold inline-flex items-center gap-1">
           Documentação da API <ExternalLink className="w-3 h-3" />
         </a>
