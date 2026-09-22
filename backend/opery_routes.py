@@ -26,6 +26,7 @@ Rotas expostas:
 """
 
 import os
+import hmac
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -280,6 +281,7 @@ def _require_admin_dep():
 
 
 # Cria a dependencia como callable (nao factory) — FastAPI espera assim
+# Cria a dependencia como callable (nao factory) — FastAPI espera assim
 async def admin_dep(request: Request):
     get_user = _deps.get("get_current_user")
     is_admin = _deps.get("is_admin_level")
@@ -289,6 +291,30 @@ async def admin_dep(request: Request):
     if not is_admin(user):
         raise HTTPException(status_code=403, detail="Acesso negado")
     return user
+
+
+async def dev_or_admin_dep(request: Request):
+    """Permite acesso tanto a Admins do sistema quanto ao Desenvolvedor Opery via token (X-Opery-Dev-Token ou ?token=)."""
+    dev_token = request.headers.get("x-opery-dev-token") or request.query_params.get("token")
+    cfg = opery_service.get_cached_config()
+    expected_dev_token = cfg.get("developer_token") or ""
+    if dev_token and expected_dev_token and hmac.compare_digest(dev_token.strip(), expected_dev_token.strip()):
+        return {"role": "opery_developer", "email": "opery_dev@oxxpharma.local"}
+
+    get_user = _deps.get("get_current_user")
+    is_admin = _deps.get("is_admin_level")
+    if get_user and is_admin:
+        try:
+            user = await get_user(request)
+            if is_admin(user):
+                return user
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=401,
+        detail="Acesso não autorizado. Forneça um token de desenvolvedor válido (X-Opery-Dev-Token ou ?token=) ou faça login como administrador."
+    )
 
 
 @router.get("/admin/opery/dashboard")
@@ -304,7 +330,7 @@ async def list_snapshots(
     start: Optional[str] = None, end: Optional[str] = None,
     environment: Optional[str] = None,
     page: int = Query(1, ge=1), per_page: int = Query(31, ge=1, le=366),
-    user: dict = Depends(admin_dep),
+    user: dict = Depends(dev_or_admin_dep),
 ):
     """Lista os snapshots diarios de faturamento recebidos da Opery."""
     db = request.app.db
@@ -329,7 +355,7 @@ async def list_sales_legacy(
     start: Optional[str] = None, end: Optional[str] = None,
     status: Optional[str] = None, q: Optional[str] = None,
     page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100),
-    user: dict = Depends(admin_dep),
+    user: dict = Depends(dev_or_admin_dep),
 ):
     db = request.app.db
     match: Dict[str, Any] = {}
@@ -352,7 +378,7 @@ async def list_sales_legacy(
 async def list_dispatch_log(
     request: Request, status: Optional[str] = None,
     page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100),
-    user: dict = Depends(admin_dep),
+    user: dict = Depends(dev_or_admin_dep),
 ):
     db = request.app.db
     match: Dict[str, Any] = {}
@@ -365,7 +391,7 @@ async def list_dispatch_log(
 
 
 @router.get("/admin/opery/dispatch-log/{order_id}")
-async def get_dispatch_log_detail(order_id: str, request: Request, user: dict = Depends(admin_dep)):
+async def get_dispatch_log_detail(order_id: str, request: Request, user: dict = Depends(dev_or_admin_dep)):
     """Retorna log completo (com payload) de um pedido especifico."""
     db = request.app.db
     log = await db.opery_dispatch_log.find_one({"order_id": order_id}, {"_id": 0})
@@ -376,7 +402,7 @@ async def get_dispatch_log_detail(order_id: str, request: Request, user: dict = 
 async def list_inbound_log(
     request: Request, kind: Optional[str] = None, ok: Optional[bool] = None,
     page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100),
-    user: dict = Depends(admin_dep),
+    user: dict = Depends(dev_or_admin_dep),
 ):
     db = request.app.db
     match: Dict[str, Any] = {}
@@ -390,13 +416,13 @@ async def list_inbound_log(
 
 @router.post("/admin/opery/dispatch/retry")
 async def retry_dispatches(request: Request, limit: int = Query(20, ge=1, le=200),
-                           user: dict = Depends(admin_dep)):
+                           user: dict = Depends(dev_or_admin_dep)):
     db = request.app.db
     return await opery_service.retry_failed_dispatches(db, limit=limit)
 
 
 @router.post("/admin/opery/dispatch/{order_id}")
-async def dispatch_specific_order(order_id: str, request: Request, user: dict = Depends(admin_dep)):
+async def dispatch_specific_order(order_id: str, request: Request, user: dict = Depends(dev_or_admin_dep)):
     db = request.app.db
     order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not order:
@@ -407,11 +433,22 @@ async def dispatch_specific_order(order_id: str, request: Request, user: dict = 
     return result or {"status": "unknown"}
 
 
+class ConvertLegacyIn(BaseModel):
+    target_env: str = "sandbox"  # 'sandbox' ou 'production'
+
+
+@router.post("/admin/opery/snapshots/convert-legacy")
+async def convert_legacy_snapshots(body: ConvertLegacyIn, request: Request, user: dict = Depends(admin_dep)):
+    """Converte snapshots legados antigos sem a tag environment para sandbox ou production."""
+    db = request.app.db
+    return await opery_service.convert_legacy_snapshots(db, target_env=body.target_env)
+
+
 # ==================== CONFIG ====================
 
 
 @router.get("/admin/opery/config")
-async def opery_config(request: Request, user: dict = Depends(admin_dep)):
+async def opery_config(request: Request, user: dict = Depends(dev_or_admin_dep)):
     """Retorna config atual (mascarada) + endpoints publicos."""
     db = request.app.db
     cfg = await opery_service.load_config(db)
@@ -423,6 +460,7 @@ async def opery_config(request: Request, user: dict = Depends(admin_dep)):
         "outbound_url_production": cfg.get("outbound_url_production") or None,
         "outbound_url_active": cfg.get("outbound_url") or None,  # derivada
         "active_env": cfg.get("active_env") or "sandbox",
+        "developer_token": cfg.get("developer_token") or None,
         "outbound_token_configured": bool(cfg.get("outbound_token")),
         "outbound_token_masked": _mask(cfg.get("outbound_token")),
         "docs_url": cfg.get("docs_url") or "/docs/opery",
@@ -444,6 +482,8 @@ class ConfigUpdate(BaseModel):
     outbound_url_production: Optional[str] = None
     outbound_token: Optional[str] = None
     active_env: Optional[str] = None
+    developer_token: Optional[str] = None
+    generate_developer_token: Optional[bool] = None
     docs_url: Optional[str] = None
 
 
@@ -451,6 +491,8 @@ class ConfigUpdate(BaseModel):
 async def update_opery_config(body: ConfigUpdate, request: Request, user: dict = Depends(admin_dep)):
     db = request.app.db
     updates = {k: v for k, v in body.model_dump(exclude_none=True).items() if v is not None}
+    if updates.pop("generate_developer_token", False):
+        updates["developer_token"] = opery_service._gen_id("opdev_")
     # Trata strings vazias como "manter" (permite mask nao sobrescrever)
     updates = {k: v for k, v in updates.items() if not (isinstance(v, str) and v.startswith("***"))}
     if not updates:
@@ -463,6 +505,7 @@ async def update_opery_config(body: ConfigUpdate, request: Request, user: dict =
         "outbound_url_sandbox": cfg.get("outbound_url_sandbox"),
         "outbound_url_production": cfg.get("outbound_url_production"),
         "active_env": cfg.get("active_env"),
+        "developer_token": cfg.get("developer_token"),
         "outbound_token_configured": bool(cfg.get("outbound_token")),
         "updated_at": cfg.get("updated_at"),
     }

@@ -237,8 +237,6 @@ function ConfigForm({ config, onSaved }) {
         </div>
       </div>
 
-      <div className="space-y-4">
-        <StatusCards config={config} />
         <div className="bg-white rounded-2xl border border-border p-5">
           <h3 className="font-heading font-black text-base mb-2">Como funciona</h3>
           <ol className="text-sm space-y-1.5 text-txt-secondary list-decimal list-inside">
@@ -249,7 +247,75 @@ function ConfigForm({ config, onSaved }) {
             <li>A Opery retorna XML da NF-e ou callback → geramos o DANFE (PDF).</li>
           </ol>
         </div>
+
+        <DevAccessCard config={config} onSaved={onSaved} />
       </div>
+    </div>
+  );
+}
+
+function DevAccessCard({ config, onSaved }) {
+  const [copied, setCopied] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const devToken = config?.developer_token || '';
+  const monitorLink = `${window.location.origin}/opery/monitor?token=${devToken}`;
+
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(monitorLink);
+    setCopied(true);
+    toast.success('Link do desenvolvedor copiado!');
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const regenToken = async () => {
+    if (!window.confirm('Deseja realmente gerar um novo token? O link antigo deixará de funcionar.')) return;
+    setGenerating(true);
+    try {
+      await api.put('/api/admin/opery/config', { generate_developer_token: true });
+      toast.success('Novo token de desenvolvedor gerado');
+      onSaved();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-5 space-y-3 shadow-xl">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h3 className="font-heading font-black text-base text-white flex items-center gap-2">
+            🔑 Acesso do Desenvolvedor Opery
+          </h3>
+          <p className="text-xs text-slate-400">Envie este link para a equipe da Opery acompanhar os logs em tempo real sem dar acesso ao restante do painel admin.</p>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Link Direto de Monitoramento</label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            readOnly
+            value={monitorLink}
+            className="flex-1 h-10 px-3 border border-slate-700 bg-slate-950 text-sky-400 rounded-lg text-xs font-mono select-all"
+          />
+          <Button variant="outline" onClick={copyLink} className="bg-slate-800 hover:bg-slate-700 text-white border-slate-700 text-xs">
+            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />} {copied ? 'Copiado' : 'Copiar Link'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
+        <span className="text-slate-400 font-mono">Token: <code className="text-slate-200">{devToken}</code></span>
+        <button type="button" onClick={regenToken} disabled={generating} className="text-xs font-semibold text-rose-400 hover:underline">
+          {generating ? 'Gerando...' : 'Gerar Novo Token'}
+        </button>
+      </div>
+    </div>
+  );
+}
     </div>
   );
 }
@@ -719,15 +785,31 @@ function SnapshotsTab() {
     setHistory({ date, updates: relevant });
   };
 
+  const convertLegacy = async () => {
+    if (!window.confirm('Deseja converter todos os snapshots antigos sem marcação de ambiente para Sandbox? (Eles deixarão de somar no Dashboard de Produção)')) return;
+    try {
+      const res = await api.post('/api/admin/opery/snapshots/convert-legacy', { target_env: 'sandbox' });
+      toast.success(`${res.modified_count} snapshots antigos foram convertidos para Sandbox!`);
+      load();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
   const currency = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   return (
     <div className="space-y-4" data-testid="opery-snapshots-tab">
-      <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm flex items-start gap-2">
-        <RefreshCcw className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-        <div className="text-sky-900">
-          <b>Separado por Ambiente.</b> Snapshots recebidos pelo endpoint de <b>Sandbox</b> são isolados e não afetam os KPIs do Dashboard. Apenas snapshots de <b>Produção</b> são contabilizados nos totais.
+      <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex items-start gap-2">
+          <RefreshCcw className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+          <div className="text-sky-900">
+            <b>Separado por Ambiente.</b> Snapshots recebidos pelo endpoint de <b>Sandbox</b> são isolados e não afetam os KPIs do Dashboard. Apenas snapshots de <b>Produção</b> são contabilizados nos totais.
+          </div>
         </div>
+        <Button variant="outline" size="sm" onClick={convertLegacy} className="text-amber-700 border-amber-300 bg-amber-50 hover:bg-amber-100 font-semibold shrink-0">
+          🧪 Migrar snapshots anteriores p/ Sandbox
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

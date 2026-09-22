@@ -72,24 +72,27 @@ def _config_from_env() -> Dict[str, Any]:
         "outbound_url_production": os.environ.get("OPERY_OUTBOUND_URL_PRODUCTION") or "",
         "outbound_token": os.environ.get("OPERY_OUTBOUND_TOKEN") or "",
         "active_env": os.environ.get("OPERY_ACTIVE_ENV") or "sandbox",
+        "developer_token": os.environ.get("OPERY_DEVELOPER_TOKEN") or "",
         "docs_url": "/docs/opery",
         "source": "env",
     }
 
 
 async def load_config(db) -> Dict[str, Any]:
-    """Carrega config do DB (fallback env). Popula cache."""
+    """Carrega config do DB (fallback env). Popula cache. Gera developer_token se ausente."""
     doc = await db.opery_settings.find_one({"key": _CONFIG_DOC_KEY}, {"_id": 0})
     if doc:
         # Retrocompat: campo antigo `outbound_url` = sandbox
         sandbox_url = doc.get("outbound_url_sandbox") or doc.get("outbound_url") or os.environ.get("OPERY_OUTBOUND_URL_SANDBOX") or os.environ.get("OPERY_OUTBOUND_URL") or ""
         prod_url = doc.get("outbound_url_production") or os.environ.get("OPERY_OUTBOUND_URL_PRODUCTION") or ""
+        dev_tok = doc.get("developer_token") or os.environ.get("OPERY_DEVELOPER_TOKEN") or ""
         cfg = {
             "webhook_secret": doc.get("webhook_secret") or os.environ.get("OPERY_WEBHOOK_SECRET") or "",
             "outbound_url_sandbox": sandbox_url,
             "outbound_url_production": prod_url,
             "outbound_token": doc.get("outbound_token") or os.environ.get("OPERY_OUTBOUND_TOKEN") or "",
             "active_env": doc.get("active_env") or "sandbox",
+            "developer_token": dev_tok,
             "docs_url": doc.get("docs_url") or "/docs/opery",
             "source": "db",
             "updated_at": doc.get("updated_at"),
@@ -97,6 +100,20 @@ async def load_config(db) -> Dict[str, Any]:
         }
     else:
         cfg = _config_from_env()
+
+    # Se developer_token nao estiver definido, gera um automatico e salva
+    if not cfg.get("developer_token"):
+        new_dev_tok = _gen_id("opdev_")
+        cfg["developer_token"] = new_dev_tok
+        try:
+            await db.opery_settings.update_one(
+                {"key": _CONFIG_DOC_KEY},
+                {"$set": {"developer_token": new_dev_tok, "updated_at": _now_iso()}, "$setOnInsert": {"key": _CONFIG_DOC_KEY, "created_at": _now_iso()}},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"opery.load_config: erro ao auto-gerar developer_token: {e}")
+
     # Deriva outbound_url atual conforme active_env
     cfg["outbound_url"] = cfg.get("outbound_url_production") if cfg.get("active_env") == "production" else cfg.get("outbound_url_sandbox")
     _CONFIG_CACHE.clear()
@@ -107,7 +124,7 @@ async def load_config(db) -> Dict[str, Any]:
 async def save_config(db, updates: Dict[str, Any], actor: Optional[str] = None) -> Dict[str, Any]:
     """Salva config no DB. Somente atualiza campos presentes em `updates`."""
     allowed = {"webhook_secret", "outbound_url_sandbox", "outbound_url_production",
-               "outbound_token", "active_env", "docs_url"}
+               "outbound_token", "active_env", "developer_token", "docs_url"}
     payload = {k: v for k, v in updates.items() if k in allowed and v is not None}
     if "active_env" in payload and payload["active_env"] not in {"sandbox", "production"}:
         raise ValueError("active_env deve ser 'sandbox' ou 'production'")
@@ -120,6 +137,17 @@ async def save_config(db, updates: Dict[str, Any], actor: Optional[str] = None) 
     )
     _CONFIG_CACHE.clear()
     return await load_config(db)
+
+
+async def convert_legacy_snapshots(db, target_env: str = "sandbox") -> Dict[str, Any]:
+    """Converte snapshots legados sem o campo 'environment' para o ambiente informado (default 'sandbox')."""
+    if target_env not in {"sandbox", "production"}:
+        raise ValueError("target_env deve ser 'sandbox' ou 'production'")
+    result = await db.opery_revenue_snapshots.update_many(
+        {"environment": {"$exists": False}},
+        {"$set": {"environment": target_env, "updated_at": _now_iso()}}
+    )
+    return {"modified_count": result.modified_count, "target_env": target_env}
 
 
 def get_cached_config() -> Dict[str, Any]:

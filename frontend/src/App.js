@@ -81,6 +81,7 @@ import PropagandistaCompanyCreatePage from './pages/propagandista/PropagandistaC
 import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
 import AdminOpery from './pages/backoffice/AdminOpery';
 import OperyDocs from './pages/OperyDocs';
+import OperyDevMonitor from './pages/OperyDevMonitor';
 import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
 import AdminAppearance from './pages/backoffice/AdminAppearance';
 import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
@@ -155,6 +156,7 @@ function AppRoutes() {
 
       {/* Documentação pública da API Opery */}
       <Route path="/docs/opery" element={<OperyDocs />} />
+      <Route path="/opery/monitor" element={<OperyDevMonitor />} />
 
       {/* BACKOFFICE (ADMIN) */}
       <Route path="/backoffice" element={<Guard requireAuth requireAdmin><BackofficeLayout /></Guard>}>
