@@ -91,21 +91,38 @@ export default function OrderDetails() {
         )}
         {isPending && (
           <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 text-left">
-            {order.payment_url && order.payment_provider === 'mercadopago' ? (
+            {order.payment_url ? (
               <>
                 <p className="text-sm text-amber-800 mb-3">
-                  <strong>Pagamento pendente.</strong> Clique no botão abaixo para abrir o checkout do MercadoPago.
+                  <strong>Pagamento pendente.</strong> Clique no botão abaixo para concluir o pagamento via {order.payment_provider === 'ipag' ? 'iPag Gateway' : 'MercadoPago'}.
                 </p>
-                <a href={order.payment_url} target="_blank" rel="noreferrer">
-                  <Button size="sm" data-testid="pay-mp-btn">Pagar com MercadoPago</Button>
-                </a>
+                <div className="flex gap-2 flex-wrap">
+                  <a href={order.payment_url} target="_blank" rel="noreferrer">
+                    <Button size="sm" data-testid="pay-btn">
+                      Pagar com {order.payment_provider === 'ipag' ? 'iPag' : 'MercadoPago'}
+                    </Button>
+                  </a>
+                  {order.boleto_url && (
+                    <a href={order.boleto_url} target="_blank" rel="noreferrer">
+                      <Button size="sm" variant="outline" data-testid="pay-boleto-btn">
+                        Imprimir Boleto
+                      </Button>
+                    </a>
+                  )}
+                </div>
               </>
+            ) : order.pix_qrcode ? (
+              <div className="text-center space-y-2">
+                <p className="text-sm text-amber-800 font-bold">Escaneie o QR Code PIX para pagar:</p>
+                {order.pix_qrcode_url && <img src={order.pix_qrcode_url} alt="QR Code Pix" className="w-48 h-48 mx-auto border rounded-lg bg-white p-2" />}
+                <div className="bg-white p-2 border rounded font-mono text-xs break-all select-all">{order.pix_qrcode}</div>
+              </div>
             ) : (
               <p className="text-sm text-amber-800">Aguardando confirmação do pagamento...</p>
             )}
-            {payCfg.environment === 'test' && (
+            {(payCfg.provider === 'mock' || payCfg.environment === 'test' || payCfg.ipag_environment === 'sandbox' || order.payment_provider === 'mock') && (
               <div className="mt-3 pt-3 border-t border-amber-200">
-                <p className="text-xs text-amber-700 mb-2"><strong>Sandbox:</strong> em modo teste, você pode simular a confirmação.</p>
+                <p className="text-xs text-amber-700 mb-2"><strong>Sandbox / Mock:</strong> em modo de teste, você pode simular a confirmação do pagamento.</p>
                 <Button onClick={confirmMockPayment} loading={paying} size="sm" variant="outline" data-testid="mock-pay-btn">
                   Simular pagamento (sandbox)
                 </Button>

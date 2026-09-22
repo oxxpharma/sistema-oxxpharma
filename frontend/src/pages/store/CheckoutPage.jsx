@@ -160,8 +160,8 @@ export default function CheckoutPage() {
         navigate(`/pedido/${order.order_id}`);
         return;
       }
-      // Se MP ativo e tem URL de pagamento, redireciona pro checkout do MP
-      if (pay.provider === 'mercadopago' && pay.payment_url) {
+      // Se gateway ativo (MP ou iPag) tem URL de pagamento externa, redireciona
+      if ((pay.provider === 'mercadopago' || pay.provider === 'ipag') && pay.payment_url) {
         toast.success('Redirecionando para o pagamento...');
         window.location.href = pay.payment_url;
         return;

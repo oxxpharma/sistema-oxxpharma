@@ -50,20 +50,34 @@ async def is_mp_configured(db) -> bool:
     return bool(token)
 
 
+import ipag_service
+
+
+async def get_active_provider(db) -> str:
+    """Retorna o gateway ativo configurado pelo admin: 'mercadopago', 'ipag' ou 'mock'."""
+    return await ipag_service.get_active_provider(db)
+
+
 async def get_public_config(db) -> Dict:
-    env = await get_mp_environment(db)
-    pub, tok = await _get_tokens(db, env)
+    provider = await get_active_provider(db)
+    mp_env = await get_mp_environment(db)
+    mp_pub, mp_tok = await _get_tokens(db, mp_env)
+    ipag_env = await ipag_service.get_ipag_environment(db)
+    ipag_conf = await ipag_service.is_ipag_configured(db)
+
     return {
-        "environment": env,
-        "configured": bool(tok),
-        "public_key": pub if tok else "",
+        "active_provider": provider,
+        "environment": ipag_env if provider == "ipag" else mp_env,
+        "configured": ipag_conf if provider == "ipag" else bool(mp_tok),
+        "public_key": mp_pub if (provider == "mercadopago" and mp_tok) else "",
     }
 
 
 async def get_admin_config(db) -> Dict:
-    """Inclui credenciais (mascaradas) e flags. Admin only."""
+    """Inclui credenciais (mascaradas) e flags de MercadoPago e iPag. Admin only."""
     s = await _get_settings(db)
     env = await get_mp_environment(db)
+    active_provider = await get_active_provider(db)
 
     def mask(v):
         if not v:
@@ -75,7 +89,11 @@ async def get_admin_config(db) -> Dict:
     test_tok = (s.get("mp_test_access_token") or "").strip() or os.environ.get("MP_ACCESS_TOKEN_TEST", "")
     prod_tok = (s.get("mp_prod_access_token") or "").strip() or os.environ.get("MP_ACCESS_TOKEN_PROD", "")
     secret = (s.get("mp_webhook_secret") or "").strip() or os.environ.get("MP_WEBHOOK_SECRET", "")
+
+    ipag_cfg = await ipag_service.get_ipag_admin_config(db)
+
     return {
+        "active_payment_provider": active_provider,
         "mp_environment": env,
         "test_public_key": (s.get("mp_test_public_key") or "").strip() or os.environ.get("MP_PUBLIC_KEY_TEST", ""),
         "test_access_token_masked": mask(test_tok),
@@ -85,18 +103,28 @@ async def get_admin_config(db) -> Dict:
         "production_configured": bool(prod_tok),
         "webhook_secret_masked": mask(secret),
         "webhook_secret_configured": bool(secret),
+        # iPag config
+        "ipag": ipag_cfg,
     }
 
 
 async def update_credentials(db, updates: Dict) -> Dict:
-    """Aceita: mp_environment, mp_test_public_key, mp_test_access_token, mp_prod_public_key, mp_prod_access_token, mp_webhook_secret."""
+    """Aceita parâmetros do MercadoPago e iPag, além de `active_payment_provider`."""
     allowed = {
+        "active_payment_provider",
         "mp_environment", "mp_test_public_key", "mp_test_access_token",
         "mp_prod_public_key", "mp_prod_access_token", "mp_webhook_secret",
+        "ipag_environment", "ipag_sandbox_api_id", "ipag_sandbox_api_key",
+        "ipag_prod_api_id", "ipag_prod_api_key",
     }
     set_doc = {k: v for k, v in updates.items() if k in allowed}
+    if "active_payment_provider" in set_doc and set_doc["active_payment_provider"] not in ("mercadopago", "ipag", "mock"):
+        raise ValueError("active_payment_provider deve ser 'mercadopago', 'ipag' ou 'mock'")
     if "mp_environment" in set_doc and set_doc["mp_environment"] not in ("test", "production"):
         raise ValueError("mp_environment deve ser 'test' ou 'production'")
+    if "ipag_environment" in set_doc and set_doc["ipag_environment"] not in ("sandbox", "production"):
+        raise ValueError("ipag_environment deve ser 'sandbox' ou 'production'")
+
     if set_doc:
         from datetime import datetime, timezone
         set_doc["updated_at"] = datetime.now(timezone.utc).isoformat()

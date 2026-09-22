@@ -1,0 +1,4242 @@
+{
+  "info": {
+    "_postman_id": "06c122ce-50ef-4fc6-9e87-ee6faf7a2521",
+    "name": "API iPag",
+    "description": "ENV_VAR:\n\nVariaveis de Produção e Sandbox.\n\n<img src=\"https://content.pstmn.io/18739226-a4fe-4d77-892d-b748d6f2e212/aW1hZ2UucG5n\" width=\"926\" height=\"490\">",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "48677044",
+    "_collection_link": "https://go.postman.co/collection/48677044-06c122ce-50ef-4fc6-9e87-ee6faf7a2521?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Pagamentos",
+      "item": [
+        {
+          "name": "Criar Pagamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-version",
+                "value": "2",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/service/payment",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "payment"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Cartão de Crédito (Simples)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 15.00,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"order_id\": \"1234567\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"card\": {\r\n      \"holder\": \"FULANO DA SILVA\",\r\n      \"number\": \"4111 1111 1111 1111\",\r\n      \"expiry_month\": \"01\",\r\n      \"expiry_year\": \"2025\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Jack Jins\",\r\n    \"cpf_cnpj\": \"799.993.388-01\"\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Cartão de Crédito (Completo)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 100.0,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"capture\": false,\r\n    \"softdescriptor\": \"MYSTORE\",\r\n    \"fraud_analysis\": true,\r\n    \"card\": {\r\n      \"holder\": \"FULANO DA SILVA\",\r\n      \"number\": \"4111 1111 1111 1111\",\r\n      \"expiry_month\": \"03\",\r\n      \"expiry_year\": \"2021\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Fulano da Silva\",\r\n    \"cpf_cnpj\": \"79999338801\",\r\n    \"phone\": \"(11) 99719-2099\",\r\n    \"email\": \"fulano@mail.me\",\r\n    \"birthdate\": \"1989-03-28\",\r\n    \"ip\": \"192.168.0.1\",\r\n    \"billing_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    }\r\n  },\r\n  \"products\": [\r\n    {\r\n      \"name\": \"Darth Vader - Toy\",\r\n      \"description\": \"Darth Vader Toy in Real Size Model\",\r\n      \"unit_price\": 50.0,\r\n      \"quantity\": 2,\r\n      \"sku\": \"DARKSIDE\"\r\n    }\r\n  ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Cartão de Crédito para Clientes Estrangeiros (Simples)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 100.0,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"order_id\": \"1234567\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"card\": {\r\n      \"holder\": \"JACK JONES\",\r\n      \"number\": \"4111111111111111\",\r\n      \"expiry_month\": \"03\",\r\n      \"expiry_year\": \"2021\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Jack Jones\"\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Cartão de Crédito para um Evento",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 85.0,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"order_id\": \"1234567\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"capture\": false,\r\n    \"fraud_analysis\": true,\r\n    \"card\": {\r\n      \"holder\": \"ARTHUR MORGAN\",\r\n      \"number\": \"4111 1111 1111 1111\",\r\n      \"expiry_month\": \"03\",\r\n      \"expiry_year\": \"2021\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Arthur Morgan\",\r\n    \"cpf_cnpj\": \"972.089.620-57\"\r\n  },\r\n  \"event\": {\r\n    \"name\": \"Reveillon - 2022\",\r\n    \"date\": \"2022-01-01 00:00:00\",\r\n    \"type\": \"party\",\r\n    \"subtype\": \"Reveillon\",\r\n    \"venue\": {\r\n      \"name\": \"Campo - Clube das Laranjeiras\",\r\n      \"capacity\": 2000,\r\n      \"address\": \"Av. Santos Dumont\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\"\r\n    },\r\n    \"tickets\": [\r\n      {\r\n        \"id\": \"EVENT001\",\r\n        \"category\": \"regular\",\r\n        \"premium\": false,\r\n        \"section\": \"Pista\",\r\n        \"attendee\": {\r\n          \"document\": \"972.089.620-57\",\r\n          \"dob\": \"1990-10-28\"\r\n        }\r\n      },\r\n      {\r\n        \"id\": \"EVENT002\",\r\n        \"category\": \"regular\",\r\n        \"premium\": true,\r\n        \"section\": \"Camarote\",\r\n        \"attendee\": {\r\n          \"document\": \"444.631.330-41\",\r\n          \"dob\": \"1992-03-28\"\r\n        }\r\n      }\r\n    ]\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Boleto (Completo)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 100.0,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"payment\": {\r\n    \"type\": \"boleto\",\r\n    \"method\": \"boletopagseguro\",\r\n    \"boleto\": {\r\n      \"due_date\": \"2020-10-20\",\r\n      \"instructions\": [\r\n        \"Sr. Caixa não receber após o vencimento\",\r\n        \"Boleto referente ao pedido 777 na Loja MYSTORE\"\r\n      ]\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Fulano da Silva\",\r\n    \"cpf_cnpj\": \"79999338801\",\r\n    \"phone\": \"(11) 99719-2099\",\r\n    \"email\": \"fulano@mail.me\",\r\n    \"birthdate\": \"1989-03-28\",\r\n    \"ip\": \"192.168.0.1\",\r\n    \"billing_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    },\r\n    \"shipping_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    }\r\n  },\r\n  \"products\": [\r\n    {\r\n      \"name\": \"Luke Skywalker Lightsaber Blue\",\r\n      \"description\": \"Luke Skywalker Real Lightsaber in Blue\",\r\n      \"unit_price\": 100.0,\r\n      \"quantity\": 1,\r\n      \"sku\": \"LIGHTSIDE\"\r\n    }\r\n  ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Tokenização do Cartão de Crédito",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 97.65,\r\n  \"callback_url\": \"https://9a32ecb90e4cb7ef0f44d6262ec7b5d9.m.pipedream.net\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"card\": {\r\n      \"tokenize\": true,\r\n      \"holder\": \"FULANO DA SILVA\",\r\n      \"number\": \"4532 2876 7749 2847\",\r\n      \"expiry_month\": \"03\",\r\n      \"expiry_year\": \"2021\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Jack Jins\",\r\n    \"cpf_cnpj\": \"799.993.388-01\"\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Apenas o Token de Cartão",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 97.65,\r\n  \"callback_url\": \"https://9a32ecb90e4cb7ef0f44d6262ec7b5d9.m.pipedream.net\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"installments\": 1,\r\n    \"card\": {\r\n      \"token\": \"d2ce5a32-c67e-4c50-8726-f6fc43c477fb\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Jack Jins\",\r\n    \"cpf_cnpj\": \"799.993.388-01\"\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Cartão de Crédito com Criação de Assinatura|Cobrança Recorrente",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 99.0,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"capture\": true,\r\n    \"card\": {\r\n      \"holder\": \"FULANO DA SILVA\",\r\n      \"number\": \"4111 1111 1111 1111\",\r\n      \"expiry_month\": \"03\",\r\n      \"expiry_year\": \"2028\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Fulano da Silva\",\r\n    \"cpf_cnpj\": \"79999338801\",\r\n    \"phone\": \"(11) 99719-2099\",\r\n    \"email\": \"fulano@mail.me\",\r\n    \"birthdate\": \"1989-03-28\",\r\n    \"ip\": \"192.168.0.1\",\r\n    \"billing_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    }\r\n  },\r\n  \"subscription\": {\r\n    \"frequency\": 4,\r\n    \"interval\": \"month\",\r\n    \"start_date\": \"2025-05-01\"\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Cartão de Crédito com Split de Pagamento",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 99.0,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"payment\": {\r\n    \"type\": \"card\",\r\n    \"method\": \"visa\",\r\n    \"installments\": 1,\r\n    \"capture\": true,\r\n    \"card\": {\r\n      \"holder\": \"FULANO DA SILVA\",\r\n      \"number\": \"4111 1111 1111 1111\",\r\n      \"expiry_month\": \"03\",\r\n      \"expiry_year\": \"2027\",\r\n      \"cvv\": \"123\"\r\n    }\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Fulano da Silva\",\r\n    \"cpf_cnpj\": \"79999338801\",\r\n    \"ip\": \"192.168.0.1\",\r\n    \"billing_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    }\r\n  },\r\n  \"split_rules\": [\r\n    {\r\n      \"seller_id\": \"vendedor1@mail.me\",\r\n      \"percentage\": 20.0,\r\n      \"liable\": true,\r\n      \"charge_processing_fee\": false\r\n    }\r\n  ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Pix (Completo)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-api-version",
+                    "value": "2",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 97.86,\r\n  \"callback_url\": \"https://99mystore.com.br/ipag/callback\",\r\n  \"order_id\": \"1234567\",\r\n  \"payment\": {\r\n    \"type\": \"pix\",\r\n    \"method\": \"pix\",\r\n    \"pix_expires_in\": 60\r\n  },\r\n  \"customer\": {\r\n    \"name\": \"Fulano da Silva\",\r\n    \"cpf_cnpj\": \"79999338801\",\r\n    \"phone\": \"(11) 99719-2099\",\r\n    \"email\": \"fulano@mail.me\",\r\n    \"birthdate\": \"1989-03-28\",\r\n    \"ip\": \"192.168.0.1\",\r\n    \"billing_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    },\r\n    \"shipping_address\": {\r\n      \"street\": \"Rua Júlio Gonzalez\",\r\n      \"number\": \"1023\",\r\n      \"district\": \"Barra Funda\",\r\n      \"complement\": \"Sala 02\",\r\n      \"city\": \"São Paulo\",\r\n      \"state\": \"SP\",\r\n      \"zipcode\": \"01156-060\"\r\n    }\r\n  },\r\n  \"products\": [\r\n    {\r\n      \"name\": \"Luke Skywalker Lightsaber Blue\",\r\n      \"description\": \"Luke Skywalker Real Lightsaber in Blue\",\r\n      \"unit_price\": 100.0,\r\n      \"quantity\": 1,\r\n      \"sku\": \"LIGHTSIDE\"\r\n    }\r\n  ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/payment",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "payment"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Consultar Pagamento",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-version",
+                "value": "2",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/service/consult",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "consult"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": "Identificação única da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "uuid",
+                  "value": "",
+                  "description": "Identificação única da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "tid",
+                  "value": "",
+                  "description": "TID da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "order_id",
+                  "value": "",
+                  "description": "Número do Pedido informado na Transação",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Capturar Pagamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-version",
+                "value": "2",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}}/service/capture?id={id}",
+              "host": [
+                "{{base_url}}}"
+              ],
+              "path": [
+                "service",
+                "capture"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}",
+                  "description": "Identificação única da Transação"
+                },
+                {
+                  "key": "uuid",
+                  "value": null,
+                  "description": "Identificação única da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "tid",
+                  "value": null,
+                  "description": "TID da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "order_id",
+                  "value": null,
+                  "description": "Número do Pedido informado na Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "amount",
+                  "value": null,
+                  "description": "Valor da Captura (opcional)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancelar Pagamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-version",
+                "value": "2",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/service/cancel?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "cancel"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}",
+                  "description": "Identificação única da Transação"
+                },
+                {
+                  "key": "uuid",
+                  "value": null,
+                  "description": "Identificação única da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "tid",
+                  "value": null,
+                  "description": "TID da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "order_id",
+                  "value": null,
+                  "description": "Número do Pedido informado na Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "amount",
+                  "value": null,
+                  "description": "Valor do Cancelamento",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validação de Cartão de Crédito",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/payment",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "payment"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Simular Captura em Sandbox",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-version",
+                "value": "2",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}}/service/transaction/simulate_capture",
+              "host": [
+                "{{base_url}}}"
+              ],
+              "path": [
+                "service",
+                "transaction",
+                "simulate_capture"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por Criar, Consultar, Cancelar e Capturar Pagamentos (Transações)\n\n## [Criar pagamento](https://developers.ipag.com.br/pt-br/payment?id=criar-pagamento)\n\nStartFragment\n\n## [Cartões de Teste](https://developers.ipag.com.br/pt-br/payment_test_cards?id=cart%c3%b5es-de-teste)\n\n| Bandeira | Número | Vencimento | CVV | Sempre Aprova |\n| --- | --- | --- | --- | --- |\n| `visa` | 4111 1111 1111 1111 | 01/25 | 123 | sim |\n| `visa` | 4916 5733 8093 7962 | 12/28 | 123 | não |\n| `mastercard` | 5353 2766 5962 9461 | 02/25 | 123 | sim |\n| `mastercard` | 5289 0946 0544 4326 | 12/28 | 123 | não |\n| `elo` | 4514 1674 2628 1141 | 01/25 | 123 | sim |\n| `elo` | 4389 3556 6853 3582 | 12/28 | 123 | não |"
+    },
+    {
+      "name": "Sincronização Callback",
+      "item": [
+        {
+          "name": "Sincronizar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/transactions/9441525/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "transactions",
+                "9441525",
+                "sync"
+              ],
+              "query": [
+                {
+                  "key": "",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "A sincronização é uma funcionalidade que permite que você sincronize os dados de um pagamento com o seu sistema. Você pode sincronizar um pagamento a qualquer momento, porém, o sistema só irá enviar o callback uma vez.\n\n## [Sincronização](https://developers.ipag.com.br/pt-br/payment_callback?id=sincroniza%c3%a7%c3%a3o)"
+    },
+    {
+      "name": "Conta",
+      "item": [
+        {
+          "name": "Listar Taxas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/account/my-fees",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "account",
+                "my-fees"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Aqui encontram-se os recursos disponíveis para consultar informações da conta.\n\n## [Conta](https://developers.ipag.com.br/pt-br/account?id=conta-)"
+    },
+    {
+      "name": "Transação",
+      "item": [
+        {
+          "name": "Listar Transações",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/transactions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "transaction_id",
+                  "value": null,
+                  "description": "Identificação única da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "tid",
+                  "value": null,
+                  "description": "TID da Transação (Adquirente)",
+                  "disabled": true
+                },
+                {
+                  "key": "nsu",
+                  "value": null,
+                  "description": "NSU da Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "order_id",
+                  "value": null,
+                  "description": "Numero do Pedido",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": null,
+                  "description": "Status da Transação (de 1 a 10)",
+                  "disabled": true
+                },
+                {
+                  "key": "customer_name",
+                  "value": null,
+                  "description": "Nome do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "customer_cpf_cnpj",
+                  "value": null,
+                  "description": "CPF ou CNPJ do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "method",
+                  "value": null,
+                  "description": "Método de pagamento",
+                  "disabled": true
+                },
+                {
+                  "key": "from_date",
+                  "value": null,
+                  "description": "Data inicial do período que a Transação foi criada (Y-m-d)",
+                  "disabled": true
+                },
+                {
+                  "key": "to_date",
+                  "value": null,
+                  "description": "Data final do período que a Transação foi criada (Y-m-d)",
+                  "disabled": true
+                },
+                {
+                  "key": "from_datetime",
+                  "value": null,
+                  "description": "Data e hora inicial do período que a Transação foi criada (Y-m-d H:i:s)",
+                  "disabled": true
+                },
+                {
+                  "key": "to_datetime",
+                  "value": null,
+                  "description": "Data e hora final do período que a Transação foi criada (Y-m-d H:i:s)",
+                  "disabled": true
+                },
+                {
+                  "key": "captured_from_date",
+                  "value": null,
+                  "description": "Data inicial do período que a Transação foi capturada (Y-m-d)",
+                  "disabled": true
+                },
+                {
+                  "key": "captured_to_date",
+                  "value": null,
+                  "description": "Data final do período que a Transação foi capturada (Y-m-d)",
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "description": "Faixa de valor inicial de uma Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "description": "Faixa de valor final de uma Transação",
+                  "disabled": true
+                },
+                {
+                  "key": "payment_link_id",
+                  "value": null,
+                  "description": "Transações associadas ao ID do link de pagamento",
+                  "disabled": true
+                },
+                {
+                  "key": "payment_link_uuid",
+                  "value": null,
+                  "description": "Transações associadas ao UUID do link de pagamento",
+                  "disabled": true
+                },
+                {
+                  "key": "payment_link_external_code",
+                  "value": null,
+                  "description": "Transações associadas ao codigo de referencia do link de pagamento)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Transação",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/transactions?id=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": "Identificação única da Transação"
+                },
+                {
+                  "key": "status",
+                  "value": "8",
+                  "description": "Status da Transação (de 1 a 10)",
+                  "disabled": true
+                },
+                {
+                  "key": "uuid",
+                  "value": null,
+                  "description": "Identificação única da Transação",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por listar e consultar transações.\n\n## [Transação](https://developers.ipag.com.br/pt-br/transaction?id=transa%c3%a7%c3%a3o-)"
+    },
+    {
+      "name": "Tokenização de Cartão",
+      "item": [
+        {
+          "name": "Novo token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/card_tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "card_tokens"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Token",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Fulano de Oliveira\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/service/resources/card_tokens?token={token}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "card_tokens"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{token}",
+                  "description": "Token gerado do cartão de crédito"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/card_tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "card_tokens"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por tokenizar e consultar cartões.\n\n## [Tokenização](https://developers.ipag.com.br/pt-br/token?id=tokeniza%c3%a7%c3%a3o-de-cart%c3%a3o-de-cr%c3%a9dito-)"
+    },
+    {
+      "name": "Cliente",
+      "item": [
+        {
+          "name": "Novo Cliente",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/customers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "customers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alterar Cliente",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/customers?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}",
+                  "description": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Cliente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/customers?id=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": "{id}"
+                },
+                {
+                  "key": "name",
+                  "value": null,
+                  "description": "Nome do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "cpf_cnpj",
+                  "value": null,
+                  "description": "CPF ou CNPJ do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "email",
+                  "value": null,
+                  "description": "E-mail do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "phone",
+                  "value": null,
+                  "description": "Telefone do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": null,
+                  "description": "Status do Cliente (true ou false)",
+                  "disabled": true
+                },
+                {
+                  "key": "order",
+                  "value": null,
+                  "description": "Ordernação dos Resultados (asc ou desc)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Clientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/customers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "",
+                  "description": "Nome do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "cpf_cnpj",
+                  "value": "",
+                  "description": "CPF ou CNPJ do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "email",
+                  "value": "",
+                  "description": "E-mail do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "phone",
+                  "value": "",
+                  "description": "Telefone do Cliente",
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": "",
+                  "description": "Status do Cliente (true ou false)",
+                  "disabled": true
+                },
+                {
+                  "key": "order",
+                  "value": "",
+                  "description": "Ordernação dos Resultados (asc ou desc)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deletar Clientes",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/customers?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por gerenciar Clientes.\n\n## [Cliente](https://developers.ipag.com.br/pt-br/customer?id=cliente-)"
+    },
+    {
+      "name": "Plano de Assinatura",
+      "item": [
+        {
+          "name": "Novo Plano de Assinatura",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/plans",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "plans"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alterar Plano de Assinatura",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/plans?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "plans"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Plano de Assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/plans?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "plans"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Planos de Assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/plans",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "plans"
+              ],
+              "query": [
+                {
+                  "key": "description",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "name",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deletar Plano de Assinatura",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/plans?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "plans"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por gerenciar Planos de Assinatura.\n\n## [Plano de Assinatura](https://developers.ipag.com.br/pt-br/subscription_plan?id=plano-de-assinatura-)"
+    },
+    {
+      "name": "Assinatura",
+      "item": [
+        {
+          "name": "Nova Assinatura",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscriptions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscriptions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alterar Assinatura",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscriptions/{id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscriptions",
+                "{id}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscriptions/131046",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscriptions",
+                "131046"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscriptions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscriptions"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "customer_name",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_due_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_due_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_payment_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_payment_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "due_day",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Lançamentos da Assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscriptions/131046/installments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscriptions",
+                "131046",
+                "installments"
+              ],
+              "query": [
+                {
+                  "key": "subscription_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_due_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_due_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_payment_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_payment_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Visualizar Lançamento da Assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscriptions/{subscription_id}/installments/{number}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscriptions",
+                "{subscription_id}",
+                "installments",
+                "{number}"
+              ],
+              "query": [
+                {
+                  "key": "subscription_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "number",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Desvincular Token da Assinatura",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/subscriptions/{id}/card_token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "subscriptions",
+                "{id}",
+                "card_token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Baixa manual",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/invoice_installments?subscription_id=&number=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "invoice_installments"
+              ],
+              "query": [
+                {
+                  "key": "subscription_id",
+                  "value": ""
+                },
+                {
+                  "key": "number",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Agendar Pagamento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/invoice_installments?subscription_id=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "invoice_installments"
+              ],
+              "query": [
+                {
+                  "key": "subscription_id",
+                  "value": ""
+                },
+                {
+                  "key": "invoice_number",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "action",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Enviar Notificação de Cobrança",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/subscription/{subscription_id}/notify?subscription_id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "subscription",
+                "{subscription_id}",
+                "notify"
+              ],
+              "query": [
+                {
+                  "key": "subscription_id",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por gerenciar Assinaturas.\n\n## [Assinatura](https://developers.ipag.com.br/pt-br/subscription?id=assinatura-)"
+    },
+    {
+      "name": "Cobrança",
+      "item": [
+        {
+          "name": "Nova Cobrança",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/charges",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "charges"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alterar Cobrança",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"is_active\": false\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/service/resources/charges?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "charges"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Cobrança",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/charges?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "charges"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Cobrança",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/charges",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "charges"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Enviar Notificação de Cobrança",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/charge/{charge_id}/notify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "charge",
+                "{charge_id}",
+                "notify"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por registrar e consultar Cobranças.\n\n## [Cobrança](https://developers.ipag.com.br/pt-br/charge?id=cobran%c3%a7a-)"
+    },
+    {
+      "name": "Link de Pagamento",
+      "item": [
+        {
+          "name": "Novo Link de Pagamento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/payment_links",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "payment_links"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alterar Link de Pagamento",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/payment_links/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "payment_links",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Link de Pagamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/payment_links/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "payment_links",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Links de Pagamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/payment_links",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "payment_links"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "token",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "external_code",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "description",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "expires_from",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "expires_to",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "has_stock_limit",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por registrar e consultar Links de Pagamento.\n\n## [Link de Pagamento](https://developers.ipag.com.br/pt-br/linkdepagamento?id=link-de-pagamento-)"
+    },
+    {
+      "name": "[Marketplace] Vendedor",
+      "item": [
+        {
+          "name": "Novo Vendedor",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/sellers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "sellers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alterar Vendedor",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"email\": \"contato@mail.me\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/service/resources/sellers?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "sellers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Vendedor",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/sellers?id=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "sellers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Vendedores",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/sellers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "sellers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Transferências dos Vendedores",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/sellers/transfers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "sellers",
+                "transfers"
+              ],
+              "query": [
+                {
+                  "key": "seller_id",
+                  "value": null,
+                  "description": "ID do vendedor",
+                  "disabled": true
+                },
+                {
+                  "key": "seller_uuid",
+                  "value": null,
+                  "description": "UUID do vendedor",
+                  "disabled": true
+                },
+                {
+                  "key": "seller_cpf_cnpj",
+                  "value": null,
+                  "description": "CPF/CNPJ do vendedor",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": null,
+                  "description": "Status da transação",
+                  "disabled": true
+                },
+                {
+                  "key": "transfer_number",
+                  "value": null,
+                  "description": "Número da transação",
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "description": "De valor",
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "description": "Até valor",
+                  "disabled": true
+                },
+                {
+                  "key": "created_at_from",
+                  "value": null,
+                  "description": "Criado de",
+                  "disabled": true
+                },
+                {
+                  "key": "created_at_to",
+                  "value": null,
+                  "description": "Criado até",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Transferência",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/sellers_transfers?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "sellers_transfers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Lançamentos Futuros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/future_transfers?seller_id=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "future_transfers"
+              ],
+              "query": [
+                {
+                  "key": "seller_id",
+                  "value": ""
+                },
+                {
+                  "key": "cpf_cnpj",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por registrar novos vendedores em seu Marketplace.\n\n### _**Permitido apenas para contas no Plano Enterprise e Master.**_\n\n## [[Marketplace] Vendedor](https://developers.ipag.com.br/pt-br/sellers?id=vendedor-)"
+    },
+    {
+      "name": "[Marketplace] Regra de Split",
+      "item": [
+        {
+          "name": "Nova Regra de Split",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/split_rules?transaction",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "split_rules"
+              ],
+              "query": [
+                {
+                  "key": "transaction",
+                  "value": null,
+                  "description": "ID da transação"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Regra de Split",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/split_rules",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "split_rules"
+              ],
+              "query": [
+                {
+                  "key": "transaction",
+                  "value": "{transaction_id}",
+                  "disabled": true
+                },
+                {
+                  "key": "id",
+                  "value": "{split_rule_id}",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Regras de Split",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/split_rules?transaction={transaction_id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "split_rules"
+              ],
+              "query": [
+                {
+                  "key": "transaction",
+                  "value": "{transaction_id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deletar Regra de Split",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/split_rules?transaction={transaction_id}&id={split_rule_id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "split_rules"
+              ],
+              "query": [
+                {
+                  "key": "transaction",
+                  "value": "{transaction_id}"
+                },
+                {
+                  "key": "id",
+                  "value": "{split_rule_id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por gerenciar Regras de Split de uma Transação **pré-autorizada(5)**.\n\n## [[Marketplace] Regra de Split](https://developers.ipag.com.br/pt-br/splitrules?id=regras-de-split-)"
+    },
+    {
+      "name": "[Master] Estabelecimento",
+      "item": [
+        {
+          "name": "Novo Estabelecimento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/establishments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "establishments"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Exemplo Estabelecimento",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"login\": \"lettierydlamarepo\",\r\n  \"name\": \"Lettiery DLamare Portela Procópio\",\r\n  \"email\": \"leo@confrapag.com.br\",\r\n  \"password\": \"123456\",\r\n  \"document\": \"096.994.824-78\",\r\n  \"phone\": \"(83) 99610-3327\",\r\n  \"address\": {\r\n    \"street\": \"Rua João Batista Maia\",\r\n    \"number\": \"154\",\r\n    \"district\": \"Bancários\",\r\n    \"complement\": \"\",\r\n    \"city\": \"João Pessoa\",\r\n    \"state\": \"PB\",\r\n    \"zipcode\": \"58051370\"\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/resources/establishments",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "resources",
+                    "establishments"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Alterar Estabelecimento",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/establishments?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "establishments"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "request",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"attributes\": {\r\n    \"is_active\": false\r\n  }\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/resources/establishments?id=571c634ce60ff702826cd18799cadd7b",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "resources",
+                    "establishments"
+                  ],
+                  "query": [
+                    {
+                      "key": "id",
+                      "value": "571c634ce60ff702826cd18799cadd7b"
+                    }
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Consultar Estabelecimento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/establishments?id=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "establishments"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": ""
+                },
+                {
+                  "key": "document",
+                  "value": null,
+                  "description": "CPF ou CNPJ do Estabelecimento",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Estabelecimentos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments"
+              ],
+              "query": [
+                {
+                  "key": "uuid",
+                  "value": null,
+                  "description": "UUID do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "name",
+                  "value": null,
+                  "description": "Nome do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "business_name",
+                  "value": null,
+                  "description": "Razão Social do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "document",
+                  "value": null,
+                  "description": "CPF/CNPJ do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "cpf_cnpj",
+                  "value": null,
+                  "description": "CPF/CNPJ do estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": null,
+                  "description": "Situação do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "username",
+                  "value": null,
+                  "description": "Username do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "login",
+                  "value": null,
+                  "description": "Login do Estabelecimento",
+                  "disabled": true
+                },
+                {
+                  "key": "created_at_from",
+                  "value": null,
+                  "description": "Criado de",
+                  "disabled": true
+                },
+                {
+                  "key": "created_at_to",
+                  "value": null,
+                  "description": "Criado até",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar KYC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/kyc",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "kyc"
+              ],
+              "query": [
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Todas as Transações",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/transactions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "transaction_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "order_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "customer_name",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "method",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_datetime",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_datetime",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "order",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Transações",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/transactions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "transaction_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "order_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "customer_name",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "method",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_date",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_datetime",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_datetime",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "to_amount",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "order",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Visualizar Transação",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/transactions/{transaction_id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "transactions",
+                "{transaction_id}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Configurar Métodos de Pagamento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "payment_methods"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Stone",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Cielo",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Rede",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Sipag",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Bin",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Zoop",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Entrepay",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Getnet",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Adiq",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Unlimit",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "D24",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/payment_methods",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "payment_methods"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Configurar Antifraudes",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}} /service/v2/establishments/{establishment_id}/antifraud_settings",
+              "host": [
+                "{{base_url}} "
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "antifraud_settings"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Redshield",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/antifraud_settings",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "antifraud_settings"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Clear Sale",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/antifraud_settings",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "antifraud_settings"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            },
+            {
+              "name": "Konduto",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/antifraud_settings",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "antifraud_settings"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Listar Disputas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/transactions/disputes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "transactions",
+                "disputes"
+              ],
+              "query": [
+                {
+                  "key": "from_transaction_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "from_status",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "disputed_at_from",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "disputed_at_to",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "chargedback_at_from",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "chargedback_at_to",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "succeded_at_from",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "succeded_at_to",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Aplicar Disputas",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/transactions/dispute",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "transactions",
+                "dispute"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Aplicar Chargebacks",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/transactions/chargeback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "transactions",
+                "chargeback"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Saldo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/account/balance",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "account",
+                "balance"
+              ],
+              "query": [
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Solicitar Transferência de Saldo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/account/withdrawl",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "account",
+                "withdrawl"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Solicitar Transferência de Saldo",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"amount\": 100.0,\r\n  \"notification_url\": \"https://api.example.com/notifications\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/account/withdrawl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "v2",
+                    "establishments",
+                    "{establishment_id}",
+                    "account",
+                    "withdrawl"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Consultar Transferência de Saldo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/account/withdrawl/{withdrawl_id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "account",
+                "withdrawl",
+                "{withdrawl_id}"
+              ],
+              "query": [
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "withdrawl_id",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por registrar novos estabelecimentos.\n\n### Permitido apenas para contas no Plano Master.\n\n## [Estabelecimento](https://developers.ipag.com.br/pt-br/merchant?id=estabelecimento-)"
+    },
+    {
+      "name": "[Master] Plano de Venda",
+      "item": [
+        {
+          "name": "Listar Planos de Venda",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/salesplans",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "salesplans"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "name",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Planos de Venda do EC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/salesplans",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "salesplans"
+              ],
+              "query": [
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Contextos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/salesplans/contexts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "salesplans",
+                "contexts"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "default",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "mode",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar contexto do EC",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/establishments/{establishment_id}/salesplans/{context_name}/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "establishments",
+                "{establishment_id}",
+                "salesplans",
+                "{context_name}",
+                "sync"
+              ],
+              "query": [
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "context_name",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por gerenciar Planos de Venda.\n\n## [[Master] Plano de Venda](https://developers.ipag.com.br/pt-br/sales_plans?id=listar-planos-de-venda)"
+    },
+    {
+      "name": "[Master] Terminais POS",
+      "item": [
+        {
+          "name": "Listar Terminais POS",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/pos-terminals",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "pos-terminals"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "provider",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "model",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "serial_number",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "synced",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Terminal POS",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/pos-terminals/{pos_terminal_id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "pos-terminals",
+                "{pos_terminal_id}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Novo Terminal POS",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/pos-terminals",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "pos-terminals"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Vincular Terminal POS",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/pos-terminals/{terminal_id}/establishments/{establishment_id}/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "pos-terminals",
+                "{terminal_id}",
+                "establishments",
+                "{establishment_id}",
+                "sync"
+              ],
+              "query": [
+                {
+                  "key": "terminal_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Desvincular Terminal POS",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/pos-terminals/{terminal_id}/establishments/{establishment_id}/unsync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "pos-terminals",
+                "{terminal_id}",
+                "establishments",
+                "{establishment_id}",
+                "unsync"
+              ],
+              "query": [
+                {
+                  "key": "terminal_id",
+                  "value": null,
+                  "disabled": true
+                },
+                {
+                  "key": "establishment_id",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por gerenciar os terminais POS.\n\n## [[Master] Terminais POS](https://developers.ipag.com.br/pt-br/pos-terminals?id=master-terminais-pos-)"
+    },
+    {
+      "name": "Transferência",
+      "item": [
+        {
+          "name": "Lista Transferências",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/transfers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "transfers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Transferência",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/transfers?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "transfers"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Recebíveis",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/receivables",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "receivables"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Status do Recebível.",
+                  "disabled": true
+                },
+                {
+                  "key": "paid_from",
+                  "value": "",
+                  "description": "Data de início para filtrar recebíveis pagos",
+                  "disabled": true
+                },
+                {
+                  "key": "paid_to",
+                  "value": "",
+                  "description": "Data de fim para filtrar recebíveis pagos.",
+                  "disabled": true
+                },
+                {
+                  "key": "expected_from",
+                  "value": "",
+                  "description": "Data de início para filtrar recebíveis esperados.",
+                  "disabled": true
+                },
+                {
+                  "key": "expected_to",
+                  "value": "",
+                  "description": "Data de fim para filtrar recebíveis esperados",
+                  "disabled": true
+                },
+                {
+                  "key": "transaction_id",
+                  "value": "",
+                  "description": "Identificação única da transação relacionada ao recebível",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "",
+                  "description": "Número da página.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": null,
+                  "description": "Limite de registros por página.",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Recebíveis Futuros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/receivables/upcoming?from={yyyy-mm-dd}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "receivables",
+                "upcoming"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "",
+                  "description": "Número da página.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "Limite de registros por página.",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "{yyyy-mm-dd}",
+                  "description": "Data específica no formato"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por listar e consultar transferências.\n\n## [Transaferência](https://developers.ipag.com.br/pt-br/transfers?id=transfer%c3%aancia-)"
+    },
+    {
+      "name": "Webhook",
+      "item": [
+        {
+          "name": "Novo Webhook",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/webhooks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "webhooks"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Exemplo Webhook",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"http_method\": \"POST\",\r\n    \"url\": \"https://minhaloja.com.br/callback\",\r\n    \"description\": \"Webhook para receber notificações de atualização das transações\",\r\n    \"actions\": [\r\n        \"TransactionCreated\",\r\n        \"TransactionWaitingPayment\",\r\n        \"TransactionCanceled\",\r\n        \"TransactionPreAuthorized\",\r\n        \"TransactionCaptured\",\r\n        \"TransactionDenied\",\r\n        \"TransactionDisputed\",\r\n        \"TransactionChargedback\"\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/resources/webhooks",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "resources",
+                    "webhooks"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Consultar Webhook",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/webhooks?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "webhooks"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}",
+                  "description": "ID"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Webhooks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/webhooks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "webhooks"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deletar Webhook",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/webhooks?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "webhooks"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por registrar, consultar e excluir Webhooks.\n\nWebhook é a forma de recebimento de informações, que são passadas quando um evento acontece.\n\n_**Importante:**_ _Caso você tenha um firewall ou um sistema de segurança que bloqueie requisições de IPs específicos, é importante liberar os IPs do nosso sistema._\n\n## [Webhook](https://developers.ipag.com.br/pt-br/webhook?id=webhook-)"
+    },
+    {
+      "name": "Checkout",
+      "item": [
+        {
+          "name": "Novo Checkout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/checkout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "checkout"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Exemplo Checkout",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"customer\": {\r\n    \"name\": \"Fulano da Silva\",\r\n    \"tax_receipt\": \"212.348.796-11\",\r\n    \"email\": \"teste@email.com\",\r\n    \"phone\": \"(11) 2222-3333\",\r\n    \"birthdate\": \"1987-11-21\",\r\n    \"address\": {\r\n      \"zipcode\": \"19020520\",\r\n      \"street\": \"Rua Doze de Outubro\",\r\n      \"number\": \"639\",\r\n      \"district\": \"Centro\",\r\n      \"complement\": \"Empresa\",\r\n      \"city\": \"Presidente Prudente\",\r\n      \"state\": \"SP\"\r\n    }\r\n  },\r\n  \"installment_setting\": {\r\n    \"max_installments\": 12,\r\n    \"min_installment_value\": 5,\r\n    \"interest\": 0,\r\n    \"interest_free_installments\": 12\r\n  },\r\n  \"order\": {\r\n    \"order_id\": \"11001\",\r\n    \"amount\": \"15.00\",\r\n    \"return_url\": \"https://www.yncalivros.com.br/retorno.aspx?from_redirect=1\",\r\n    \"return_type\": \"json\"\r\n  },\r\n  \"products\": [\r\n    {\r\n      \"name\": \"Caneca\",\r\n      \"unit_price\": \"15.00\",\r\n      \"quantity\": 1,\r\n      \"sku\": \"CAN123\",\r\n      \"description\": \"Caneca verde\"\r\n    },\r\n    {\r\n      \"name\": \"Camiseta\",\r\n      \"unit_price\": \"30.00\",\r\n      \"quantity\": 1,\r\n      \"sku\": \"CAM145G\"\r\n    }\r\n  ],\r\n  \"split_rules\": [\r\n    {\r\n      \"receiver\": \"qwertyuiopasdfghjklzxcvbnm123456\",\r\n      \"percentage\": \"50\",\r\n      \"charge_processing_fee\": true\r\n    },\r\n    {\r\n      \"receiver\": \"654321mnbvcxzlkjhgfdsapoiuytrewq\",\r\n      \"percentage\": \"20\"\r\n    }\r\n  ],\r\n  \"expires_in\": 60\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/service/resources/checkout",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "service",
+                    "resources",
+                    "checkout"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Obter Parcelamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/checkout/installments?amount=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "checkout",
+                "installments"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "",
+                  "description": "Valor"
+                },
+                {
+                  "key": "max_installment",
+                  "value": "",
+                  "description": "parcelamento máximo",
+                  "disabled": true
+                },
+                {
+                  "key": "installments_without_interest",
+                  "value": null,
+                  "description": "Número máximo de parcelas sem juros",
+                  "disabled": true
+                },
+                {
+                  "key": "installment_min_amount",
+                  "value": null,
+                  "description": "Valor mínimo da parcela individual",
+                  "disabled": true
+                },
+                {
+                  "key": "installment_tax",
+                  "value": null,
+                  "description": "Juros aplicados na parcela",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por Criar Checkouts\n\n## [Checkout](https://developers.ipag.com.br/pt-br/checkout?id=checkout-)"
+    },
+    {
+      "name": "Voucher",
+      "item": [
+        {
+          "name": "Novo Voucher",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/vouchers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "vouchers"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Serviço responsável por registrar e consultar vouchers. Vouchers são Transações que utilizam o Meio de Pagamento Voucher.\n\n## [Voucher](https://developers.ipag.com.br/pt-br/voucher?id=voucher-)"
+    },
+    {
+      "name": "TEF",
+      "item": [
+        {
+          "name": "Registrar Transação",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/v2/tef/transactions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "v2",
+                "tef",
+                "transactions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar Transação",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/service/resources/transactions?id={id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "service",
+                "resources",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{id}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "## [Introdução TEF](https://developers.ipag.com.br/pt-br/tef?id=tef-)\n\nServiço responsável por registrar transações de cartão de crédito e débito processadas em POS (Point of Sale) e TEF (Transferência Eletrônica de Fundos).\n\nQuando uma transação é processada em POS ou TEF, é possível registrar essa transação na plataforma e obter informações sobre a transação registrada no seu sistema através dos callbacks. Desta forma você utiliza apenas uma integração para manter o controle de todas as transações processadas em POS, TEF e via Gateway.\n\n_**Atenção: Este serviço não está disponível para todos os clientes. Caso tenha interesse, entre em contato com o nosso time de suporte.**_\n\n_**Atenção: Este serviço não processa transações, apenas permite registrar transações já processadas em POS e/ou TEF e envia via callback as informações da transação registrada.**_"
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "basic": [
+      {
+        "key": "password",
+        "value": "{{API_KEY}}",
+        "type": "string"
+      },
+      {
+        "key": "username",
+        "value": "{{API_ID}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}

@@ -27,6 +27,7 @@ import email_service
 import card_service
 import role_profiles
 import payments_service
+import ipag_service
 import correios_service
 import maxx_service
 import tenant_service
@@ -4622,8 +4623,6 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
     if order.get("payment_status") == "paid":
         raise HTTPException(status_code=400, detail="Pedido ja pago")
 
-    # Iter 38: Pedido com total <= 0 (totalmente pago via voucher) eh marcado pago direto,
-    # sem criar preferencia no MercadoPago.
     order_total = float(order.get("total") or 0)
     if order_total <= 0.005:
         await mark_order_paid(db, order_id, payment_id=f"voucher_{uuid.uuid4().hex[:10]}", source="voucher")
@@ -4635,21 +4634,11 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
             "paid": True,
         }
 
-    if not await payments_service.is_mp_configured(db):
-        # Sem MP configurado: continua mock (auto-aprovavel via /mock/confirm)
-        payment_id = f"mock_{uuid.uuid4().hex[:12]}"
-        await db.orders.update_one(
-            {"order_id": order_id},
-            {"$set": {"payment_provider": "mock", "payment_id": payment_id, "payment_url": None}},
-        )
-        return {"order_id": order_id, "payment_id": payment_id, "payment_url": None, "provider": "mock"}
+    provider = await payments_service.get_active_provider(db)
 
     items_full = order.get("items", []) + [{"product_id": "shipping", "name": "Frete", "price": float(order.get("shipping_cost") or 0), "quantity": 1}]
     items_full = [it for it in items_full if (it.get("price") or 0) > 0]
 
-    # Iter 38: Se houver voucher utilizado ou desconto de cupom, consolida os itens em
-    # uma unica linha com o valor real a cobrar (order.total). Caso contrario o MP
-    # cobraria o subtotal + frete sem considerar abatimentos.
     voucher_used = float(order.get("voucher_used") or 0)
     discount_amount = float(order.get("discount_amount") or 0)
     if (voucher_used > 0 or discount_amount > 0) and order_total > 0:
@@ -4663,41 +4652,103 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
     frontend_url = get_app_url()
     backend_url = os.environ.get("BACKEND_URL") or frontend_url
 
-    try:
-        pref = await payments_service.create_preference(db, order, user, items_full, frontend_url, backend_url)
-    except Exception as e:
-        logger.exception(f"Falha criando preferencia MP para {order_id}: {e}")
-        raise HTTPException(status_code=502, detail=f"Erro MercadoPago: {e}")
+    if provider == "ipag":
+        if not await ipag_service.is_ipag_configured(db):
+            payment_id = f"mock_{uuid.uuid4().hex[:12]}"
+            await db.orders.update_one(
+                {"order_id": order_id},
+                {"$set": {"payment_provider": "mock", "payment_id": payment_id, "payment_url": None}},
+            )
+            return {"order_id": order_id, "payment_id": payment_id, "payment_url": None, "provider": "mock"}
 
-    # Escolhe init_point: se environment=test, usa sandbox_init_point
-    env = pref.get("environment")
-    init_point = pref.get("sandbox_init_point") if env == "test" else pref.get("init_point")
-    init_point = init_point or pref.get("init_point")
+        try:
+            res = await ipag_service.create_ipag_payment(db, order, user, items_full, frontend_url, backend_url)
+        except Exception as e:
+            logger.exception(f"Falha criando pagamento iPag para {order_id}: {e}")
+            raise HTTPException(status_code=502, detail=f"Erro iPag: {e}")
 
-    await db.orders.update_one(
-        {"order_id": order_id},
-        {"$set": {
-            "payment_provider": "mercadopago",
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {
+                "payment_provider": "ipag",
+                "payment_id": res["payment_id"],
+                "payment_url": res.get("payment_url"),
+                "pix_qrcode": res.get("pix_qrcode"),
+                "pix_qrcode_url": res.get("pix_qrcode_url"),
+                "boleto_url": res.get("boleto_url"),
+                "ipag_environment": res.get("environment"),
+            }},
+        )
+        return {
+            "order_id": order_id,
+            "payment_id": res["payment_id"],
+            "payment_url": res.get("payment_url"),
+            "pix_qrcode": res.get("pix_qrcode"),
+            "pix_qrcode_url": res.get("pix_qrcode_url"),
+            "boleto_url": res.get("boleto_url"),
+            "provider": "ipag",
+            "environment": res.get("environment"),
+        }
+
+    elif provider == "mercadopago":
+        if not await payments_service.is_mp_configured(db):
+            payment_id = f"mock_{uuid.uuid4().hex[:12]}"
+            await db.orders.update_one(
+                {"order_id": order_id},
+                {"$set": {"payment_provider": "mock", "payment_id": payment_id, "payment_url": None}},
+            )
+            return {"order_id": order_id, "payment_id": payment_id, "payment_url": None, "provider": "mock"}
+
+        try:
+            pref = await payments_service.create_preference(db, order, user, items_full, frontend_url, backend_url)
+        except Exception as e:
+            logger.exception(f"Falha criando preferencia MP para {order_id}: {e}")
+            raise HTTPException(status_code=502, detail=f"Erro MercadoPago: {e}")
+
+        env = pref.get("environment")
+        init_point = pref.get("sandbox_init_point") if env == "test" else pref.get("init_point")
+        init_point = init_point or pref.get("init_point")
+
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {
+                "payment_provider": "mercadopago",
+                "payment_id": pref["preference_id"],
+                "payment_url": init_point,
+                "mp_environment": env,
+            }},
+        )
+        return {
+            "order_id": order_id,
             "payment_id": pref["preference_id"],
             "payment_url": init_point,
-            "mp_environment": env,
-        }},
-    )
-    return {
-        "order_id": order_id,
-        "payment_id": pref["preference_id"],
-        "payment_url": init_point,
-        "provider": "mercadopago",
-        "environment": env,
-    }
+            "provider": "mercadopago",
+            "environment": env,
+        }
+
+    else:
+        payment_id = f"mock_{uuid.uuid4().hex[:12]}"
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {"payment_provider": "mock", "payment_id": payment_id, "payment_url": None}},
+        )
+        return {"order_id": order_id, "payment_id": payment_id, "payment_url": None, "provider": "mock"}
+
 
 @app.post("/api/payments/mock/confirm/{order_id}")
 async def mock_confirm_payment(request: Request, order_id: str, user: dict = Depends(get_current_user)):
-    """Confirma pagamento manualmente (mock). Disponivel em ambiente test ou quando MP nao configurado."""
+    """Confirma pagamento manualmente (mock). Disponivel quando provider for mock ou ambiente for test/sandbox."""
     db = request.app.db
-    env = await payments_service.get_mp_environment(db)
-    if env == "production" and await payments_service.is_mp_configured(db):
-        raise HTTPException(status_code=403, detail="Mock indisponivel em producao")
+    provider = await payments_service.get_active_provider(db)
+    if provider == "mercadopago":
+        env = await payments_service.get_mp_environment(db)
+        if env == "production" and await payments_service.is_mp_configured(db):
+            raise HTTPException(status_code=403, detail="Mock indisponivel em producao com MercadoPago configurado")
+    elif provider == "ipag":
+        env = await ipag_service.get_ipag_environment(db)
+        if env == "production" and await ipag_service.is_ipag_configured(db):
+            raise HTTPException(status_code=403, detail="Mock indisponivel em producao com iPag configurado")
+
     order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Pedido nao encontrado")
@@ -5364,6 +5415,44 @@ async def mp_webhook(request: Request):
 
     await db.payment_webhook_logs.insert_one(log_entry)
     return {"received": True}
+
+
+@app.post("/api/payments/webhook/ipag")
+async def ipag_webhook(request: Request):
+    """Webhook / Callback iPag: processa notificacao de alteracao de status de pagamento."""
+    db = request.app.db
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    query_params = dict(request.query_params)
+    payload = {**query_params, **body}
+
+    order_id = payload.get("order_id") or payload.get("reference") or payload.get("custom_id")
+    trans_id = payload.get("id") or payload.get("transaction_id")
+    status = str(payload.get("status") or payload.get("status_code") or "").lower()
+
+    log_entry = {
+        "log_id": gen_id("ipaghook_"),
+        "received_at": now_iso(),
+        "provider": "ipag",
+        "data_id": trans_id,
+        "order_id": order_id,
+        "status": status,
+        "raw_body": body,
+        "query": query_params,
+    }
+
+    # iPag status: 2 = Paid/Approved ("2", "paid", "approved", "captured", "capturado")
+    is_paid = status in ["2", "paid", "approved", "captured", "capturado"]
+
+    if order_id and is_paid:
+        await mark_order_paid(db, str(order_id), payment_id=str(trans_id) if trans_id else None, source="ipag")
+        log_entry["action"] = "marked_paid"
+
+    await db.payment_webhook_logs.insert_one(log_entry)
+    return {"status": "ok", "order_id": order_id, "payment_status": status}
 
 # ==================== SETTINGS (ADMIN) ====================
 
