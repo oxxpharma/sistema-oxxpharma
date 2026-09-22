@@ -237,6 +237,8 @@ function ConfigForm({ config, onSaved }) {
         </div>
       </div>
 
+      <div className="space-y-4">
+        <StatusCards config={config} />
         <div className="bg-white rounded-2xl border border-border p-5">
           <h3 className="font-heading font-black text-base mb-2">Como funciona</h3>
           <ol className="text-sm space-y-1.5 text-txt-secondary list-decimal list-inside">
@@ -313,9 +315,6 @@ function DevAccessCard({ config, onSaved }) {
           {generating ? 'Gerando...' : 'Gerar Novo Token'}
         </button>
       </div>
-    </div>
-  );
-}
     </div>
   );
 }
