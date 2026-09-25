@@ -208,7 +208,7 @@ export default function OperyDevMonitor() {
         {tab === 'inbound' && <DevInboundTab fetchApi={fetchApi} />}
         {tab === 'outbound' && <DevOutboundTab fetchApi={fetchApi} />}
         {tab === 'snapshots' && <DevSnapshotsTab fetchApi={fetchApi} />}
-        {tab === 'status' && <DevStatusTab config={config} />}
+        {tab === 'status' && <DevStatusTab config={config} fetchApi={fetchApi} />}
       </main>
 
       <footer className="max-w-7xl w-full mx-auto px-6 py-4 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
@@ -619,8 +619,12 @@ function DevSnapshotsTab({ fetchApi }) {
 
 /* ============ TAB: STATUS & ENDPOINTS ============ */
 
-function DevStatusTab({ config }) {
+/* ============ TAB: STATUS & ENDPOINTS ============ */
+
+function DevStatusTab({ config, fetchApi }) {
   const [copied, setCopied] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const base = window.location.origin;
 
   const copy = async (text, key) => {
@@ -630,13 +634,64 @@ function DevStatusTab({ config }) {
     setTimeout(() => setCopied(null), 1500);
   };
 
+  const testConn = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetchApi('/api/admin/opery/test-connection', { method: 'POST' });
+      setTestResult(res);
+      if (res.ok) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message || 'Falha no teste de conexão');
+      }
+    } catch (e) {
+      toast.error(e.message);
+      setTestResult({ ok: false, message: e.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 shadow-sm">
-        <div>
-          <h2 className="font-heading font-black text-lg text-slate-900">URLs de Webhook (Opery → OxxPharma)</h2>
-          <p className="text-xs text-slate-500">Endpoints configurados para recebimento de snapshots e notificações do ERP Opery.</p>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="font-heading font-black text-lg text-slate-900">URLs de Webhook & Conectividade</h2>
+            <p className="text-xs text-slate-500">Endpoints configurados para recebimento e disparo de notificações do ERP Opery.</p>
+          </div>
+          <button
+            onClick={testConn}
+            disabled={testing}
+            className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm inline-flex items-center gap-2 transition"
+          >
+            {testing ? <RefreshCcw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+            {testing ? 'Testando Conexão...' : '⚡ Testar Conexão Outbound'}
+          </button>
         </div>
+
+        {testResult && (
+          <div className={`p-4 rounded-xl border text-xs space-y-2 ${testResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
+            <div className="flex items-center justify-between font-bold">
+              <div className="flex items-center gap-1.5">
+                {testResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <XCircle className="w-4 h-4 text-rose-600 shrink-0" />}
+                <span>{testResult.message}</span>
+              </div>
+              {testResult.elapsed_ms !== undefined && <span className="font-mono text-xs opacity-75">{testResult.elapsed_ms}ms</span>}
+            </div>
+            {testResult.url && <div className="font-mono text-[11px] opacity-90 truncate">URL: <code>{testResult.url}</code></div>}
+            {testResult.response_text && (
+              <div className="space-y-1 pt-1">
+                <div className="font-semibold text-[11px] uppercase tracking-wider opacity-75">Resposta recebida:</div>
+                <pre className="bg-slate-900 text-slate-100 font-mono text-[11px] p-3 rounded-lg overflow-auto max-h-40 whitespace-pre-wrap break-all shadow-inner">
+                  {testResult.response_text}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -689,12 +744,31 @@ function DevModal({ log, onClose, isOutbound = false }) {
         <div className="p-5 space-y-4">
           {isOutbound ? (
             <>
+              {log.error && (
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-xs text-rose-800 space-y-1">
+                  <div className="font-bold text-rose-900 flex items-center gap-1.5">
+                    <XCircle className="w-4 h-4 text-rose-600 shrink-0" /> Motivo do Erro / Falha
+                  </div>
+                  <div className="font-mono text-[11px] break-all">{log.error}</div>
+                </div>
+              )}
               <DevCode title="Payload Enviado (OxxPharma → Opery)" content={JSON.stringify(log.payload, null, 2)} />
+
+              {/* Response Section */}
               {log.response_json ? (
-                <DevCode title="Resposta Opery (JSON)" content={JSON.stringify(log.response_json, null, 2)} />
+                <DevCode title="Resposta Opery (Response JSON)" content={JSON.stringify(log.response_json, null, 2)} />
               ) : log.response_body ? (
-                <DevCode title="Resposta Opery (Texto)" content={String(log.response_body)} />
-              ) : null}
+                <DevCode title="Resposta Opery (Response Body)" content={String(log.response_body)} />
+              ) : log.status === 'pending_config' ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 font-medium">
+                  <b>Aguardando Configuração:</b> A Outbound URL não estava configurada no momento deste disparo.
+                </div>
+              ) : (
+                <DevCode
+                  title="Resposta Opery (Response)"
+                  content={log.error ? `Erro retornado sem corpo JSON: ${log.error}` : 'Sem corpo de resposta (HTTP Status: ' + (log.response_status || 'sem resposta') + ')'}
+                />
+              )}
             </>
           ) : (
             <>

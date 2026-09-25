@@ -573,6 +573,11 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
     try:
         result = await _post_to_opery(url, token, payload)
         ok = 200 <= result["status_code"] < 300
+        error_msg = None
+        if not ok:
+            snippet = result["response_text"][:500] if result.get("response_text") else ""
+            error_msg = f"HTTP {result['status_code']}{': ' + snippet if snippet else ''}"
+
         doc = {
             "log_id": log_id,
             "order_id": order_id,
@@ -582,7 +587,7 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             "response_status": result["status_code"],
             "response_body": result["response_text"],
             "response_json": result.get("response_json"),
-            "error": None if ok else f"HTTP {result['status_code']}",
+            "error": error_msg,
             "created_at": prev.get("created_at") if prev else _now_iso(),
             "updated_at": _now_iso(),
         }
@@ -625,7 +630,7 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             "payload": payload,
             "response_status": None,
             "response_body": None,
-            "error": str(e)[:1000],
+            "error": f"Erro de conexão/execução: {str(e)}",
             "created_at": prev.get("created_at") if prev else _now_iso(),
             "updated_at": _now_iso(),
         }

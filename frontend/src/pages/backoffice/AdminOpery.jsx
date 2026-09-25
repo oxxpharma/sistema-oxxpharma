@@ -94,6 +94,8 @@ function ConfigForm({ config, onSaved }) {
   const [showSecret, setShowSecret] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   const save = async () => {
     const payload = {};
@@ -112,6 +114,32 @@ function ConfigForm({ config, onSaved }) {
       onSaved();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
+  };
+
+  const testConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const payload = {
+        environment: form.active_env,
+        outbound_url_sandbox: form.outbound_url_sandbox,
+        outbound_url_production: form.outbound_url_production,
+        outbound_token: form.outbound_token,
+      };
+      const res = await api.post('/api/admin/opery/test-connection', payload);
+      setTestResult(res);
+      if (res.ok) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message || 'Falha no teste de conexão');
+      }
+    } catch (e) {
+      const errRes = { ok: false, message: e.message || 'Erro ao testar conexão' };
+      setTestResult(errRes);
+      toast.error(e.message);
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -226,13 +254,45 @@ function ConfigForm({ config, onSaved }) {
           )}
         </div>
 
+        {testResult && (
+          <div className={`p-4 rounded-xl border text-xs space-y-2.5 ${testResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`} data-testid="opery-test-result">
+            <div className="flex items-center justify-between font-bold text-sm">
+              <div className="flex items-center gap-1.5">
+                {testResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <XCircle className="w-4 h-4 text-rose-600 shrink-0" />}
+                <span>{testResult.message}</span>
+              </div>
+              {testResult.elapsed_ms !== undefined && (
+                <span className="font-mono text-xs opacity-80">{testResult.elapsed_ms}ms</span>
+              )}
+            </div>
+            {testResult.url && (
+              <div className="font-mono text-[11px] opacity-90 truncate">
+                URL testada: <code>{testResult.url}</code>
+              </div>
+            )}
+            {testResult.response_text && (
+              <div className="space-y-1 pt-1">
+                <div className="font-semibold text-[11px] uppercase tracking-wider opacity-75">Resposta recebida da Opery:</div>
+                <pre className="bg-slate-900 text-slate-100 font-mono text-[11px] p-3 rounded-lg overflow-auto max-h-48 whitespace-pre-wrap break-all shadow-inner">
+                  {testResult.response_text}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between pt-3 border-t border-border">
           <div className="text-[11px] text-txt-secondary">
             {config?.updated_at && <>Última atualização: {formatDateTime(config.updated_at)} · {config.updated_by || '—'}</>}
           </div>
-          <Button onClick={save} disabled={saving} data-testid="opery-save-config">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" onClick={testConnection} disabled={testing} data-testid="opery-test-connection">
+              {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4 text-sky-600" />} Testar Conexão
+            </Button>
+            <Button onClick={save} disabled={saving} data-testid="opery-save-config">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -752,19 +812,41 @@ function LogDetailModal({ log, onClose, isOutbound = false }) {
         <div className="p-5 space-y-4">
           {isOutbound ? (
             <>
-              <Field label="Order ID" value={log.order_id} mono />
-              <Field label="Status" value={log.status} />
-              <Field label="Tentativas" value={String(log.attempts)} />
-              <Field label="Criado em" value={formatDateTime(log.created_at)} />
-              <Field label="Atualizado em" value={formatDateTime(log.updated_at)} />
-              {log.error && <Field label="Erro" value={log.error} error />}
-              {log.response_status !== undefined && <Field label="HTTP Status" value={String(log.response_status || '—')} />}
-              <CodeBlock title="Payload enviado" content={JSON.stringify(log.payload, null, 2)} />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Field label="Order ID" value={log.order_id} mono />
+                <Field label="Status" value={log.status} error={log.status !== 'success'} />
+                <Field label="Tentativas" value={String(log.attempts)} />
+                <Field label="HTTP Status" value={log.response_status ? String(log.response_status) : '—'} error={log.response_status && (log.response_status < 200 || log.response_status >= 300)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Criado em" value={formatDateTime(log.created_at)} />
+                <Field label="Atualizado em" value={formatDateTime(log.updated_at)} />
+              </div>
+              {log.error && (
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-xs text-rose-800 space-y-1" data-testid="outbound-log-error">
+                  <div className="font-bold flex items-center gap-1.5 text-rose-900">
+                    <XCircle className="w-4 h-4 text-rose-600 shrink-0" /> Motivo do Erro / Falha
+                  </div>
+                  <div className="font-mono text-[11px] break-all">{log.error}</div>
+                </div>
+              )}
+              <CodeBlock title="Payload enviado (OxxPharma → Opery)" content={JSON.stringify(log.payload, null, 2)} />
+
+              {/* Response Section */}
               {log.response_json ? (
-                <CodeBlock title="Response JSON" content={JSON.stringify(log.response_json, null, 2)} />
+                <CodeBlock title="Resposta da Opery (Response JSON)" content={JSON.stringify(log.response_json, null, 2)} />
               ) : log.response_body ? (
-                <CodeBlock title="Response body" content={String(log.response_body)} />
-              ) : null}
+                <CodeBlock title="Resposta da Opery (Response Body)" content={String(log.response_body)} />
+              ) : log.status === 'pending_config' ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 font-medium">
+                  <b>Aguardando Configuração:</b> A Outbound URL não estava configurada no momento deste disparo.
+                </div>
+              ) : (
+                <CodeBlock
+                  title="Resposta da Opery (Response)"
+                  content={log.error ? `Erro retornado sem corpo JSON: ${log.error}` : 'Sem corpo de resposta (HTTP Status: ' + (log.response_status || 'sem resposta') + ')'}
+                />
+              )}
             </>
           ) : (
             <>

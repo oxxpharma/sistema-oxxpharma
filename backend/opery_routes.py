@@ -392,9 +392,9 @@ async def list_dispatch_log(
 
 @router.get("/admin/opery/dispatch-log/{order_id}")
 async def get_dispatch_log_detail(order_id: str, request: Request, user: dict = Depends(dev_or_admin_dep)):
-    """Retorna log completo (com payload) de um pedido especifico."""
+    """Retorna log completo (com payload) de um pedido especifico (busca por order_id ou log_id)."""
     db = request.app.db
-    log = await db.opery_dispatch_log.find_one({"order_id": order_id}, {"_id": 0})
+    log = await db.opery_dispatch_log.find_one({"$or": [{"order_id": order_id}, {"log_id": order_id}]}, {"_id": 0})
     return log or {"order_id": order_id, "status": "never_dispatched"}
 
 
@@ -442,6 +442,85 @@ async def convert_legacy_snapshots(body: ConvertLegacyIn, request: Request, user
     """Converte snapshots legados antigos sem a tag environment para sandbox ou production."""
     db = request.app.db
     return await opery_service.convert_legacy_snapshots(db, target_env=body.target_env)
+
+
+class TestConnectionIn(BaseModel):
+    environment: Optional[str] = None
+    outbound_url_sandbox: Optional[str] = None
+    outbound_url_production: Optional[str] = None
+    outbound_token: Optional[str] = None
+
+
+@router.post("/admin/opery/test-connection")
+async def test_opery_connection(body: Optional[TestConnectionIn] = None, request: Request = None, user: dict = Depends(dev_or_admin_dep)):
+    """Testa conectividade e token enviando um ping para o endpoint de saída da Opery."""
+    db = request.app.db
+    cfg = await opery_service.load_config(db)
+
+    b = body or TestConnectionIn()
+    env = b.environment or cfg.get("active_env") or "sandbox"
+    
+    if env == "production":
+        url = b.outbound_url_production or cfg.get("outbound_url_production") or ""
+    else:
+        url = b.outbound_url_sandbox or cfg.get("outbound_url_sandbox") or cfg.get("outbound_url") or ""
+
+    raw_token = b.outbound_token
+    token = raw_token if (raw_token and not raw_token.startswith("***")) else (cfg.get("outbound_token") or "")
+
+    if not url:
+        raise HTTPException(status_code=400, detail=f"Nenhuma Outbound URL configurada para o ambiente '{env}'")
+
+    test_payload = {
+        "event": "connection_test",
+        "source": "oxxpharma",
+        "timestamp": opery_service._now_iso(),
+        "environment": env,
+        "message": "Teste de conectividade da integração OxxPharma <> Opery",
+    }
+
+    import time
+    start_time = time.time()
+    try:
+        res = await opery_service._post_to_opery(url, token, test_payload)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        status_code = res.get("status_code", 0)
+        ok = 200 <= status_code < 300
+        
+        if ok:
+            detail_msg = f"Conexão realizada com sucesso! A Opery respondeu HTTP {status_code} ({elapsed_ms}ms)."
+        elif status_code in (401, 403):
+            detail_msg = f"Servidor Opery alcançado (HTTP {status_code}), mas a autenticação falhou. Verifique o Outbound Token."
+        elif status_code == 404:
+            detail_msg = f"Servidor alcançado, mas a URL retornou HTTP 404 (Não Encontrado). Verifique a Outbound URL."
+        elif status_code >= 500:
+            detail_msg = f"Servidor Opery respondeu com erro interno HTTP {status_code}."
+        else:
+            detail_msg = f"Resposta HTTP {status_code} recebida do servidor Opery."
+
+        return {
+            "ok": ok,
+            "status_code": status_code,
+            "elapsed_ms": elapsed_ms,
+            "environment": env,
+            "url": url,
+            "message": detail_msg,
+            "response_text": (res.get("response_text") or "")[:2000],
+            "response_json": res.get("response_json"),
+        }
+    except Exception as e:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.error(f"opery.test_connection failed to {url}: {e}")
+        return {
+            "ok": False,
+            "status_code": 0,
+            "elapsed_ms": elapsed_ms,
+            "environment": env,
+            "url": url,
+            "message": f"Erro de conexão ao acessar a URL {url}",
+            "error": str(e),
+            "response_text": f"Exceção de rede: {e}",
+        }
 
 
 # ==================== CONFIG ====================
