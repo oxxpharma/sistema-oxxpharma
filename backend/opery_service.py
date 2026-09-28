@@ -18,6 +18,7 @@ DUAS DIRECOES:
 """
 
 import os
+import re
 import uuid
 import hmac
 import logging
@@ -432,6 +433,61 @@ async def aggregate_stats(db, start: Optional[str] = None, end: Optional[str] = 
 # ==================== OUTBOUND (OxxPharma -> Opery) ====================
 
 
+def _extract_zip_code(order: Dict[str, Any], address: Dict[str, Any], user: Optional[Dict[str, Any]]) -> str:
+    """Extrai obrigatoriamente o CEP (zip) do pedido, endereco ou cadastro do usuario.
+    Retorna no formato 'XXXXX-XXX' ou limpo. NUNCA envia null ou vazio.
+    """
+    user = user or {}
+    candidates = [
+        # 1. Do objeto de endereco de entrega do pedido (shipping_address)
+        address.get("zip_code"),
+        address.get("zip"),
+        address.get("cep"),
+        address.get("postal_code"),
+
+        # 2. Do proprio pedido (campos na raiz)
+        order.get("zip_code"),
+        order.get("cep"),
+        order.get("zip"),
+
+        # 3. Do snapshot de retirada no balcao/pickup (se for pedido de retirada)
+        (order.get("pickup_snapshot") or {}).get("zip_code") if isinstance(order.get("pickup_snapshot"), dict) else None,
+        (order.get("pickup_snapshot") or {}).get("cep") if isinstance(order.get("pickup_snapshot"), dict) else None,
+
+        # 4. Do cadastro principal do usuario
+        user.get("zip_code"),
+        user.get("cep"),
+        user.get("zip"),
+
+        # 5. Do endereco aninhado no usuario (user.address)
+        (user.get("address") or {}).get("zip_code") if isinstance(user.get("address"), dict) else None,
+        (user.get("address") or {}).get("cep") if isinstance(user.get("address"), dict) else None,
+    ]
+
+    # 6. Da lista de enderecos salvos do usuario (user.addresses)
+    user_addresses = user.get("addresses") or []
+    if isinstance(user_addresses, list):
+        for u_addr in user_addresses:
+            if isinstance(u_addr, dict):
+                candidates.extend([
+                    u_addr.get("zip_code"),
+                    u_addr.get("cep"),
+                    u_addr.get("zip")
+                ])
+
+    for candidate in candidates:
+        if candidate and str(candidate).strip():
+            s = str(candidate).strip()
+            digits = re.sub(r"\D", "", s)
+            if len(digits) == 8:
+                return f"{digits[:5]}-{digits[5:]}"
+            elif len(digits) > 0:
+                return s
+
+    # Fallback padrao obrigatorio para evitar envio de null/vazio
+    return "00000-000"
+
+
 def _build_outbound_payload(order: Dict[str, Any], user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Constroi o payload no formato que a Opery ira consumir para emissao de NF-e.
 
@@ -452,6 +508,20 @@ def _build_outbound_payload(order: Dict[str, Any], user: Optional[Dict[str, Any]
             "cfop": it.get("cfop"),
         })
 
+    raw_cpf = user.get("cpf") or user.get("cpf_digits") or order.get("customer_cpf") or order.get("customer_cpf_digits")
+    raw_cnpj = user.get("cnpj") or user.get("cnpj_digits") or order.get("customer_cnpj") or order.get("cnpj")
+
+    # Identifica se e Pessoa Juridica (PJ) ou Pessoa Fisica (PF)
+    is_pj = False
+    if raw_cnpj and str(raw_cnpj).strip():
+        is_pj = True
+    elif raw_cpf and len(re.sub(r"\D", "", str(raw_cpf))) == 14:
+        is_pj = True
+        raw_cnpj = raw_cpf
+        raw_cpf = None
+
+    person_type = "PJ" if is_pj else "PF"
+
     return {
         "source": "oxxpharma",
         "order_id": order.get("order_id"),
@@ -462,20 +532,21 @@ def _build_outbound_payload(order: Dict[str, Any], user: Optional[Dict[str, Any]
         "payment_id": order.get("payment_id"),
         "customer": {
             "user_id": order.get("user_id"),
+            "person_type": person_type,
             "name": order.get("customer_name") or user.get("name"),
             "email": order.get("customer_email") or user.get("email"),
-            "cpf": user.get("cpf") or user.get("cpf_digits") or order.get("customer_cpf"),
-            "cnpj": user.get("cnpj"),
-            "phone": user.get("phone") or order.get("customer_phone"),
+            "cpf": raw_cpf if not is_pj else None,
+            "cnpj": raw_cnpj if is_pj else None,
+            "phone": user.get("phone") or order.get("customer_phone") or address.get("phone"),
         },
         "shipping_address": {
-            "street": address.get("street"),
-            "number": address.get("number"),
-            "complement": address.get("complement"),
-            "neighborhood": address.get("neighborhood"),
-            "city": address.get("city"),
-            "state": address.get("state"),
-            "zip": address.get("zip") or address.get("cep"),
+            "street": address.get("street") or address.get("logradouro") or "",
+            "number": address.get("number") or address.get("numero") or "S/N",
+            "complement": address.get("complement") or address.get("complemento"),
+            "neighborhood": address.get("neighborhood") or address.get("bairro") or address.get("district") or "",
+            "city": address.get("city") or address.get("cidade") or "",
+            "state": address.get("state") or address.get("uf") or "",
+            "zip": _extract_zip_code(order, address, user),
             "country": address.get("country") or "BR",
         },
         "items": items,

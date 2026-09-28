@@ -190,6 +190,7 @@ X-OxxPharma-Source: oxxpharma-app
   "payment_id": "MP-98765432",
   "customer": {
     "user_id": "usr_xyz789",
+    "person_type": "PF",
     "name": "João Silva",
     "email": "joao@exemplo.com",
     "cpf": "12345678900",
