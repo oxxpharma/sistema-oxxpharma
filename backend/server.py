@@ -2612,6 +2612,34 @@ async def admin_get_order_nf(request: Request, order_id: str, user: dict = Depen
     db = request.app.db
     doc = await db.orders_nf.find_one({"order_id": order_id}, {"_id": 0})
     if not doc:
+        # Fallback: se tiver XML da Opery gravado no pedido, gera o DANFE PDF sob demanda
+        order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+        if order and order.get("opery_nf_xml"):
+            import opery_nf
+            pdf_bytes = opery_nf.render_danfe_pdf(order["opery_nf_xml"])
+            if pdf_bytes:
+                import base64
+                b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+                data_url = f"data:application/pdf;base64,{b64}"
+                nf_num = order.get("opery_nf_number") or order_id[-8:].upper()
+                nf_name = f"DANFE_{nf_num}.pdf"
+                now = now_iso()
+                meta = {
+                    "name": nf_name,
+                    "mime": "application/pdf",
+                    "size": len(pdf_bytes),
+                    "uploaded_by": "opery_integration",
+                    "uploaded_by_name": "Integração Opery (Automático)",
+                    "uploaded_at": now,
+                    "source": "opery"
+                }
+                doc = {"order_id": order_id, "data_url": data_url, **meta}
+                try:
+                    await db.orders_nf.update_one({"order_id": order_id}, {"$set": doc}, upsert=True)
+                    await db.orders.update_one({"order_id": order_id}, {"$set": {"nf_meta": meta}})
+                except Exception as e:
+                    logger.warning(f"admin_get_order_nf: erro ao persistir doc: {e}")
+                return doc
         raise HTTPException(status_code=404, detail="NF nao encontrada")
     return doc
 

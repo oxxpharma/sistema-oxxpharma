@@ -756,6 +756,32 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             if nf_pdf_url: update["opery_nf_pdf_url"] = nf_pdf_url
             if nf_xml: update["opery_nf_xml"] = str(nf_xml)
             if nf_chave: update["opery_nf_chave"] = str(nf_chave)
+
+            if pdf_bytes:
+                import base64
+                b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+                data_url = f"data:application/pdf;base64,{b64_pdf}"
+                nf_name = f"DANFE_{nf or order_id[-8:].upper()}.pdf"
+                now = _now_iso()
+                meta = {
+                    "name": nf_name,
+                    "mime": "application/pdf",
+                    "size": len(pdf_bytes),
+                    "uploaded_by": "opery_integration",
+                    "uploaded_by_name": "Integração Opery (Automático)",
+                    "uploaded_at": now,
+                    "source": "opery",
+                }
+                try:
+                    await db.orders_nf.update_one(
+                        {"order_id": order_id},
+                        {"$set": {"order_id": order_id, "data_url": data_url, **meta}},
+                        upsert=True,
+                    )
+                    update["nf_meta"] = meta
+                except Exception as e:
+                    logger.warning(f"opery: erro ao salvar orders_nf para {order_id}: {e}")
+
             try:
                 await db.orders.update_one({"order_id": order_id}, {"$set": update})
             except Exception as e:
@@ -811,10 +837,33 @@ async def sync_or_fetch_order_xml(db, order_id: str, force_redispatch: bool = Tr
     pdf_bytes = opery_nf.render_danfe_pdf(nf_xml) if nf_xml else None
 
     if pdf_bytes and nf_xml:
-        await db.orders.update_one(
-            {"order_id": order_id},
-            {"$set": {"opery_danfe_status": "rendered", "opery_danfe_updated_at": _now_iso()}}
-        )
+        import base64
+        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        data_url = f"data:application/pdf;base64,{b64_pdf}"
+        nf_num = order.get("opery_nf_number") or order_id[-8:].upper()
+        nf_name = f"DANFE_{nf_num}.pdf"
+        now = _now_iso()
+        meta = {
+            "name": nf_name,
+            "mime": "application/pdf",
+            "size": len(pdf_bytes),
+            "uploaded_by": "opery_integration",
+            "uploaded_by_name": "Integração Opery (Automático)",
+            "uploaded_at": now,
+            "source": "opery",
+        }
+        try:
+            await db.orders_nf.update_one(
+                {"order_id": order_id},
+                {"$set": {"order_id": order_id, "data_url": data_url, **meta}},
+                upsert=True,
+            )
+            await db.orders.update_one(
+                {"order_id": order_id},
+                {"$set": {"opery_danfe_status": "rendered", "opery_danfe_updated_at": now, "nf_meta": meta}}
+            )
+        except Exception as e:
+            logger.warning(f"sync_or_fetch_order_xml: erro ao atualizar nf_meta para {order_id}: {e}")
 
     log = await db.opery_dispatch_log.find_one({"order_id": order_id}, {"_id": 0})
 

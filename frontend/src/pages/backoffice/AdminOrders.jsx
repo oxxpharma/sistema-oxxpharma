@@ -341,14 +341,14 @@ export default function AdminOrders() {
                         )}
                         <button onClick={() => setSelected(o)} className="p-2 hover:bg-bg-secondary rounded" data-testid={`view-order-${o.order_id}`}><Eye className="w-4 h-4" /></button>
                         <button onClick={() => resendInvoice(o, false)} className="p-2 hover:bg-emerald-50 rounded ml-1" data-testid={`resend-invoice-${o.order_id}`} title="Reenviar fatura detalhada por e-mail"><Mail className="w-4 h-4 text-emerald-600" /></button>
-                        {/* Iter 55: Nota Fiscal */}
-                        {o.nf_meta ? (
+                        {/* Iter 55 & Opery: Nota Fiscal / DANFE */}
+                        {(o.nf_meta || o.opery_nf_xml || o.opery_nf_number || o.opery_nf_pdf_url) ? (
                           <>
                             <button
                               onClick={() => downloadNf(o)}
                               className="p-2 hover:bg-sky-50 rounded ml-1"
                               data-testid={`nf-download-${o.order_id}`}
-                              title={`Baixar NF: ${o.nf_meta.name} · ${new Date(o.nf_meta.uploaded_at).toLocaleString('pt-BR')} por ${o.nf_meta.uploaded_by_name || '—'}`}
+                              title={o.nf_meta ? `Baixar NF: ${o.nf_meta.name} · ${new Date(o.nf_meta.uploaded_at).toLocaleString('pt-BR')} por ${o.nf_meta.uploaded_by_name || '—'}` : `Baixar DANFE (NF ${o.opery_nf_number || 'Opery'})`}
                             >
                               <Download className="w-4 h-4 text-sky-600" />
                             </button>
@@ -356,7 +356,7 @@ export default function AdminOrders() {
                               onClick={() => setNfOrder(o)}
                               className="p-2 hover:bg-amber-50 rounded ml-1"
                               data-testid={`nf-replace-${o.order_id}`}
-                              title="Alterar NF anexada"
+                              title="Alterar / Substituir NF anexada"
                             >
                               <FileEdit className="w-4 h-4 text-amber-600" />
                             </button>
