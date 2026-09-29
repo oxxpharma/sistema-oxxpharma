@@ -685,15 +685,17 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
         }
 
         pdf_bytes = None
+        render_err_msg = None
         if nf_xml and str(nf_xml).strip():
             xml_str = str(nf_xml).strip()
             xml_size = len(xml_str.encode("utf-8"))
             try:
                 import opery_nf
-                pdf_bytes = opery_nf.render_danfe_pdf(xml_str)
+                pdf_bytes, render_err_msg = opery_nf.render_danfe_pdf_with_error(xml_str)
             except Exception as e:
                 logger.warning(f"opery._do_dispatch: erro ao renderizar DANFE: {e}")
                 pdf_bytes = None
+                render_err_msg = str(e)
 
             if pdf_bytes:
                 pdf_size = len(pdf_bytes)
@@ -711,7 +713,7 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
                     "xml_received": True,
                     "xml_size_bytes": xml_size,
                     "pdf_size_bytes": 0,
-                    "details": f"XML recebido ({round(xml_size/1024, 1)} KB), mas falhou ao gerar DANFE PDF (verifique se é um XML NF-e SEFAZ válido).",
+                    "details": f"XML recebido ({round(xml_size/1024, 1)} KB), mas falhou ao gerar DANFE PDF: {render_err_msg or 'estrutura XML incompatível'}.",
                     "processed_at": _now_iso(),
                 }
         elif nf_pdf_url:
