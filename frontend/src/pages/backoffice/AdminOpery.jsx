@@ -3,11 +3,13 @@ import { toast } from 'sonner';
 import {
   Loader2, Copy, Check, ExternalLink, Save, RefreshCcw, Eye, EyeOff,
   Store, CheckCircle2, XCircle, Clock, ArrowUpRight, ArrowDownLeft,
-  FileText, AlertTriangle, Play,
+  FileText, AlertTriangle, Play, Download,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
+
+const roundKB = (bytes) => (bytes ? (bytes / 1024).toFixed(1) : '0');
 
 const DISPATCH_STATUS = {
   success: { label: 'Enviado com sucesso', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: CheckCircle2 },
@@ -680,10 +682,25 @@ function OutboundLogs() {
     finally { setRetrying(false); }
   };
 
-  const retrySingle = async (order_id) => {
+  const retrySingle = async (order_id, force = false) => {
     try {
-      await api.post(`/api/admin/opery/dispatch/${order_id}`);
-      toast.success('Reenviado');
+      await api.post(`/api/admin/opery/dispatch/${order_id}${force ? '?force=true' : ''}`);
+      toast.success(force ? 'Reenvio forçado para a Opery!' : 'Reenviado');
+      load(page);
+      if (selectedId === order_id) openDetail(order_id);
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const syncNf = async (order_id) => {
+    try {
+      const res = await api.post(`/api/admin/opery/order/${order_id}/sync-nf?force_redispatch=true`);
+      if (res.pdf_available) {
+        toast.success('XML processado e DANFE PDF gerado com sucesso!');
+      } else if (res.has_xml) {
+        toast.warning('XML recebido, mas falhou ao gerar DANFE PDF.');
+      } else {
+        toast.info(res.xml_treatment?.details || 'Nenhum XML retornado.');
+      }
       load(page);
       if (selectedId === order_id) openDetail(order_id);
     } catch (e) { toast.error(e.message); }
@@ -722,10 +739,10 @@ function OutboundLogs() {
                 <tr>
                   <th className="p-2 text-left">Última tentativa</th>
                   <th className="p-2 text-left">Pedido</th>
-                  <th className="p-2 text-center">Status</th>
+                  <th className="p-2 text-center">Status Outbound</th>
                   <th className="p-2 text-center">Tentativas</th>
                   <th className="p-2 text-left">Erro / Response</th>
-                  <th className="p-2"></th>
+                  <th className="p-2 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody>
@@ -749,11 +766,9 @@ function OutboundLogs() {
                       <td className="p-2 text-xs text-txt-secondary truncate max-w-[280px]">
                         {log.error || (log.response_body ? String(log.response_body).slice(0, 100) : '—')}
                       </td>
-                      <td className="p-2 flex gap-2 whitespace-nowrap">
+                      <td className="p-2 flex gap-2 justify-end whitespace-nowrap">
                         <button onClick={() => openDetail(log.order_id)} className="text-brand-main font-semibold text-xs hover:underline" data-testid={`view-outbound-${log.order_id}`}>Ver</button>
-                        {log.status !== 'success' && (
-                          <button onClick={() => retrySingle(log.order_id)} className="text-emerald-600 font-semibold text-xs hover:underline">Reenviar</button>
-                        )}
+                        <button onClick={() => retrySingle(log.order_id, true)} className="text-emerald-600 font-semibold text-xs hover:underline" title="Re-executa requisição HTTP para a Opery mesmo se marcou sucesso">Reenviar (Forçar)</button>
                       </td>
                     </tr>
                   );
@@ -791,14 +806,17 @@ function OutboundLogs() {
         )}
       </div>
 
-      {detail && <LogDetailModal log={detail} onClose={() => { setDetail(null); setSelectedId(null); }} isOutbound />}
+      {detail && <LogDetailModal log={detail} onClose={() => { setDetail(null); setSelectedId(null); }} isOutbound onRetryForce={() => retrySingle(detail.order_id, true)} onSyncNf={() => syncNf(detail.order_id)} />}
     </div>
   );
 }
 
 /* ============ LOG DETAIL MODAL ============ */
 
-function LogDetailModal({ log, onClose, isOutbound = false }) {
+function LogDetailModal({ log, onClose, isOutbound = false, onRetryForce, onSyncNf }) {
+  const xmlTr = log.xml_treatment || {};
+  const isXmlSuccess = xmlTr.status === 'success';
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose} data-testid="opery-log-detail">
       <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
@@ -818,6 +836,53 @@ function LogDetailModal({ log, onClose, isOutbound = false }) {
                 <Field label="Tentativas" value={String(log.attempts)} />
                 <Field label="HTTP Status" value={log.response_status ? String(log.response_status) : '—'} error={log.response_status && (log.response_status < 200 || log.response_status >= 300)} />
               </div>
+
+              {/* Bloco de Tratamento do XML & DANFE PDF */}
+              <div className={`rounded-xl border p-4 text-xs space-y-2 ${isXmlSuccess ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950' : xmlTr.xml_received ? 'bg-amber-50/70 border-amber-200 text-amber-950' : 'bg-slate-50 border-slate-200 text-slate-900'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <FileText className={`w-4 h-4 ${isXmlSuccess ? 'text-emerald-600' : 'text-slate-500'}`} />
+                    Tratamento do XML & DANFE PDF
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${isXmlSuccess ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : xmlTr.status === 'pdf_url_only' ? 'bg-sky-100 text-sky-800 border-sky-300' : xmlTr.xml_received ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-slate-200 text-slate-700 border-slate-300'}`}>
+                    {isXmlSuccess ? '🟢 DANFE PDF Gerado' : xmlTr.status === 'pdf_url_only' ? '🔵 URL do PDF' : xmlTr.xml_received ? '🟡 XML s/ DANFE' : '⚪ Sem XML na resposta'}
+                  </span>
+                </div>
+                <div className="font-medium text-xs leading-relaxed">
+                  {xmlTr.details || (isXmlSuccess ? 'XML processado e DANFE PDF gerado com sucesso.' : 'Sem detalhes de XML registrados.')}
+                </div>
+                {xmlTr.xml_size_bytes > 0 && (
+                  <div className="flex gap-4 text-[11px] opacity-80 pt-1 font-mono">
+                    <span>Tamanho XML: {roundKB(xmlTr.xml_size_bytes)} KB</span>
+                    {xmlTr.pdf_size_bytes > 0 && <span>Tamanho PDF: {roundKB(xmlTr.pdf_size_bytes)} KB</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Botões de Ação para Outbound Log */}
+              <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
+                {onRetryForce && (
+                  <Button size="sm" variant="outline" onClick={onRetryForce} className="text-xs">
+                    <Play className="w-3.5 h-3.5 text-emerald-600" /> Reenviar Pedido para Opery (Forçar)
+                  </Button>
+                )}
+                {onSyncNf && (
+                  <Button size="sm" variant="outline" onClick={onSyncNf} className="text-xs">
+                    <RefreshCcw className="w-3.5 h-3.5 text-brand-main" /> Sincronizar XML / DANFE
+                  </Button>
+                )}
+                {isXmlSuccess && (
+                  <a href={`/api/admin/opery/order/${log.order_id}/nf.pdf`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm">
+                    <FileText className="w-3.5 h-3.5" /> Baixar DANFE (PDF)
+                  </a>
+                )}
+                {xmlTr.xml_received && (
+                  <a href={`/api/admin/opery/order/${log.order_id}/nf.xml`} download className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300">
+                    <Download className="w-3.5 h-3.5" /> Baixar XML
+                  </a>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Criado em" value={formatDateTime(log.created_at)} />
                 <Field label="Atualizado em" value={formatDateTime(log.updated_at)} />

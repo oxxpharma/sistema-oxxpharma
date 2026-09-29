@@ -3,11 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   CheckCircle2, XCircle, Clock, RefreshCcw, Copy, Check,
-  ExternalLink, ShieldCheck,
+  ExternalLink, ShieldCheck, FileText,
 } from 'lucide-react';
 import { formatDateTime } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import BrandLogo from '../components/branding/BrandLogo';
+
+const roundKB = (bytes) => (bytes ? (bytes / 1024).toFixed(1) : '0');
 
 const DISPATCH_STATUS = {
   success: { label: 'Enviado com sucesso', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
@@ -391,10 +393,10 @@ function DevOutboundTab({ fetchApi }) {
     } catch (e) { toast.error(e.message); }
   };
 
-  const retrySingle = async (order_id) => {
+  const retrySingle = async (order_id, force = false) => {
     try {
-      await fetchApi(`/api/admin/opery/dispatch/${order_id}`, { method: 'POST' });
-      toast.success('Pedido re-disparado para a Opery');
+      await fetchApi(`/api/admin/opery/dispatch/${order_id}${force ? '?force=true' : ''}`, { method: 'POST' });
+      toast.success(force ? 'Reenvio forçado para a Opery!' : 'Pedido re-disparado para a Opery');
       load(page);
     } catch (e) { toast.error(e.message); }
   };
@@ -450,15 +452,13 @@ function DevOutboundTab({ fetchApi }) {
                         <td className="p-3 text-slate-600 truncate max-w-[280px]">
                           {log.error || (log.response_body ? String(log.response_body).slice(0, 90) : '—')}
                         </td>
-                        <td className="p-3 text-right space-x-3">
+                        <td className="p-3 text-right space-x-3 whitespace-nowrap">
                           <button onClick={() => openDetail(log.order_id)} className="text-orange-600 hover:text-orange-700 font-bold hover:underline">
                             Ver JSON
                           </button>
-                          {log.status !== 'success' && (
-                            <button onClick={() => retrySingle(log.order_id)} className="text-emerald-600 hover:text-emerald-700 font-bold hover:underline">
-                              Reenviar
-                            </button>
-                          )}
+                          <button onClick={() => retrySingle(log.order_id, true)} className="text-emerald-600 hover:text-emerald-700 font-bold hover:underline" title="Força a requisição HTTP para a Opery mesmo se marcou sucesso">
+                            Reenviar (Forçar)
+                          </button>
                         </td>
                       </tr>
                     );
@@ -730,7 +730,10 @@ function DevStatusTab({ config, fetchApi }) {
 
 /* ============ MODAL DETALHES JSON ============ */
 
-function DevModal({ log, onClose, isOutbound = false }) {
+function DevModal({ log, onClose, isOutbound = false, onRetryForce }) {
+  const xmlTr = log.xml_treatment || {};
+  const isXmlSuccess = xmlTr.status === 'success';
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-auto shadow-2xl text-slate-900" onClick={e => e.stopPropagation()}>
@@ -744,6 +747,41 @@ function DevModal({ log, onClose, isOutbound = false }) {
         <div className="p-5 space-y-4">
           {isOutbound ? (
             <>
+              {/* Bloco de Tratamento do XML & DANFE PDF */}
+              <div className={`rounded-xl border p-4 text-xs space-y-2 ${isXmlSuccess ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' : xmlTr.xml_received ? 'bg-amber-50/80 border-amber-200 text-amber-950' : 'bg-slate-50 border-slate-200 text-slate-900'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <FileText className={`w-4 h-4 ${isXmlSuccess ? 'text-emerald-600' : 'text-slate-500'}`} />
+                    Tratamento do XML & DANFE PDF
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${isXmlSuccess ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : xmlTr.status === 'pdf_url_only' ? 'bg-sky-100 text-sky-800 border-sky-300' : xmlTr.xml_received ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-slate-200 text-slate-700 border-slate-300'}`}>
+                    {isXmlSuccess ? '🟢 DANFE PDF Gerado' : xmlTr.status === 'pdf_url_only' ? '🔵 URL do PDF' : xmlTr.xml_received ? '🟡 XML s/ DANFE' : '⚪ Sem XML na resposta'}
+                  </span>
+                </div>
+                <div className="font-medium text-xs leading-relaxed">
+                  {xmlTr.details || (isXmlSuccess ? 'XML processado e DANFE PDF gerado com sucesso.' : 'Sem detalhes de XML registrados.')}
+                </div>
+                {xmlTr.xml_size_bytes > 0 && (
+                  <div className="flex gap-4 text-[11px] opacity-80 pt-1 font-mono">
+                    <span>Tamanho XML: {roundKB(xmlTr.xml_size_bytes)} KB</span>
+                    {xmlTr.pdf_size_bytes > 0 && <span>Tamanho PDF: {roundKB(xmlTr.pdf_size_bytes)} KB</span>}
+                  </div>
+                )}
+              </div>
+
+              {onRetryForce && (
+                <div className="flex gap-2">
+                  <button onClick={onRetryForce} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition">
+                    ⚡ Reenviar Pedido para Opery (Forçar)
+                  </button>
+                  {isXmlSuccess && (
+                    <a href={`/api/admin/opery/order/${log.order_id}/nf.pdf`} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-lg shadow-sm">
+                      📄 Visualizar DANFE PDF
+                    </a>
+                  )}
+                </div>
+              )}
+
               {log.error && (
                 <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-xs text-rose-800 space-y-1">
                   <div className="font-bold text-rose-900 flex items-center gap-1.5">

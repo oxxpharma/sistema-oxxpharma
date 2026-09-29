@@ -422,15 +422,26 @@ async def retry_dispatches(request: Request, limit: int = Query(20, ge=1, le=200
 
 
 @router.post("/admin/opery/dispatch/{order_id}")
-async def dispatch_specific_order(order_id: str, request: Request, user: dict = Depends(dev_or_admin_dep)):
+async def dispatch_specific_order(order_id: str, request: Request, force: bool = Query(False), user: dict = Depends(dev_or_admin_dep)):
+    """Dispara um pedido para a Opery. Se force=True, re-dispara mesmo se o status for success."""
     db = request.app.db
     order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Pedido nao encontrado")
     if order.get("payment_status") != "paid":
         raise HTTPException(status_code=400, detail="Pedido precisa estar pago para dispatch")
-    result = await opery_service.dispatch_paid_order(db, order)
+    result = await opery_service.dispatch_paid_order(db, order, force=force)
     return result or {"status": "unknown"}
+
+
+@router.post("/admin/opery/order/{order_id}/sync-nf")
+async def sync_order_nf(order_id: str, request: Request, force_redispatch: bool = Query(True), user: dict = Depends(dev_or_admin_dep)):
+    """Sincroniza/re-processa o XML e DANFE PDF do pedido. Re-dispara se force_redispatch=True."""
+    db = request.app.db
+    try:
+        return await opery_service.sync_or_fetch_order_xml(db, order_id, force_redispatch=force_redispatch)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 class ConvertLegacyIn(BaseModel):

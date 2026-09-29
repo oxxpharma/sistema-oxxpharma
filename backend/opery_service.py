@@ -585,23 +585,25 @@ async def _post_to_opery(url: str, token: str, body: Dict[str, Any]) -> Dict[str
         }
 
 
-async def dispatch_paid_order(db, order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def dispatch_paid_order(db, order: Dict[str, Any], force: bool = False) -> Optional[Dict[str, Any]]:
     """Dispara pedido pago para a Opery. Cria log de dispatch (idempotente por order_id).
 
+    Se `force` for True, ignora a idempotência de envios com status 'success' (permite reenvio).
     Se OPERY_OUTBOUND_URL nao estiver configurado, apenas registra o log como 'pending_config'
-    para que possa ser reprocessado depois quando a Opery entregar a documentacao.
+    para que possa ser reprocessado depois.
     """
     if not order or not order.get("order_id"):
         return None
     order_id = order["order_id"]
 
-    # idempotencia: nunca dispara o mesmo pedido 2x com sucesso
-    existing = await db.opery_dispatch_log.find_one(
-        {"order_id": order_id, "status": {"$in": ["success", "pending_config"]}},
-        {"_id": 0},
-    )
-    if existing and existing.get("status") == "success":
-        return existing
+    # idempotencia: se nao for forçado, nunca dispara o mesmo pedido 2x com sucesso
+    if not force:
+        existing = await db.opery_dispatch_log.find_one(
+            {"order_id": order_id, "status": {"$in": ["success", "pending_config"]}},
+            {"_id": 0},
+        )
+        if existing and existing.get("status") == "success":
+            return existing
 
     user = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) if order.get("user_id") else None
     payload = _build_outbound_payload(order, user)
@@ -622,8 +624,9 @@ async def dispatch_paid_order(db, order: Dict[str, Any]) -> Optional[Dict[str, A
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         }
+        existing = await db.opery_dispatch_log.find_one({"order_id": order_id}, {"_id": 0})
         if existing:
-            await db.opery_dispatch_log.update_one({"order_id": order_id, "status": "pending_config"}, {"$set": {**doc, "log_id": existing["log_id"]}})
+            await db.opery_dispatch_log.update_one({"order_id": order_id}, {"$set": {**doc, "log_id": existing["log_id"]}})
             return doc
         await db.opery_dispatch_log.insert_one(doc)
         logger.info(f"opery.dispatch_paid_order: order {order_id} enfileirado (pending_config)")
@@ -633,7 +636,7 @@ async def dispatch_paid_order(db, order: Dict[str, Any]) -> Optional[Dict[str, A
 
 
 async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Executa o POST HTTP e grava o log de dispatch."""
+    """Executa o POST HTTP, grava o log de dispatch, trata o XML retornado e gera o DANFE (PDF)."""
     log_id = _gen_id("opdisp_")
     attempts = 1
     prev = await db.opery_dispatch_log.find_one({"order_id": order_id}, {"_id": 0})
@@ -649,6 +652,78 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             snippet = result["response_text"][:500] if result.get("response_text") else ""
             error_msg = f"HTTP {result['status_code']}{': ' + snippet if snippet else ''}"
 
+        # Extrai possiveis campos de XML / NF no JSON retornado
+        rjson = result.get("response_json") or {}
+        nf = rjson.get("nf_number") or rjson.get("invoice_number") or rjson.get("numero_nf") or rjson.get("nfe_number") or rjson.get("nf")
+        nf_pdf_url = rjson.get("nf_url") or rjson.get("pdf_url") or rjson.get("danfe_url") or rjson.get("url_pdf")
+        nf_xml = (
+            rjson.get("nf_xml")
+            or rjson.get("xml")
+            or rjson.get("nfe_xml")
+            or rjson.get("xml_nfe")
+            or rjson.get("xml_content")
+            or rjson.get("danfe_xml")
+            or rjson.get("response_xml")
+            or rjson.get("conteudo_xml")
+        )
+        nf_chave = rjson.get("chave") or rjson.get("access_key") or rjson.get("nf_chave") or rjson.get("chave_nfe")
+
+        # Se o response_text for XML puro ou contiver tag de XML/NFe
+        resp_text = (result.get("response_text") or "").strip()
+        if not nf_xml and resp_text:
+            if resp_text.startswith("<?xml") or "<nfeProc" in resp_text or "<NFe" in resp_text or "<infNFe" in resp_text:
+                nf_xml = resp_text
+
+        # Tratamento do XML & DANFE PDF
+        xml_treatment = {
+            "status": "no_xml",
+            "xml_received": False,
+            "xml_size_bytes": 0,
+            "pdf_size_bytes": 0,
+            "details": "A Opery respondeu o HTTP, mas nenhum XML de NF-e foi retornado no corpo da resposta.",
+            "processed_at": _now_iso(),
+        }
+
+        pdf_bytes = None
+        if nf_xml and str(nf_xml).strip():
+            xml_str = str(nf_xml).strip()
+            xml_size = len(xml_str.encode("utf-8"))
+            try:
+                import opery_nf
+                pdf_bytes = opery_nf.render_danfe_pdf(xml_str)
+            except Exception as e:
+                logger.warning(f"opery._do_dispatch: erro ao renderizar DANFE: {e}")
+                pdf_bytes = None
+
+            if pdf_bytes:
+                pdf_size = len(pdf_bytes)
+                xml_treatment = {
+                    "status": "success",
+                    "xml_received": True,
+                    "xml_size_bytes": xml_size,
+                    "pdf_size_bytes": pdf_size,
+                    "details": f"XML recebido ({round(xml_size/1024, 1)} KB). DANFE PDF gerado com sucesso ({round(pdf_size/1024, 1)} KB).",
+                    "processed_at": _now_iso(),
+                }
+            else:
+                xml_treatment = {
+                    "status": "render_failed",
+                    "xml_received": True,
+                    "xml_size_bytes": xml_size,
+                    "pdf_size_bytes": 0,
+                    "details": f"XML recebido ({round(xml_size/1024, 1)} KB), mas falhou ao gerar DANFE PDF (verifique se é um XML NF-e SEFAZ válido).",
+                    "processed_at": _now_iso(),
+                }
+        elif nf_pdf_url:
+            xml_treatment = {
+                "status": "pdf_url_only",
+                "xml_received": False,
+                "xml_size_bytes": 0,
+                "pdf_size_bytes": 0,
+                "details": f"Opery retornou URL direta do PDF ao invés do XML: {nf_pdf_url}",
+                "processed_at": _now_iso(),
+            }
+
         doc = {
             "log_id": log_id,
             "order_id": order_id,
@@ -658,39 +733,33 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             "response_status": result["status_code"],
             "response_body": result["response_text"],
             "response_json": result.get("response_json"),
+            "xml_treatment": xml_treatment,
             "error": error_msg,
             "created_at": prev.get("created_at") if prev else _now_iso(),
             "updated_at": _now_iso(),
         }
+
         if prev:
             await db.opery_dispatch_log.update_one({"log_id": log_id}, {"$set": doc})
         else:
             await db.opery_dispatch_log.insert_one(doc)
 
-        # se a Opery devolveu numero de NF, guardamos no pedido
-        rjson = result.get("response_json") or {}
-        # Extrai possiveis campos comuns
-        nf = rjson.get("nf_number") or rjson.get("invoice_number") or rjson.get("numero_nf") or rjson.get("nfe_number")
-        nf_pdf_url = rjson.get("nf_url") or rjson.get("pdf_url") or rjson.get("danfe_url")
-        nf_xml = rjson.get("nf_xml") or rjson.get("xml") or rjson.get("nfe_xml")
-        nf_chave = rjson.get("chave") or rjson.get("access_key") or rjson.get("nf_chave")
-
-        # Se retornou XML na resposta (texto ou base64), tenta detectar tambem no response_body plain-text
-        if not nf_xml and result.get("response_text") and result["response_text"].strip().startswith("<?xml"):
-            nf_xml = result["response_text"]
-
+        # Se a Opery devolveu numero de NF, XML ou PDF URL, guardamos no pedido
         if ok and (nf or nf_xml or nf_pdf_url):
-            update: Dict[str, Any] = {"opery_nf_issued_at": _now_iso()}
+            update: Dict[str, Any] = {
+                "opery_nf_issued_at": _now_iso(),
+                "opery_danfe_status": "rendered" if pdf_bytes else ("received_xml" if nf_xml else "pdf_url"),
+            }
             if nf: update["opery_nf_number"] = str(nf)
             if nf_pdf_url: update["opery_nf_pdf_url"] = nf_pdf_url
-            if nf_xml: update["opery_nf_xml"] = nf_xml
+            if nf_xml: update["opery_nf_xml"] = str(nf_xml)
             if nf_chave: update["opery_nf_chave"] = str(nf_chave)
             try:
                 await db.orders.update_one({"order_id": order_id}, {"$set": update})
             except Exception as e:
                 logger.warning(f"opery: nao consegui gravar nf_* no order {order_id}: {e}")
 
-        logger.info(f"opery.dispatch order={order_id} status={doc['status']} http={result['status_code']}")
+        logger.info(f"opery.dispatch order={order_id} status={doc['status']} http={result['status_code']} xml={xml_treatment['status']}")
         return doc
     except Exception as e:
         doc = {
@@ -701,6 +770,12 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             "payload": payload,
             "response_status": None,
             "response_body": None,
+            "xml_treatment": {
+                "status": "error",
+                "xml_received": False,
+                "details": f"Erro de comunicação: {e}",
+                "processed_at": _now_iso(),
+            },
             "error": f"Erro de conexão/execução: {str(e)}",
             "created_at": prev.get("created_at") if prev else _now_iso(),
             "updated_at": _now_iso(),
@@ -711,6 +786,50 @@ async def _do_dispatch(db, order_id: str, url: str, token: str, payload: Dict[st
             await db.opery_dispatch_log.insert_one(doc)
         logger.error(f"opery.dispatch order={order_id} EXCEPTION: {e}")
         return doc
+
+
+async def sync_or_fetch_order_xml(db, order_id: str, force_redispatch: bool = True) -> Dict[str, Any]:
+    """Busca/sincroniza o XML e DANFE PDF de um pedido especifico.
+
+    Se `force_redispatch` for True, re-executa a requisicao HTTP para a Opery (usando force=True).
+    Re-tenta renderizar o DANFE PDF se o XML estiver salvo no banco.
+    """
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise ValueError("Pedido não encontrado")
+
+    dispatch_result = None
+    if force_redispatch:
+        dispatch_result = await dispatch_paid_order(db, order, force=True)
+        # Recarrega o pedido atualizado
+        order = await db.orders.find_one({"order_id": order_id}, {"_id": 0}) or order
+
+    nf_xml = order.get("opery_nf_xml")
+    import opery_nf
+    pdf_bytes = opery_nf.render_danfe_pdf(nf_xml) if nf_xml else None
+
+    if pdf_bytes and nf_xml:
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {"opery_danfe_status": "rendered", "opery_danfe_updated_at": _now_iso()}}
+        )
+
+    log = await db.opery_dispatch_log.find_one({"order_id": order_id}, {"_id": 0})
+
+    return {
+        "ok": True,
+        "order_id": order_id,
+        "has_xml": bool(nf_xml),
+        "pdf_available": bool(pdf_bytes),
+        "nf_number": order.get("opery_nf_number"),
+        "nf_chave": order.get("opery_nf_chave"),
+        "xml_treatment": (log or {}).get("xml_treatment") or {
+            "status": "success" if pdf_bytes else ("render_failed" if nf_xml else "no_xml"),
+            "xml_received": bool(nf_xml),
+            "details": "DANFE PDF gerado com sucesso" if pdf_bytes else ("XML inválido" if nf_xml else "Sem XML"),
+        },
+        "dispatch": log,
+    }
 
 
 async def retry_failed_dispatches(db, limit: int = 20) -> Dict[str, Any]:
