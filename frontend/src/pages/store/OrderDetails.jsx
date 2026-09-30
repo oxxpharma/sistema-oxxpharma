@@ -261,7 +261,7 @@ function OrderTrackingSection({ orderId, trackingCode, orderStatus }) {
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[11px] font-black tracking-wider uppercase text-slate-400">CÓDIGO DE RASTREIO</span>
             <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-3 py-0.5 rounded-full inline-flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> API Correios Ao Vivo
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> NOVIDADE!
             </span>
           </div>
           <div className="font-mono font-black text-xl text-slate-900 tracking-wide">
