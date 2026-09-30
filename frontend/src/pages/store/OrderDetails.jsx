@@ -7,7 +7,7 @@ import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibili
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { CheckCircle2, Package, MapPin, Loader2, Award } from 'lucide-react';
+import { CheckCircle2, Package, MapPin, Loader2, Award, Truck, RefreshCw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUS_LABELS = {
@@ -132,6 +132,13 @@ export default function OrderDetails() {
         )}
       </div>
 
+      {/* Módulo de Rastreamento de Entrega Estilizado (Visual da Imagem de Referência) */}
+      <OrderTrackingSection
+        orderId={order.order_id}
+        trackingCode={order.tracking_code}
+        orderStatus={order.order_status}
+      />
+
       <div className="bg-white rounded-xl border border-border p-6 mb-6">
         <h2 className="font-heading font-black text-lg mb-4 flex items-center gap-2"><Package className="w-5 h-5 text-brand-main" /> Itens</h2>
         <div className="space-y-3">
@@ -153,7 +160,6 @@ export default function OrderDetails() {
             <span className="font-bold">Total</span>
             <span className="font-heading font-black text-2xl text-brand-main">{formatCurrency(order.total)}</span>
           </div>
-          {/* Iter 42k: pontos ganhos com este pedido (se elegivel) */}
           {(() => {
             if (!canSeeProductPoints(user, settings)) return null;
             const totalPts = (order.items || []).reduce(
@@ -194,6 +200,141 @@ export default function OrderDetails() {
       <div className="flex gap-3 justify-center">
         <Link to="/meus-pedidos"><Button variant="outline" data-testid="view-orders-btn">Meus pedidos</Button></Link>
         <Link to="/"><Button data-testid="continue-shopping-btn">Continuar comprando</Button></Link>
+      </div>
+    </div>
+  );
+}
+
+
+function OrderTrackingSection({ orderId, trackingCode, orderStatus }) {
+  const [tracking, setTracking] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchTracking = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const res = await api.get(`/api/orders/${orderId}/tracking`);
+      setTracking(res);
+      if (isManual) toast.success('Rastreamento atualizado!');
+    } catch (err) {
+      if (isManual) toast.error('Falha ao consultar rastreamento');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (orderId) {
+      fetchTracking();
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [orderId]);
+
+  if (!trackingCode && (!tracking || !tracking.has_tracking)) {
+    return null;
+  }
+
+  const events = tracking?.events || [];
+  const correiosUrl = tracking?.correios_url || `https://rastreamento.correios.com.br/app/index.php?codigo=${trackingCode}`;
+
+  return (
+    <div className="bg-[#F1F5F9] rounded-3xl p-6 md:p-8 mb-6 border border-slate-200 shadow-sm" data-testid="order-tracking-section">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-[#008069]/10 text-[#008069] rounded-2xl">
+            <Truck className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="font-heading font-black text-xl text-slate-900">Rastreamento de Entrega</h2>
+            <p className="text-xs text-slate-500 font-medium">Pedido #{orderId.slice(-8).toUpperCase()}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Box Código & Ações */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 mb-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[11px] font-black tracking-wider uppercase text-slate-400">CÓDIGO DE RASTREIO</span>
+            <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-3 py-0.5 rounded-full inline-flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> API Correios Ao Vivo
+            </span>
+          </div>
+          <div className="font-mono font-black text-xl text-slate-900 tracking-wide">
+            {trackingCode || tracking?.tracking_code || '—'}
+          </div>
+          <div className="text-xs text-slate-500 font-medium mt-0.5">
+            Transportador: <b className="text-slate-700">{tracking?.carrier || 'Correios'}</b>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <button
+            onClick={() => fetchTracking(true)}
+            disabled={refreshing}
+            className="flex-1 md:flex-none bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-sm"
+            data-testid="refresh-tracking-btn"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Atualizar
+          </button>
+          <a
+            href={correiosUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex-1 md:flex-none bg-[#008069] hover:bg-[#006e5a] text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-md"
+            data-testid="correios-site-btn"
+          >
+            Site Correios <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      </div>
+
+      {/* Histórico de Movimentação */}
+      <div>
+        <h3 className="font-heading font-black text-xs text-slate-700 tracking-wider uppercase mb-6">
+          HISTÓRICO DE MOVIMENTAÇÃO
+        </h3>
+
+        {loading ? (
+          <div className="p-8 text-center text-xs text-slate-500">
+            <Loader2 className="w-5 h-5 animate-spin inline text-[#008069] mr-2" />
+            Buscando movimentações em tempo real...
+          </div>
+        ) : events.length === 0 ? (
+          <div className="p-4 bg-white rounded-xl text-xs text-slate-500 text-center border">
+            Nenhuma movimentação registrada ainda.
+          </div>
+        ) : (
+          <div className="relative pl-8 space-y-6 before:absolute before:left-3.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-emerald-400">
+            {events.map((ev, idx) => (
+              <div key={idx} className="relative">
+                {/* Node Icon Check */}
+                <div className="absolute -left-8 top-0 w-7 h-7 bg-[#008069] text-white rounded-full flex items-center justify-center font-bold text-xs shadow-sm">
+                  ✓
+                </div>
+
+                <div className="bg-white/90 p-4 rounded-2xl border border-slate-200/80 shadow-xs">
+                  <div className="flex justify-between items-start flex-wrap gap-2">
+                    <span className="font-heading font-bold text-sm text-slate-900">{ev.status}</span>
+                    <span className="text-xs text-slate-400 font-semibold">
+                      {ev.date} {ev.time ? `às ${ev.time}` : ''}
+                    </span>
+                  </div>
+                  {ev.location && (
+                    <div className="text-xs font-bold text-[#008069] mt-0.5">{ev.location}</div>
+                  )}
+                  {ev.description && (
+                    <div className="text-xs text-slate-500 mt-1 leading-relaxed">{ev.description}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

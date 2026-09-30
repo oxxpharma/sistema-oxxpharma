@@ -1995,10 +1995,76 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
     o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not o:
         raise HTTPException(status_code=404, detail="Pedido nao encontrado")
-    is_admin = user.get("role") == "admin" or user.get("access_level", 99) <= 1
+    is_admin = user.get("role") in ("admin", "super_admin") or user.get("access_level", 99) <= 1
     if not is_admin and o.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
     return o
+
+
+@app.get("/api/orders/{order_id}/tracking")
+async def get_order_tracking(request: Request, order_id: str, user: dict = Depends(get_current_user)):
+    """Retorna dados de rastreamento detalhado em tempo real para o cliente ou admin."""
+    db = request.app.db
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    is_admin = user.get("role") in ("admin", "super_admin") or user.get("access_level", 99) <= 1
+    if not is_admin and o.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    code = (o.get("tracking_code") or "").strip().upper()
+    if not code:
+        return {
+            "has_tracking": False,
+            "order_id": order_id,
+            "tracking_code": None,
+            "carrier": "Correios",
+            "events": [],
+        }
+
+    cfg = await correios_service.get_config(db)
+    track_res = await correios_service.track_correios_package(db, code, cfg)
+
+    if track_res and track_res.get("events"):
+        return {
+            "has_tracking": True,
+            "order_id": order_id,
+            "tracking_code": code,
+            "carrier": track_res.get("carrier") or "Correios",
+            "status": track_res.get("status") or "shipped",
+            "delivered": track_res.get("delivered") or False,
+            "events": track_res.get("events") or [],
+            "correios_url": track_res.get("correios_url") or f"https://rastreamento.correios.com.br/app/index.php?codigo={code}",
+        }
+
+    created_dt = o.get("created_at") or o.get("paid_at") or now_iso()
+    try:
+        dt_obj = datetime.fromisoformat(created_dt.replace("Z", "+00:00"))
+        d_str = dt_obj.strftime("%d/%m/%Y")
+        t_str = dt_obj.strftime("%H:%M")
+    except Exception:
+        d_str = created_dt[:10]
+        t_str = created_dt[11:16]
+
+    return {
+        "has_tracking": True,
+        "order_id": order_id,
+        "tracking_code": code,
+        "carrier": "Correios",
+        "status": "shipped",
+        "delivered": False,
+        "events": [
+            {
+                "status": "Etiqueta emitida",
+                "date": d_str,
+                "time": t_str,
+                "location": "Unidade dos Correios",
+                "description": "Aguardando postagem pelo remetente",
+                "completed": True,
+            }
+        ],
+        "correios_url": f"https://rastreamento.correios.com.br/app/index.php?codigo={code}",
+    }
 
 # ==================== ADMIN ORDERS ====================
 
