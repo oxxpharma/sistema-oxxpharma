@@ -34,6 +34,32 @@ def _digits(s: Optional[str]) -> str:
     if not s: return ""
     return "".join(ch for ch in s if ch.isdigit())
 
+def _get_cutoff_period(dt: Optional[datetime] = None) -> str:
+    """Retorna a fatura/ciclo de fechamento YYYY-MM com base no dia de corte (dia 26).
+    Compras até o dia 26 vencem no ciclo do mês atual.
+    Compras após o dia 26 vencem no ciclo do mês seguinte.
+    """
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    if dt.day <= 26:
+        return dt.strftime("%Y-%m")
+    else:
+        first_next = (dt.replace(day=1) + timedelta(days=32)).replace(day=1)
+        return first_next.strftime("%Y-%m")
+
+def _add_months(period_yyyy_mm: str, num_months: int) -> str:
+    """Soma num_months a uma string 'YYYY-MM'."""
+    try:
+        parts = period_yyyy_mm.split("-")
+        year, month = int(parts[0]), int(parts[1])
+        total_months = (year * 12 + (month - 1)) + num_months
+        new_year = total_months // 12
+        new_month = (total_months % 12) + 1
+        return f"{new_year:04d}-{new_month:02d}"
+    except Exception:
+        return period_yyyy_mm
+
+
 # ==================== MODELS ====================
 
 class CompanyCreate(BaseModel):
@@ -711,10 +737,11 @@ async def convenio_dashboard(request: Request, user: dict = Depends(_admin_user_
 # ==================== EMPLOYEE CONTEXT & CHECKOUT HELPERS ====================
 
 async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
-    """Retorna contexto de funcionario para o usuario logado, ou None se nao for.
-    Estrutura: { employee_id, employee_name, company_id, company_name, salary,
-                 discount_percent, payroll_enabled, payroll_limit_percent,
-                 payroll_limit_amount, open_charges_total, available_limit }
+    """Retorna contexto de funcionario para o usuario logado com calculos completos de parcelamento:
+    - Margem Mensal (30% do salario)
+    - Limite Total Acumulado (100% do salario)
+    - Dia 26 de corte do mes (compras apos dia 26 vencem no mes seguinte)
+    - Recomposicao de credito conforme parcelas sao pagas/faturadas
     """
     if not user:
         return None
@@ -730,47 +757,77 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
     company = await db.companies.find_one({"company_id": emp["company_id"], "active": True}, {"_id": 0})
     if not company:
         return None
-    # link automatico do user_id se ainda nao setado
     if not emp.get("user_id") and user.get("user_id"):
         await db.company_employees.update_one(
             {"employee_id": emp["employee_id"]},
             {"$set": {"user_id": user["user_id"]}},
         )
         emp["user_id"] = user["user_id"]
-    salary = float(emp.get("salary") or 0)
-    limit_pct = float(company.get("payroll_limit_percent") or 35.0)
-    # Iter 66.3: override manual do limite (por funcionario) — se setado, ignora salario
+
+    salary = float(emp.get("salary") or 0.0)
     override = emp.get("payroll_limit_override")
+
     if override is not None and float(override) > 0:
-        limit_amount = round(float(override), 2)
+        monthly_margin = round(float(override), 2)
+        total_limit = round(monthly_margin * 3.3333, 2)
     else:
-        limit_amount = round(salary * limit_pct / 100, 2)
-    # soma cobrancas em aberto (status: open, billed)
+        # Regras:
+        # Limite mensal: 30% do salario
+        # Limite acumulado total: 100% do salario
+        monthly_margin = round(salary * 0.30, 2)
+        total_limit = round(salary, 2)
+
+    active_cutoff_period = _get_cutoff_period()
+
+    # Busca cobrancas ativas (open, billed)
     charges = await db.payroll_charges.find(
         {"employee_id": emp["employee_id"], "status": {"$in": ["open", "billed"]}},
-        {"_id": 0, "amount": 1},
-    ).to_list(1000)
-    open_total = round(sum(float(c.get("amount", 0)) for c in charges), 2)
+        {"_id": 0},
+    ).to_list(2000)
+
+    # 1) Soma total devedor acumulado em todas as parcelas futuras
+    total_unpaid_balance = round(sum(float(c.get("amount", 0)) for c in charges), 2)
+    available_total_limit = max(0.0, round(total_limit - total_unpaid_balance, 2))
+
+    # 2) Soma do comprometimento mensal por periodo YYYY-MM
+    committed_by_month: Dict[str, float] = {}
+    for ch in charges:
+        period = ch.get("due_period_month") or ch.get("period_month") or active_cutoff_period
+        amt = float(ch.get("amount", 0))
+        committed_by_month[period] = round(committed_by_month.get(period, 0.0) + amt, 2)
+
+    current_month_committed = committed_by_month.get(active_cutoff_period, 0.0)
+    available_monthly_margin = max(0.0, round(monthly_margin - current_month_committed, 2))
+
     base_disc = float(company.get("discount_percent") or 0.0)
     extra_disc = float(company.get("employee_discount_pct") or 0.0)
     effective_disc = round(base_disc + extra_disc, 2)
+
     return {
         "employee_id": emp["employee_id"],
         "employee_name": emp.get("name"),
         "company_id": company["company_id"],
         "company_name": company.get("name"),
-        # Iter 66.3: NAO exponho o salario ao frontend (privacidade). Fica so no admin.
         "position": emp.get("position"),
-        "discount_percent": effective_disc,  # Iter 68: soma base + extra
+        "salary": salary,
+        "monthly_margin": monthly_margin,                 # 30% do salario
+        "current_month_committed": current_month_committed, # Comprometido no mes atual
+        "available_monthly_margin": available_monthly_margin, # Margem disponivel no mes
+        "total_limit": total_limit,                       # 100% do salario
+        "total_unpaid_balance": total_unpaid_balance,     # Saldo total devedor
+        "available_total_limit": available_total_limit,   # Limite total disponivel
+        "active_cutoff_period": active_cutoff_period,
+        "committed_by_month": committed_by_month,
+        "discount_percent": effective_disc,
         "base_discount_pct": base_disc,
-        "employee_discount_pct": extra_disc,  # Iter 68: cedido da comissao da empresa
+        "employee_discount_pct": extra_disc,
         "discount_max_units": company.get("discount_max_units"),
         "payroll_enabled": bool(company.get("payroll_enabled")),
-        "payroll_limit_percent": limit_pct,
-        "payroll_limit_amount": limit_amount,
-        "payroll_limit_override": override,   # so exposto para admin/company_admin usar
-        "open_charges_total": open_total,
-        "available_limit": round(max(0.0, limit_amount - open_total), 2),
+        "payroll_limit_percent": 30.0,
+        "payroll_limit_amount": monthly_margin,
+        "payroll_limit_override": override,
+        "open_charges_total": current_month_committed,
+        "available_limit": available_monthly_margin,      # Retrocompatibilidade
     }
 
 
@@ -784,75 +841,178 @@ async def me_employee_context(request: Request, user: dict = Depends(_current_us
     return ctx
 
 
+@router.get("/me/consignado-card")
+async def me_consignado_card(request: Request, user: dict = Depends(_current_user_lazy)):
+    """Retorna os dados do Cartao Consignado e Extrato Detalhado do Funcionario."""
+    db = request.app.db
+    ctx = await get_employee_context(db, user)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="Usuario nao vinculado a nenhuma empresa credenciada")
+
+    # Busca todas as cobrancas do funcionario (abertas, faturadas e pagas)
+    charges = await db.payroll_charges.find(
+        {"employee_id": ctx["employee_id"]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(2000)
+
+    statement_by_month: Dict[str, Dict] = {}
+    for ch in charges:
+        month = ch.get("due_period_month") or ch.get("period_month") or "Outros"
+        if month not in statement_by_month:
+            statement_by_month[month] = {
+                "period_month": month,
+                "total_due": 0.0,
+                "charges_count": 0,
+                "items": [],
+            }
+        amt = float(ch.get("amount", 0))
+        statement_by_month[month]["total_due"] = round(statement_by_month[month]["total_due"] + amt, 2)
+        statement_by_month[month]["charges_count"] += 1
+        statement_by_month[month]["items"].append(ch)
+
+    sorted_statement = sorted(list(statement_by_month.values()), key=lambda x: x["period_month"], reverse=True)
+
+    return {
+        "card": {
+            "card_number_mock": f"•••• •••• •••• {ctx['employee_id'][-4:].upper()}",
+            "employee_id": ctx["employee_id"],
+            "employee_name": ctx["employee_name"],
+            "company_name": ctx["company_name"],
+            "position": ctx.get("position"),
+            "salary": ctx["salary"],
+            "monthly_margin": ctx["monthly_margin"],
+            "current_month_committed": ctx["current_month_committed"],
+            "available_monthly_margin": ctx["available_monthly_margin"],
+            "total_limit": ctx["total_limit"],
+            "total_unpaid_balance": ctx["total_unpaid_balance"],
+            "available_total_limit": ctx["available_total_limit"],
+            "active_cutoff_period": ctx["active_cutoff_period"],
+        },
+        "statement": sorted_statement,
+        "raw_charges": charges,
+    }
+
+
 class PayrollEligibilityIn(BaseModel):
     amount: float
+    installments: Optional[int] = 1
 
 
 @router.post("/checkout/payroll-eligibility")
 async def checkout_payroll_eligibility(request: Request, data: PayrollEligibilityIn, user: dict = Depends(_current_user_lazy)):
-    """Verifica se o usuario pode pagar `amount` via desconto em folha.
-    Retorna: {eligible, reason?, limit, open_charges, available, amount, company_name}."""
+    """Verifica elegibilidade e opções de parcelamento (1x a 12x) via desconto em folha."""
     db = request.app.db
     ctx = await get_employee_context(db, user)
     if not ctx:
         return {"eligible": False, "reason": "not_employee"}
     if not ctx["payroll_enabled"]:
-        return {"eligible": False, "reason": "payroll_disabled", **{k: ctx[k] for k in ["company_name", "payroll_limit_amount", "available_limit"]}}
+        return {
+            "eligible": False,
+            "reason": "payroll_disabled",
+            **{k: ctx[k] for k in ["company_name", "monthly_margin", "available_monthly_margin", "available_total_limit"]}
+        }
     amt = float(data.amount or 0)
     if amt <= 0:
         return {"eligible": False, "reason": "invalid_amount"}
-    if amt > ctx["available_limit"]:
-        return {
-            "eligible": False,
-            "reason": "over_limit",
-            "amount": amt,
-            "limit": ctx["payroll_limit_amount"],
-            "open_charges": ctx["open_charges_total"],
-            "available": ctx["available_limit"],
-            "company_name": ctx["company_name"],
-        }
+
+    requested_n = max(1, min(int(data.installments or 1), 12))
+
+    options = []
+    for n in range(1, 13):
+        inst_amt = round(amt / n, 2)
+        fits_monthly = inst_amt <= ctx["available_monthly_margin"]
+        fits_total = amt <= ctx["available_total_limit"]
+        is_ok = fits_monthly and fits_total
+        reason = None
+        if not fits_monthly and not fits_total:
+            reason = "exceeds_both"
+        elif not fits_monthly:
+            reason = "exceeds_monthly_margin"
+        elif not fits_total:
+            reason = "exceeds_total_limit"
+
+        options.append({
+            "installments": n,
+            "installment_amount": inst_amt,
+            "eligible": is_ok,
+            "reason": reason,
+        })
+
+    target_option = next((o for o in options if o["installments"] == requested_n), options[0])
+
     return {
-        "eligible": True,
+        "eligible": target_option["eligible"],
+        "reason": target_option.get("reason"),
+        "requested_installments": requested_n,
+        "requested_installment_amount": target_option["installment_amount"],
         "amount": amt,
-        "limit": ctx["payroll_limit_amount"],
-        "open_charges": ctx["open_charges_total"],
-        "available": ctx["available_limit"],
+        "monthly_margin": ctx["monthly_margin"],
+        "available_monthly_margin": ctx["available_monthly_margin"],
+        "total_limit": ctx["total_limit"],
+        "total_unpaid_balance": ctx["total_unpaid_balance"],
+        "available_total_limit": ctx["available_total_limit"],
         "company_name": ctx["company_name"],
         "employee_id": ctx["employee_id"],
+        "installment_options": options,
     }
 
 
-async def create_payroll_charge(db, order: Dict, employee_ctx: Dict, acceptance: Dict) -> Dict:
-    """Cria uma cobranca payroll (desconto em folha) para uma order.
-    Registra o aceite digital (IP, UA, timestamp) para conformidade legal."""
+async def create_payroll_charge(db, order: Dict, employee_ctx: Dict, acceptance: Dict, installments: int = 1) -> List[Dict]:
+    """Cria cobranças parceladas payroll (desconto em folha) para uma order.
+    Registra o aceite digital (IP, UA, parcelas, timestamp) para conformidade legal.
+    """
     now = _now_iso()
-    period = now[:7]  # YYYY-MM
-    charge = {
-        "charge_id": _gen_id("payr_"),
-        "order_id": order["order_id"],
-        "company_id": employee_ctx["company_id"],
-        "employee_id": employee_ctx["employee_id"],
-        "employee_name": employee_ctx["employee_name"],
-        "user_id": order.get("user_id"),
-        "amount": float(order.get("total", 0)),
-        "status": "open",  # open -> billed -> paid
-        "period_month": period,
-        "created_at": now,
-    }
-    await db.payroll_charges.insert_one(charge)
-    # Aceite digital (log separado para auditoria)
+    start_period = _get_cutoff_period()
+    total_amt = float(order.get("total", 0))
+    n = max(1, min(int(installments or 1), 12))
+    purchase_id = _gen_id("purch_")
+
+    base_inst = round(total_amt / n, 2)
+    inst_amounts = [base_inst] * n
+    diff = round(total_amt - sum(inst_amounts), 2)
+    if abs(diff) > 0:
+        inst_amounts[-1] = round(inst_amounts[-1] + diff, 2)
+
+    created_charges = []
+    for idx, inst_amt in enumerate(inst_amounts, start=1):
+        due_month = _add_months(start_period, idx - 1)
+        charge = {
+            "charge_id": _gen_id("payr_"),
+            "purchase_id": purchase_id,
+            "order_id": order["order_id"],
+            "company_id": employee_ctx["company_id"],
+            "employee_id": employee_ctx["employee_id"],
+            "employee_name": employee_ctx["employee_name"],
+            "user_id": order.get("user_id"),
+            "purchase_total": total_amt,
+            "installment_number": idx,
+            "total_installments": n,
+            "amount": inst_amt,
+            "status": "open",  # open -> billed -> paid
+            "due_period_month": due_month,
+            "period_month": due_month,
+            "cutoff_cycle": start_period,
+            "created_at": now,
+        }
+        await db.payroll_charges.insert_one(charge)
+        created_charges.append(charge)
+
     await db.payroll_acceptances.insert_one({
         "acceptance_id": _gen_id("acpt_"),
+        "purchase_id": purchase_id,
         "order_id": order["order_id"],
         "employee_id": employee_ctx["employee_id"],
         "user_id": order.get("user_id"),
-        "amount": charge["amount"],
+        "amount": total_amt,
+        "installments": n,
+        "installment_amount": inst_amounts[0],
         "ip": acceptance.get("ip"),
         "user_agent": acceptance.get("user_agent"),
         "terms_version": acceptance.get("terms_version") or "v1",
         "accepted_at": now,
     })
-    return charge
+    return created_charges
+
 
 
 # ==================== PROPAGANDISTA (Iter 66 - FASE 4) ====================
@@ -1379,6 +1539,99 @@ async def admin_billing_resend_email(request: Request, billing_id: str, user: di
 <tbody>{rows}</tbody></table>"""
     await email_service.send_email(db, b["company_email"], subject, html)
     return {"ok": True, "to": b["company_email"]}
+
+
+@router.post("/admin/company-billings/{billing_id}/approve")
+async def admin_approve_company_billing(request: Request, billing_id: str, user: dict = Depends(_admin_user_lazy)):
+    """Aprova o Fechamento Mensal Empresarial, autoriza cobrança e gera link iPag/MP automaticamente."""
+    db = request.app.db
+    billing = await db.company_billings.find_one({"billing_id": billing_id}, {"_id": 0})
+    if not billing:
+        raise HTTPException(status_code=404, detail="Faturamento não encontrado")
+
+    now = _now_iso()
+    await db.company_billings.update_one(
+        {"billing_id": billing_id},
+        {"$set": {"approved": True, "approved_at": now, "approved_by": user.get("email")}}
+    )
+
+    # Gera cobrança automática via iPag / MercadoPago
+    payment_info = None
+    try:
+        payment_info = await admin_billing_create_payment(request, billing_id, user)
+    except Exception as e:
+        logger.error(f"Erro gerando cobrança no fechamento aprovado: {e}")
+
+    try:
+        await admin_billing_resend_email(request, billing_id, user)
+    except Exception as e:
+        logger.error(f"Erro enviando email de fechamento: {e}")
+
+    return {
+        "approved": True,
+        "billing_id": billing_id,
+        "approved_at": now,
+        "payment": payment_info,
+    }
+
+
+@router.get("/admin/convenio/financial-closing")
+async def admin_financial_closing_report(
+    request: Request,
+    period: Optional[str] = None,
+    company_id: Optional[str] = None,
+    user: dict = Depends(_admin_user_lazy)
+):
+    """Relatório do Fechamento para Financeira (Antecipação / Factoring).
+    Exibe todas as compras realizadas no período pelo SEU VALOR INTEGRAL (total),
+    com o detalhamento de todas as parcelas e datas de vencimento.
+    """
+    db = request.app.db
+    if not period:
+        period = _get_cutoff_period()
+
+    q: Dict[str, Any] = {"cutoff_cycle": period}
+    if company_id:
+        q["company_id"] = company_id
+
+    charges = await db.payroll_charges.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
+
+    purchases: Dict[str, Dict] = {}
+    for ch in charges:
+        pid = ch.get("purchase_id") or ch.get("order_id")
+        if pid not in purchases:
+            purchases[pid] = {
+                "purchase_id": pid,
+                "order_id": ch.get("order_id"),
+                "company_id": ch.get("company_id"),
+                "employee_id": ch.get("employee_id"),
+                "employee_name": ch.get("employee_name"),
+                "purchase_total": float(ch.get("purchase_total") or ch.get("amount", 0)),
+                "total_installments": int(ch.get("total_installments", 1)),
+                "created_at": ch.get("created_at"),
+                "cutoff_cycle": period,
+                "installments_schedule": [],
+            }
+        purchases[pid]["installments_schedule"].append({
+            "charge_id": ch.get("charge_id"),
+            "installment_number": ch.get("installment_number", 1),
+            "amount": float(ch.get("amount", 0)),
+            "due_period_month": ch.get("due_period_month"),
+            "status": ch.get("status"),
+        })
+
+    purch_list = list(purchases.values())
+    for p in purch_list:
+        p["installments_schedule"].sort(key=lambda x: x["installment_number"])
+
+    grand_total_integral = round(sum(p["purchase_total"] for p in purch_list), 2)
+
+    return {
+        "period": period,
+        "purchases_count": len(purch_list),
+        "grand_total_integral": grand_total_integral,
+        "purchases": purch_list,
+    }
 
 
 @router.put("/company/employees/{employee_id}/limit")

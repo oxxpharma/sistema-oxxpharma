@@ -6,6 +6,8 @@ import { Input } from '../../components/ui/Input';
 import { User, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
+import MyConsignmentCard from '../../components/convenio/MyConsignmentCard';
+
 export default function MyAccount() {
   const { user, setUser } = useAuth();
   const [form, setForm] = useState({
@@ -41,10 +43,10 @@ export default function MyAccount() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6" data-testid="my-account">
+    <div className="max-w-4xl mx-auto px-4 py-8 space-y-8" data-testid="my-account">
       <h1 className="font-heading font-black text-3xl text-txt-primary flex items-center gap-3"><User className="w-7 h-7 text-brand-main" /> Minha conta</h1>
 
-      <form onSubmit={submit} className="bg-white rounded-xl border border-border p-6 space-y-4">
+      <form onSubmit={submit} className="bg-white rounded-xl border border-border p-6 space-y-4 shadow-sm">
         <h2 className="font-bold text-lg">Dados pessoais</h2>
         <Input label="Email" value={user?.email} disabled />
         <Input label="Nome completo" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
@@ -53,6 +55,9 @@ export default function MyAccount() {
 
         <Button type="submit" loading={saving}><Save className="w-4 h-4" /> Salvar</Button>
       </form>
+
+      {/* Se o usuário for funcionário de empresa credenciada, renderiza o Cartão Consignado */}
+      <MyConsignmentCard />
     </div>
   );
 }

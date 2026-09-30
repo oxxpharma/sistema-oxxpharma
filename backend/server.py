@@ -383,6 +383,7 @@ class CheckoutData(BaseModel):
     # Iter 66 (Convenio): aceite digital exigido por lei para desconto em folha
     payroll_accepted: Optional[bool] = False
     payroll_terms_version: Optional[str] = "v1"
+    payroll_installments: Optional[int] = 1
     # Iter 66.3: usar bonus de garantia (Ozoxx) — quantidade de unidades a consumir
     warranty_bonus_units: Optional[int] = 0
 
@@ -1864,6 +1865,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     # Iter 66 (Convenio): Desconto em folha
     payroll_charge_pending = None
     employee_ctx_for_order = None
+    payroll_inst_count = 1
     if data.payment_method == "payroll":
         if not data.payroll_accepted:
             raise HTTPException(status_code=400, detail="Aceite digital do desconto em folha e obrigatorio")
@@ -1872,10 +1874,17 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             raise HTTPException(status_code=400, detail="Usuario nao e funcionario de empresa credenciada")
         if not employee_ctx_for_order["payroll_enabled"]:
             raise HTTPException(status_code=400, detail="Empresa nao permite desconto em folha")
-        if final_total > employee_ctx_for_order["available_limit"]:
+        payroll_inst_count = max(1, min(int(getattr(data, "payroll_installments", 1) or 1), 12))
+        inst_amount = round(final_total / payroll_inst_count, 2)
+        if inst_amount > employee_ctx_for_order["available_monthly_margin"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Valor R$ {final_total:.2f} excede o limite disponivel R$ {employee_ctx_for_order['available_limit']:.2f} (limite consignado {employee_ctx_for_order['payroll_limit_percent']}% do salario)",
+                detail=f"A parcela de R$ {inst_amount:.2f} excede a sua margem mensal disponível de R$ {employee_ctx_for_order['available_monthly_margin']:.2f} (máximo 30% do salário).",
+            )
+        if final_total > employee_ctx_for_order["available_total_limit"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"O valor total do pedido (R$ {final_total:.2f}) excede o seu limite total acumulado disponível de R$ {employee_ctx_for_order['available_total_limit']:.2f} (máximo 100% do salário).",
             )
         payroll_charge_pending = employee_ctx_for_order
 
@@ -1899,6 +1908,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "total": final_total,
         "total_before_voucher": grand_total,
         "shipping_address": addr, "payment_method": data.payment_method,
+        "payroll_installments": payroll_inst_count if data.payment_method == "payroll" else None,
         # Iter 47: marca pedidos de retirada no local com snapshot do endereco da loja
         "is_pickup": is_pickup,
         "pickup_snapshot": pickup_snapshot if is_pickup else None,
@@ -1926,8 +1936,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
 
     # Iter 66 (Convenio): pedido pago via desconto em folha
     # -> marca pago imediatamente, roda hooks (comissoes, pontos, emails, nota fiscal)
-    # -> cria PayrollCharge (open) que vira parte do fechamento mensal da empresa
-    # -> registra aceite digital com IP + user_agent para conformidade legal
+    # -> cria PayrollCharges parcelados que viram parte dos fechamentos mensais da empresa
+    # -> registra aceite digital com IP + user_agent + parcelas para conformidade legal
     if payroll_charge_pending:
         await mark_order_paid(db, order["order_id"], payment_id=None, source="payroll")
         acceptance = {
@@ -1937,7 +1947,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         }
         try:
             fresh_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
-            await convenio_routes.create_payroll_charge(db, fresh_order or order, payroll_charge_pending, acceptance)
+            await convenio_routes.create_payroll_charge(
+                db, fresh_order or order, payroll_charge_pending, acceptance, installments=payroll_inst_count
+            )
         except Exception as e:
             logger.error(f"Falha ao criar payroll charge: {e}")
 

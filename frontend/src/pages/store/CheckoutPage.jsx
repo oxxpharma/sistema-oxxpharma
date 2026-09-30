@@ -44,6 +44,7 @@ export default function CheckoutPage() {
   const [employeeCtx, setEmployeeCtx] = useState(null);
   const [payrollAccepted, setPayrollAccepted] = useState(false);
   const [payrollEligibility, setPayrollEligibility] = useState(null);
+  const [payrollInstallments, setPayrollInstallments] = useState(1);
   // Iter 66.3: bonus de garantia Ozoxx
   const [bonusInfo, setBonusInfo] = useState(null);
   const [bonusUnitsToUse, setBonusUnitsToUse] = useState(0);
@@ -63,6 +64,18 @@ export default function CheckoutPage() {
       setAppliedCoupon(c);
     } catch { /* noop */ }
   }, []);
+
+  // Efeito de checagem em tempo real da elegibilidade e parcelas do desconto em folha
+  useEffect(() => {
+    if (employeeCtx && total > 0) {
+      (async () => {
+        try {
+          const el = await api.post('/api/checkout/payroll-eligibility', { amount: total, installments: payrollInstallments });
+          setPayrollEligibility(el);
+        } catch { setPayrollEligibility(null); }
+      })();
+    }
+  }, [employeeCtx, total, payrollInstallments]);
 
   useEffect(() => {
     (async () => {
@@ -136,6 +149,7 @@ export default function CheckoutPage() {
         shipping_delivery_days: pickup ? 0 : selectedShipping?.delivery_days,
         payroll_accepted: paymentMethod === 'payroll' ? payrollAccepted : undefined,
         payroll_terms_version: paymentMethod === 'payroll' ? 'v1' : undefined,
+        payroll_installments: paymentMethod === 'payroll' ? payrollInstallments : undefined,
         warranty_bonus_units: bonusUnitsToUse > 0 ? bonusUnitsToUse : undefined,
       });
       // Iter 66: Desconto em folha ja fica pago no backend
@@ -435,25 +449,91 @@ export default function CheckoutPage() {
                 </button>
               ))}
 
-              {/* Iter 66 (Convenio): aceite digital exigido por lei */}
+              {/* Iter 66 (Convenio): Desconto em folha com Parcelamento */}
               {paymentMethod === 'payroll' && employeeCtx && (
-                <div className={`mt-3 rounded-xl border p-4 ${total > employeeCtx.available_limit ? 'border-red-400 bg-red-50' : 'border-emerald-300 bg-emerald-50'}`} data-testid="payroll-consent-box">
-                  <div className="text-sm font-bold mb-1">Desconto em folha — {employeeCtx.company_name}</div>
-                  <div className="text-xs text-txt-secondary space-y-1 mb-3">
-                    <div className="flex justify-between"><span>Limite consignado do mês:</span><span className="font-semibold">{formatCurrency(employeeCtx.payroll_limit_amount)}</span></div>
-                    <div className="flex justify-between"><span>Já utilizado no mês:</span><span className="font-semibold">{formatCurrency(employeeCtx.open_charges_total)}</span></div>
-                    <div className="flex justify-between"><span>Disponível para uso:</span><span className="font-semibold text-emerald-700">{formatCurrency(employeeCtx.available_limit)}</span></div>
-                    <div className="flex justify-between border-t border-emerald-200 pt-1 mt-1"><span>Este pedido:</span><span className={`font-bold ${total > employeeCtx.available_limit ? 'text-red-600' : 'text-brand-main'}`}>{formatCurrency(total)}</span></div>
+                <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50/70 p-4 space-y-4" data-testid="payroll-consent-box">
+                  <div className="flex justify-between items-center border-b border-emerald-200/60 pb-2">
+                    <div className="text-sm font-bold text-emerald-950">
+                      💳 Desconto em folha — {employeeCtx.company_name}
+                    </div>
+                    <span className="text-[11px] bg-emerald-200 text-emerald-800 font-semibold px-2 py-0.5 rounded-full">
+                      Cartão Consignado
+                    </span>
                   </div>
-                  {total > employeeCtx.available_limit ? (
-                    <div className="text-xs text-red-700 font-semibold">
-                      ⚠️ Este pedido excede o limite disponível. Escolha outro método de pagamento ou reduza os itens.
+
+                  {/* Resumo dos Limites */}
+                  <div className="grid sm:grid-cols-2 gap-2 text-xs bg-white rounded-lg p-3 border border-emerald-200 shadow-sm">
+                    <div>
+                      <div className="text-txt-secondary font-medium">Margem Mensal (30% salário):</div>
+                      <div className="text-emerald-700 font-bold">
+                        {formatCurrency(employeeCtx.available_monthly_margin)} <span className="font-normal text-[10px] text-txt-secondary">disponível</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-txt-secondary font-medium">Limite Total Acumulado:</div>
+                      <div className="text-blue-700 font-bold">
+                        {formatCurrency(employeeCtx.available_total_limit)} <span className="font-normal text-[10px] text-txt-secondary">disponível</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Seleção de Parcelamento */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-txt-primary">
+                      Opções de Parcelamento em Folha:
+                    </label>
+                    <select
+                      value={payrollInstallments}
+                      onChange={e => setPayrollInstallments(parseInt(e.target.value, 10))}
+                      className="w-full bg-white border border-border rounded-lg p-2.5 text-xs font-semibold text-txt-primary shadow-sm focus:ring-2 focus:ring-emerald-500"
+                      data-testid="payroll-installments-select"
+                    >
+                      {(payrollEligibility?.installment_options || Array.from({ length: 12 }, (_, i) => {
+                        const n = i + 1;
+                        const instAmt = total / n;
+                        const ok = instAmt <= (employeeCtx.available_monthly_margin || 0) && total <= (employeeCtx.available_total_limit || 0);
+                        return { installments: n, installment_amount: instAmt, eligible: ok };
+                      })).map(opt => {
+                        const instVal = formatCurrency(opt.installment_amount);
+                        let label = `${opt.installments}x de ${instVal} (Total: ${formatCurrency(total)})`;
+                        if (!opt.eligible) {
+                          if (opt.reason === 'exceeds_monthly_margin') label += ` — Excede margem mensal (${formatCurrency(employeeCtx.available_monthly_margin)}/mês)`;
+                          else if (opt.reason === 'exceeds_total_limit') label += ` — Excede limite total (${formatCurrency(employeeCtx.available_total_limit)})`;
+                          else label += ` — Excede limite de margem/total`;
+                        } else {
+                          label += ` · Sem juros`;
+                        }
+                        return (
+                          <option key={opt.installments} value={opt.installments} disabled={!opt.eligible}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Status & Validação */}
+                  {payrollEligibility && !payrollEligibility.eligible ? (
+                    <div className="text-xs text-red-700 font-semibold bg-red-50 p-2.5 rounded-lg border border-red-200 flex items-center gap-2">
+                      <span>⚠️</span>
+                      <span>
+                        {payrollEligibility.reason === 'exceeds_monthly_margin' && `A parcela excede sua margem mensal de ${formatCurrency(employeeCtx.available_monthly_margin)}.`}
+                        {payrollEligibility.reason === 'exceeds_total_limit' && `O valor total excede o seu limite total acumulado de ${formatCurrency(employeeCtx.available_total_limit)}.`}
+                        {payrollEligibility.reason === 'exceeds_both' && `O parcelamento selecionado excede seus limites de margem e total.`}
+                        {!payrollEligibility.reason && `Escolha outro parcelamento ou método de pagamento.`}
+                      </span>
                     </div>
                   ) : (
-                    <label className="flex items-start gap-2 text-xs cursor-pointer select-none" data-testid="payroll-accept-label">
-                      <input type="checkbox" checked={payrollAccepted} onChange={e => setPayrollAccepted(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-500" data-testid="payroll-accept" />
+                    <label className="flex items-start gap-2 text-xs cursor-pointer select-none bg-white p-3 rounded-lg border border-emerald-200" data-testid="payroll-accept-label">
+                      <input
+                        type="checkbox"
+                        checked={payrollAccepted}
+                        onChange={e => setPayrollAccepted(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 accent-emerald-500"
+                        data-testid="payroll-accept"
+                      />
                       <span>
-                        Autorizo o desconto de <b>{formatCurrency(total)}</b> em minha folha de pagamento pela empresa <b>{employeeCtx.company_name}</b>, referente ao pedido a ser gerado, conforme regras do convênio e respeitando o limite legal. Confirmo a leitura e concordância dos termos.
+                        Autorizo o desconto em folha de <b>{payrollInstallments}x de {formatCurrency(total / payrollInstallments)}</b> (total: {formatCurrency(total)}) pela empresa <b>{employeeCtx.company_name}</b>, conforme regras do convênio e limite legal de margem consignável.
                       </span>
                     </label>
                   )}

@@ -29,6 +29,7 @@ import MyNetwork from './pages/store/MyNetwork';
 import MyWithdrawals from './pages/store/MyWithdrawals';
 import MyAccount from './pages/store/MyAccount';
 import MyPoints from './pages/store/MyPoints';
+import MyConsignmentCardPage from './pages/store/MyConsignmentCardPage';
 import SearchPage from './pages/store/SearchPage';
 
 // Auth
@@ -139,6 +140,7 @@ function AppRoutes() {
         <Route path="/minha-rede" element={<Guard requireAuth><MyNetwork /></Guard>} />
         <Route path="/meus-saques" element={<Guard requireAuth><MyWithdrawals /></Guard>} />
         <Route path="/minha-conta" element={<Guard requireAuth><MyAccount /></Guard>} />
+        <Route path="/meu-cartao-consignado" element={<Guard requireAuth><MyConsignmentCardPage /></Guard>} />
         <Route path="/meus-pontos" element={<Guard requireAuth><MyPoints /></Guard>} />
         <Route path="/p/:slug" element={<CmsPageView />} />
       </Route>
