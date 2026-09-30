@@ -65,18 +65,6 @@ export default function CheckoutPage() {
     } catch { /* noop */ }
   }, []);
 
-  // Efeito de checagem em tempo real da elegibilidade e parcelas do desconto em folha
-  useEffect(() => {
-    if (employeeCtx && total > 0) {
-      (async () => {
-        try {
-          const el = await api.post('/api/checkout/payroll-eligibility', { amount: total, installments: payrollInstallments });
-          setPayrollEligibility(el);
-        } catch { setPayrollEligibility(null); }
-      })();
-    }
-  }, [employeeCtx, total, payrollInstallments]);
-
   useEffect(() => {
     (async () => {
       try {
@@ -215,6 +203,20 @@ export default function CheckoutPage() {
     : 0;
   const total = Math.max(0, grandBeforeVoucher - voucherToUse - bonusAmountUsed);
   const fullyCoveredByVoucher = useVoucher && voucherToUse >= grandBeforeVoucher && grandBeforeVoucher > 0;
+
+  // Iter 66: checa elegibilidade de parcelamento em folha
+  useEffect(() => {
+    if (employeeCtx && total > 0) {
+      (async () => {
+        try {
+          const el = await api.post('/api/checkout/payroll-eligibility', { amount: total, installments: payrollInstallments });
+          setPayrollEligibility(el);
+        } catch { setPayrollEligibility(null); }
+      })();
+    } else {
+      setPayrollEligibility(null);
+    }
+  }, [employeeCtx, total, payrollInstallments]);
 
   // Iter 66.3: recarrega bonus quando subtotal muda
   useEffect(() => {

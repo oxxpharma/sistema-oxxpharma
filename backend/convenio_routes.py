@@ -62,6 +62,14 @@ def _add_months(period_yyyy_mm: str, num_months: int) -> str:
 
 # ==================== MODELS ====================
 
+class CompanyRepresentativeCreate(BaseModel):
+    name: str
+    email: EmailStr
+    cpf: Optional[str] = None
+    phone: Optional[str] = None
+    password: Optional[str] = "123456"
+
+
 class CompanyCreate(BaseModel):
     name: str
     cnpj: str
@@ -304,7 +312,82 @@ async def assign_company_admin(request: Request, company_id: str, body: Dict, us
         {"user_id": target_user_id},
         {"$set": {"role": "company_admin", "company_admin_of": company_id, "updated_at": _now_iso()}},
     )
+    await db.companies.update_one(
+        {"company_id": company_id},
+        {"$set": {"representative_user_id": target_user_id}}
+    )
     return {"message": "Usuario vinculado como admin da empresa"}
+
+
+@router.post("/admin/companies/{company_id}/create-representative")
+async def create_company_representative(
+    request: Request,
+    company_id: str,
+    data: CompanyRepresentativeCreate,
+    user: dict = Depends(_admin_user_lazy)
+):
+    """Cria ou atualiza o usuário responsável (RH / Gestor) da empresa credenciada com acesso ao Painel Empresa (/empresa)."""
+    db = request.app.db
+    company = await _get_company_or_404(db, company_id)
+
+    email = data.email.lower().strip()
+    cpf_dig = _digits(data.cpf)
+    phone_dig = _digits(data.phone)
+    password = data.password or "123456"
+
+    import bcrypt
+    pwd_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not existing_user and cpf_dig:
+        existing_user = await db.users.find_one({"cpf_digits": cpf_dig}, {"_id": 0})
+
+    if existing_user:
+        rep_user_id = existing_user["user_id"]
+        current_nets = existing_user.get("networks") or []
+        upd = {
+            "role": "company_admin",
+            "company_admin_of": company_id,
+            "networks": list(set(current_nets + ["network_2"])),
+            "updated_at": _now_iso(),
+        }
+        if data.name: upd["name"] = data.name
+        if cpf_dig: upd["cpf_digits"] = cpf_dig
+        if phone_dig: upd["phone_digits"] = phone_dig
+        if data.password: upd["password_hash"] = pwd_hash
+        await db.users.update_one({"user_id": rep_user_id}, {"$set": upd})
+    else:
+        rep_user_id = _gen_id("usr_")
+        user_doc = {
+            "user_id": rep_user_id,
+            "name": data.name,
+            "email": email,
+            "cpf_digits": cpf_dig,
+            "phone_digits": phone_dig,
+            "password_hash": pwd_hash,
+            "role": "company_admin",
+            "company_admin_of": company_id,
+            "networks": ["network_2"],
+            "network_type": "network_2",
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        await db.users.insert_one(user_doc)
+
+    await db.companies.update_one(
+        {"company_id": company_id},
+        {"$set": {"representative_user_id": rep_user_id, "contact_name": data.name, "contact_email": email}}
+    )
+
+    return {
+        "company_id": company_id,
+        "representative_user_id": rep_user_id,
+        "name": data.name,
+        "email": email,
+        "role": "company_admin",
+        "login_url": "/login",
+        "credentials": {"email": email, "password": password},
+    }
 
 
 @router.post("/admin/companies/{company_id}/contract")
@@ -424,28 +507,50 @@ async def list_employees(request: Request, company_id: Optional[str] = None, sea
 
 @router.post("/company/employees")
 async def create_employee(request: Request, data: EmployeeCreate, company_id: Optional[str] = None,
+                          confirm_link: bool = Query(False),
                           user: dict = Depends(_company_admin_lazy)):
     db = request.app.db
     cid = await _resolve_company_scope(request, user, company_id)
     payload = data.model_dump()
+    payload["email"] = payload["email"].lower().strip()
     payload["cpf_digits"] = _digits(payload.get("cpf"))
     payload["phone_digits"] = _digits(payload.get("phone"))
-    # dedupe por email dentro da empresa
-    dup = await db.company_employees.find_one({"company_id": cid, "email": payload["email"].lower()})
+
+    # Dedupe dentro da propria empresa por email ou CPF
+    q_dup: Dict[str, Any] = {"company_id": cid, "email": payload["email"]}
+    if payload["cpf_digits"]:
+        q_dup = {"company_id": cid, "$or": [{"email": payload["email"]}, {"cpf_digits": payload["cpf_digits"]}]}
+
+    dup = await db.company_employees.find_one(q_dup, {"_id": 0})
     if dup:
-        raise HTTPException(status_code=409, detail="Funcionario com este email ja existe na empresa")
-    payload["email"] = payload["email"].lower()
+        raise HTTPException(status_code=409, detail="Funcionário com este E-mail ou CPF já está cadastrado nesta empresa.")
+
     payload["company_id"] = cid
-    # tenta linkar ao user existente ou cria conta na Rede 2 abaixo da empresa
+
     company_doc = await db.companies.find_one({"company_id": cid}, {"_id": 0})
     company_rep_id = company_doc.get("representative_user_id") if company_doc else None
 
+    # Procura se existe usuario cadastrado no sistema (db.users) por email ou CPF
     linked_user = None
     if payload["email"]:
         linked_user = await db.users.find_one({"email": payload["email"]}, {"_id": 0})
     if not linked_user and payload["cpf_digits"]:
         linked_user = await db.users.find_one({"cpf_digits": payload["cpf_digits"]}, {"_id": 0})
 
+    # Se existe usuario cadastrado no sistema e nao houve confirmacao prévia do vinculo:
+    if linked_user and not confirm_link:
+        return {
+            "needs_confirmation": True,
+            "existing_user": {
+                "user_id": linked_user["user_id"],
+                "name": linked_user.get("name"),
+                "email": linked_user.get("email"),
+                "cpf_digits": linked_user.get("cpf_digits"),
+            },
+            "message": f"Encontramos o usuário {linked_user.get('name')} ({linked_user.get('email')}) cadastrado no sistema. Deseja vincular esta conta existente como funcionário da empresa?"
+        }
+
+    # Se NAO existe usuario, cria a conta no sistema (db.users) com as condicoes da empresa
     if not linked_user:
         import bcrypt
         pwd_hash = bcrypt.hashpw("123456".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -455,7 +560,7 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
             "name": payload["name"],
             "email": payload["email"],
             "cpf_digits": payload.get("cpf_digits"),
-            "phone": payload.get("phone"),
+            "phone_digits": payload.get("phone_digits"),
             "password_hash": pwd_hash,
             "role": "customer",
             "networks": ["network_2"],
@@ -468,20 +573,27 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
         await db.users.insert_one(user_doc)
         payload["user_id"] = emp_user_id
     else:
+        # Vincula a conta do usuario existente
         payload["user_id"] = linked_user["user_id"]
         upd_u = {}
         if not linked_user.get("sponsor_id") and company_rep_id:
             upd_u["sponsor_id"] = company_rep_id
             upd_u["sponsor_id_net2"] = company_rep_id
+        if not linked_user.get("cpf_digits") and payload.get("cpf_digits"):
+            upd_u["cpf_digits"] = payload["cpf_digits"]
         current_nets = linked_user.get("networks") or []
         if "network_2" not in current_nets:
             upd_u["networks"] = list(set(current_nets + ["network_2"]))
         if upd_u:
             await db.users.update_one({"user_id": linked_user["user_id"]}, {"$set": upd_u})
 
-    doc = {"employee_id": _gen_id("emp_"), **payload, "created_at": _now_iso()}
+    doc = {"employee_id": _gen_id("emp_"), **payload, "active": True, "created_at": _now_iso()}
     await db.company_employees.insert_one(doc)
-    return await db.company_employees.find_one({"employee_id": doc["employee_id"]}, {"_id": 0})
+    res = await db.company_employees.find_one({"employee_id": doc["employee_id"]}, {"_id": 0})
+    res["needs_confirmation"] = False
+    res["user_created"] = not bool(linked_user)
+    res["user_linked"] = bool(linked_user)
+    return res
 
 
 @router.put("/company/employees/{employee_id}")
