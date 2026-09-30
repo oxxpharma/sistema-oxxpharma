@@ -7904,7 +7904,50 @@ async def admin_correios_test(request: Request, user: dict = Depends(require_adm
 @app.post("/api/admin/correios-test-auth")
 async def admin_correios_test_auth(request: Request, user: dict = Depends(require_admin())):
     """Testa apenas autenticacao com Correios CWS (sem calcular frete)."""
-    return await correios_service.test_credentials(request.app.db)
+    token = await correios_service.get_correios_auth_token(request.app.db)
+    cfg = await correios_service.get_config(request.app.db)
+    if token:
+        return {
+            "ok": True,
+            "environment": cfg.get("correios_environment"),
+            "token_preview": token[:24] + "...",
+        }
+    return {"ok": False, "error": "Falha na autenticação CWS com Correios"}
+
+
+@app.post("/api/admin/shipping/test-tracking")
+async def admin_shipping_test_tracking(request: Request, user: dict = Depends(require_admin())):
+    """Endpoint de diagnostico e teste de rastreamento em tempo real com log passo a passo."""
+    body = await request.json() or {}
+    tracking_code = body.get("tracking_code") or ""
+    if not tracking_code:
+        raise HTTPException(status_code=400, detail="Código de rastreamento é obrigatório")
+    return await correios_service.diagnose_tracking(request.app.db, tracking_code)
+
+
+@app.post("/api/admin/shipping/test-freight")
+async def admin_shipping_test_freight(request: Request, user: dict = Depends(require_admin())):
+    """Testa cotacao de frete em tempo real para um CEP de destino."""
+    body = await request.json() or {}
+    cep = body.get("cep") or body.get("cep_destination") or ""
+    if not cep:
+        raise HTTPException(status_code=400, detail="CEP de destino é obrigatório")
+    items = body.get("items") or [{"weight": float(body.get("weight") or 0.5), "quantity": 1}]
+    return await correios_service.calculate_freight(request.app.db, cep, items)
+
+
+@app.post("/api/admin/shipping/sync-tracking")
+async def admin_shipping_sync_tracking(request: Request, user: dict = Depends(require_admin())):
+    """Dispara a sincronizacao e rastreamento automatico de todos os pedidos em transito imediatamente."""
+    return await correios_service.run_automatic_tracking_cycle(request.app.db)
+
+
+@app.get("/api/admin/shipping/notifications")
+async def admin_shipping_notifications(request: Request, limit: int = 50, user: dict = Depends(require_admin())):
+    """Retorna historico de notificacoes de rastreio disparadas por e-mail."""
+    db = request.app.db
+    logs = await db.tracking_notifications.find({}, {"_id": 0}).sort("sent_at", -1).limit(limit).to_list(limit)
+    return {"notifications": logs, "total": len(logs)}
 
 
 # ==================== MAXX MMN INTEGRATION ====================
