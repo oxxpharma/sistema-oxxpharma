@@ -244,15 +244,30 @@ DEFAULT_TEMPLATES = [
     {
         "slug": "order_shipped",
         "name": "Pedido enviado",
-        "subject": "Seu pedido #{{order_short_id}} foi enviado",
+        "subject": "🚚 Seu pedido #{{order_short_id}} foi enviado!",
         "body_html": """
-<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
-  <h1 style="color:#E8731A;">Saiu para entrega</h1>
-  <p>Boas noticias, {{user.name}}! Seu pedido <strong>#{{order_short_id}}</strong> esta a caminho.</p>
-  {% if order.tracking_code %}<p style="background:#f0f0f0;padding:12px;border-radius:6px;margin:12px 0;">
-    <strong>Código de rastreamento:</strong> <code style="font-size:14px;font-weight:bold;">{{order.tracking_code}}</code>
-  </p>{% endif %}
-  <p><a href="{{order_link}}" style="background:#E8731A;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Acompanhar</a></p>
+<div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto;padding:32px 24px;color:#1E293B;line-height:1.6;">
+  <div style="text-align:center;margin-bottom:24px;">
+    <span style="font-size:48px;">🚚</span>
+    <h1 style="color:#008069;font-size:24px;font-weight:900;margin:12px 0 4px 0;">Seu pedido foi enviado!</h1>
+    <p style="font-size:14px;color:#64748B;margin:0;">Olá <strong>{{user.name}}</strong>, seu pedido <strong>#{{order_short_id}}</strong> foi postado e já está a caminho.</p>
+  </div>
+
+  <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:14px;padding:20px;margin-bottom:24px;text-align:center;">
+    <div style="font-size:11px;font-weight:bold;color:#047857;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Código de Rastreamento</div>
+    <div style="font-family:monospace;font-size:20px;font-weight:900;color:#065F46;letter-spacing:1px;">{{tracking_code}}</div>
+    <div style="font-size:12px;color:#059669;margin-top:4px;">Transportadora: <b>Correios</b></div>
+  </div>
+
+  <p style="font-size:13px;color:#475569;text-align:center;margin-bottom:24px;">
+    Você pode acompanhar a linha do tempo detalhada e as movimentações em tempo real da entrega diretamente no nosso site.
+  </p>
+
+  <div style="text-align:center;">
+    <a href="{{order_link}}" style="display:inline-block;background:#008069;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:14px 32px;border-radius:12px;box-shadow:0 4px 6px -1px rgba(0, 128, 105, 0.2);">
+      Rastrear meu Pedido
+    </a>
+  </div>
 </div>""",
         "active": True,
     },
@@ -395,3 +410,8 @@ async def seed_default_templates(db):
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             })
+        elif t["slug"] == "order_shipped":
+            await db.email_templates.update_one(
+                {"slug": "order_shipped"},
+                {"$set": {"body_html": t["body_html"], "subject": t["subject"], "updated_at": now_iso()}}
+            )
