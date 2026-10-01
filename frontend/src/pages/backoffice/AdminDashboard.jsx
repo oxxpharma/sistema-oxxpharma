@@ -64,15 +64,6 @@ export default function AdminDashboard() {
 
   useEffect(() => { load(initial.start, initial.end); /* eslint-disable-next-line */ }, []);
 
-  if (loading && !data) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-8 h-8 animate-spin text-brand-main" />
-      </div>
-    );
-  }
-  if (!data) return null;
-
   const periodTitleText = useMemo(() => {
     if (start && end) {
       if (start.slice(0, 7) === end.slice(0, 7) && start.endsWith('-01')) {
@@ -87,6 +78,26 @@ export default function AdminDashboard() {
     if (end) return `até ${end.slice(8,10)}/${end.slice(5,7)}`;
     return 'mês atual';
   }, [start, end]);
+
+  const hasFilter = !!(start || end);
+  const clearFilter = () => { setStart(''); setEnd(''); load('', ''); };
+  const setQuickRange = (days) => {
+    const today = new Date();
+    const from = new Date();
+    from.setDate(today.getDate() - (days - 1));
+    const e = today.toISOString().slice(0, 10);
+    const s = from.toISOString().slice(0, 10);
+    setStart(s); setEnd(e); load(s, e);
+  };
+
+  if (loading && !data) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-brand-main" />
+      </div>
+    );
+  }
+  if (!data) return null;
 
   return (
     <div data-testid="admin-dashboard" className="space-y-5">
