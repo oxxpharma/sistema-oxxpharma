@@ -5353,6 +5353,16 @@ async def admin_retry_igvd_pending(request: Request, user: dict = Depends(requir
     applied = 0
     for v in pending:
         u = await igvd_service._find_user(db, v.get("licenciado_email") or "", v.get("licenciado_cpf_digits") or "")
+        if not u:
+            lic = {
+                "email": v.get("licenciado_email"),
+                "full_name": v.get("licenciado_name"),
+                "cpf_digits": v.get("licenciado_cpf_digits"),
+                "phone": v.get("licenciado_phone"),
+                "birth_date": v.get("licenciado_birth_date"),
+                "address": v.get("licenciado_address") or {},
+            }
+            u = await igvd_service._auto_create_user_from_igvd(db, lic)
         if u:
             res = await igvd_service._apply_voucher_to_user(db, v, u["user_id"])
             if res.get("status") == "applied" and res.get("order_id"):

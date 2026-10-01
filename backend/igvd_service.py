@@ -15,6 +15,9 @@ pelo `voucher.code`. Indice unico em `igvd_vouchers.voucher_code`.
 """
 
 import re
+import secrets
+import uuid
+import bcrypt
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -180,6 +183,84 @@ async def _find_user(db, email: str, cpf_digits: str) -> Optional[Dict]:
         if u:
             return u
     return None
+
+
+async def _auto_create_user_from_igvd(db, lic: Dict) -> Optional[Dict]:
+    """Cria conta de usuario automaticamente a partir dos dados do licenciado IGVD.
+    Retorna o dict do user criado ou None se faltarem dados minimos (e-mail e CPF)."""
+    email = str(lic.get("email") or "").strip().lower()
+    cpf_digits = str(lic.get("cpf_digits") or "").strip()
+    cpf_raw = str(lic.get("cpf_raw") or "").strip()
+
+    if not email and not cpf_digits:
+        return None
+
+    name = str(lic.get("full_name") or "").strip() or (email.split("@")[0] if email else "Licenciado IGVD")
+    phone = str(lic.get("phone") or "").strip()
+    birth_date = lic.get("birth_date")
+
+    if len(cpf_digits) == 11:
+        cpf_fmt = f"{cpf_digits[:3]}.{cpf_digits[3:6]}.{cpf_digits[6:9]}-{cpf_digits[9:]}"
+    else:
+        cpf_fmt = cpf_raw
+
+    # Prepara endereco default se houver dados no payload IGVD
+    lic_addr = lic.get("address") or {}
+    addresses = []
+    if lic_addr.get("street") or lic_addr.get("city") or lic_addr.get("zip_digits") or lic_addr.get("zip_code"):
+        zip_d = lic_addr.get("zip_digits") or _clean_cpf(lic_addr.get("zip_code"))
+        addresses = [{
+            "address_id": "addr_" + secrets.token_hex(6),
+            "label": "Adesão IGVD",
+            "name": name,
+            "street": str(lic_addr.get("street") or "").strip(),
+            "number": str(lic_addr.get("number") or "S/N").strip(),
+            "complement": str(lic_addr.get("complement") or "").strip(),
+            "neighborhood": str(lic_addr.get("neighborhood") or "").strip(),
+            "city": str(lic_addr.get("city") or "").strip(),
+            "state": str(lic_addr.get("state") or "").strip().upper()[:2],
+            "zip_code": (f"{zip_d[:5]}-{zip_d[5:]}" if len(zip_d) == 8 else str(lic_addr.get("zip_code") or "").strip()),
+            "is_default": True,
+        }]
+
+    # Tenta vincular patrocinador caso informado no payload
+    sponsor_id = None
+    sponsor_code = None
+    sp_email = str(lic.get("sponsor_email") or "").strip().lower()
+    if sp_email:
+        sp_user = await db.users.find_one({"email": {"$regex": f"^{re.escape(sp_email)}$", "$options": "i"}}, {"_id": 0, "user_id": 1, "referral_code": 1})
+        if sp_user:
+            sponsor_id = sp_user.get("user_id")
+            sponsor_code = sp_user.get("referral_code")
+
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    raw_pw = secrets.token_urlsafe(12)
+    pw_hash = bcrypt.hashpw(raw_pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    ref_code = uuid.uuid4().hex[:8].upper()
+
+    user_doc = {
+        "user_id": user_id,
+        "email": email or f"igvd_{user_id}@oxxpharma.com",
+        "name": name,
+        "phone": phone,
+        "cpf": cpf_fmt,
+        "cpf_digits": cpf_digits,
+        "birth_date": birth_date,
+        "password_hash": pw_hash,
+        "role": "customer",
+        "access_level": 99,
+        "status": "active",
+        "addresses": addresses,
+        "sponsor_id": sponsor_id,
+        "sponsor_code": sponsor_code,
+        "network_type": "customer",
+        "referral_code": ref_code,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+        "source": "igvd_auto_register",
+    }
+    await db.users.insert_one(user_doc)
+    return user_doc
 
 
 async def _load_kit_config(db) -> Dict:
@@ -518,6 +599,10 @@ async def ingest_voucher(db, payload: Dict, idempotency_key: Optional[str]) -> D
     await db.igvd_vouchers.insert_one(doc)
 
     user = await _find_user(db, email, cpf_digits)
+    if not user:
+        # Auto-cria cadastro do licenciado IGVD para processamento imediato sem pendencia
+        user = await _auto_create_user_from_igvd(db, lic)
+
     if user:
         return await _apply_voucher_to_user(db, doc, user["user_id"])
     return {
@@ -526,7 +611,7 @@ async def ingest_voucher(db, payload: Dict, idempotency_key: Optional[str]) -> D
         "voucher_code": code,
         "credited_amount_cents": amount_cents,
         "status": "pending",
-        "message": "Voucher salvo e aguardando cadastro do licenciado",
+        "message": "Voucher salvo e aguardando dados válidos do licenciado",
     }
 
 
