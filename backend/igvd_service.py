@@ -479,7 +479,7 @@ async def _create_paid_kit_order(db, voucher_doc: Dict, user_doc: Dict) -> Dict:
         "shipping_address": ship_addr,
         "is_pickup": False,
         "pickup_snapshot": None,
-        "payment_method": "igvd_voucher",
+        "payment_method": "credit_card",
         "payment_status": "paid",  # ja pago pela IGVD
         "order_status": "paid",
         "paid_at": now,
