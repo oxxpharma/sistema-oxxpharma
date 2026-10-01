@@ -3814,20 +3814,52 @@ async def admin_dashboard(request: Request, start: Optional[str] = None, end: Op
             return None
         return round((cur - prev) / prev * 100, 2)
 
-    # Receita por dia (ultimos 30 dias, sempre)
+    # Receita por dia no periodo selecionado (ou mes atual / ultimos 30 dias se sem filtro)
+    try:
+        if start and end:
+            from_date = datetime.strptime(start[:10], "%Y-%m-%d").date()
+            to_date = datetime.strptime(end[:10], "%Y-%m-%d").date()
+        elif start:
+            from_date = datetime.strptime(start[:10], "%Y-%m-%d").date()
+            to_date = today_start.date()
+        elif end:
+            from_date = (today_start - timedelta(days=29)).date()
+            to_date = datetime.strptime(end[:10], "%Y-%m-%d").date()
+        else:
+            from_date = (today_start - timedelta(days=29)).date()
+            to_date = today_start.date()
+    except Exception:
+        from_date = (today_start - timedelta(days=29)).date()
+        to_date = today_start.date()
+
+    if from_date > to_date:
+        from_date, to_date = to_date, from_date
+
+    num_days = (to_date - from_date).days + 1
+    num_days = max(1, min(num_days, 366))
+
+    daily_match = {"payment_status": "paid"}
+    daily_match["created_at"] = {
+        "$gte": from_date.isoformat() + "T00:00:00",
+        "$lte": to_date.isoformat() + "T23:59:59"
+    }
+    if tenant_filter:
+        daily_match.update(tenant_filter)
+
     daily = await db.orders.aggregate([
-        {"$match": {"payment_status": "paid", "created_at": {"$gte": last_30_start}}},
+        {"$match": daily_match},
         {"$group": {
             "_id": {"$substr": ["$created_at", 0, 10]},
             "revenue": {"$sum": "$total"},
             "orders": {"$sum": 1},
         }},
         {"$sort": {"_id": 1}},
-    ]).to_list(60)
+    ]).to_list(400)
+
     daily_map = {d["_id"]: {"revenue": round(d["revenue"], 2), "orders": d["orders"]} for d in daily}
     revenue_by_day = []
-    for i in range(30):
-        day = (today_start - timedelta(days=29 - i)).date().isoformat()
+    for i in range(num_days):
+        day = (from_date + timedelta(days=i)).isoformat()
         d = daily_map.get(day, {"revenue": 0, "orders": 0})
         revenue_by_day.append({"date": day, "revenue": d["revenue"], "orders": d["orders"]})
 

@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Send, DollarSign, CheckCircle, FileText, CheckCircle2, Building2, Landmark, Clock, ExternalLink } from 'lucide-react';
+import { Loader2, Send, DollarSign, CheckCircle, FileText, CheckCircle2, Building2, Landmark, Clock, ExternalLink, Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 function monthOptions() {
   const opts = [];
   const now = new Date();
-  for (let i = 0; i < 12; i++) {
+  // Começa em +1 mês (para suportar o ciclo de corte pós dia 26)
+  for (let i = -1; i < 12; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     opts.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
@@ -47,6 +48,29 @@ export default function AdminCompanyBillings() {
       load();
     } catch (err) { toast.error(err.message); }
     finally { setRunning(false); }
+  };
+
+  const exportXLSX = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const path = `/api/admin/convenio/financial-closing/export-xlsx${period ? `?period=${period}` : ''}`;
+      const res = await fetch(path, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Falha ao exportar relatório em Excel');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fechamento_financeira_${period || 'geral'}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Relatório Excel exportado com sucesso!');
+    } catch (err) {
+      toast.error(err.message || 'Erro ao exportar arquivo');
+    }
   };
 
   const approveBilling = async (id) => {
@@ -219,21 +243,27 @@ export default function AdminCompanyBillings() {
                   R$ {(financialData?.grand_total_integral || 0).toFixed(2)}
                 </div>
                 <div className="text-xs text-slate-300 mt-1">
-                  Valor total integral das compras realizadas no ciclo {financialData?.period} ({financialData?.purchases_count || 0} pedidos)
+                  Valor total integral das compras realizadas no período {financialData?.period || period || 'Geral'} ({financialData?.purchases_count || 0} pedidos)
                 </div>
               </div>
-              <div className="text-right text-xs text-slate-300 max-w-xs">
-                Utilizado para operação de factoring/antecipação junto à instituição financeira parceira.
+              <div className="flex flex-col items-end gap-2">
+                <Button onClick={exportXLSX} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow">
+                  <Download className="w-4 h-4 mr-2" /> Exportar XLSX
+                </Button>
+                <div className="text-right text-xs text-slate-300 max-w-xs">
+                  Utilizado para operação de factoring/antecipação junto à instituição financeira parceira.
+                </div>
               </div>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm">
             <table className="w-full text-left text-sm">
-              <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary border-b border-border">
+              <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary border-b border-border font-bold">
                 <tr>
+                  <th className="p-4">Empresa / CNPJ</th>
+                  <th className="p-4">Funcionário / CPF</th>
                   <th className="p-4">Pedido / Data</th>
-                  <th className="p-4">Funcionário / Empresa</th>
                   <th className="p-4 text-center">Parcelas</th>
                   <th className="p-4 text-right">Valor Integral</th>
                   <th className="p-4 text-right">Cronograma</th>
@@ -243,12 +273,16 @@ export default function AdminCompanyBillings() {
                 {(financialData?.purchases || []).map(p => (
                   <tr key={p.purchase_id} className="hover:bg-bg-secondary/30 transition">
                     <td className="p-4">
-                      <div className="font-bold text-txt-primary">#{p.order_id ? p.order_id.slice(-8).toUpperCase() : p.purchase_id}</div>
-                      <div className="text-xs text-txt-secondary">{p.created_at ? p.created_at.slice(0, 10) : ''}</div>
+                      <div className="font-bold text-txt-primary">{p.company_name}</div>
+                      <div className="text-xs text-txt-secondary font-mono">{p.company_cnpj}</div>
                     </td>
                     <td className="p-4">
                       <div className="font-semibold text-txt-primary">{p.employee_name}</div>
-                      <div className="text-xs text-txt-secondary">{p.company_id}</div>
+                      <div className="text-xs text-txt-secondary font-mono">{p.employee_cpf ? `CPF: ${p.employee_cpf}` : ''}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="font-bold text-txt-primary">#{p.order_id ? p.order_id.slice(-8).toUpperCase() : p.purchase_id}</div>
+                      <div className="text-xs text-txt-secondary">{p.created_at ? p.created_at.slice(0, 10) : ''}</div>
                     </td>
                     <td className="p-4 text-center font-semibold">
                       {p.total_installments}x
@@ -269,7 +303,7 @@ export default function AdminCompanyBillings() {
                 ))}
                 {(!financialData?.purchases || financialData.purchases.length === 0) && (
                   <tr>
-                    <td colSpan="5" className="p-8 text-center text-txt-secondary">
+                    <td colSpan="6" className="p-8 text-center text-txt-secondary">
                       Nenhuma compra realizada no período selecionado.
                     </td>
                   </tr>

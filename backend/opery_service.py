@@ -404,18 +404,47 @@ async def aggregate_stats(db, start: Optional[str] = None, end: Optional[str] = 
 
     avg_ticket = round(total_revenue / paid_orders_count, 2) if paid_orders_count else 0.0
 
-    # Serie diaria dos ultimos 30 dias (somente producao / $ne sandbox)
+    # Serie diaria para o periodo selecionado (ou ultimos 30 dias se nao especificado)
     n = datetime.now(timezone.utc)
     today = n.replace(hour=0, minute=0, second=0, microsecond=0).date()
-    last_30_start = (today - timedelta(days=29)).isoformat()
+
+    try:
+        s_parsed = _parse_iso_date(start) if start else None
+        e_parsed = _parse_iso_date(end) if end else None
+        if s_parsed and e_parsed:
+            from_d = datetime.strptime(s_parsed, "%Y-%m-%d").date()
+            to_d = datetime.strptime(e_parsed, "%Y-%m-%d").date()
+        elif s_parsed:
+            from_d = datetime.strptime(s_parsed, "%Y-%m-%d").date()
+            to_d = today
+        elif e_parsed:
+            from_d = today - timedelta(days=29)
+            to_d = datetime.strptime(e_parsed, "%Y-%m-%d").date()
+        else:
+            from_d = today - timedelta(days=29)
+            to_d = today
+    except Exception:
+        from_d = today - timedelta(days=29)
+        to_d = today
+
+    if from_d > to_d:
+        from_d, to_d = to_d, from_d
+
+    num_days = (to_d - from_d).days + 1
+    num_days = max(1, min(num_days, 366))
+
     daily = await db.opery_revenue_snapshots.find(
-        {"date": {"$gte": last_30_start}, "environment": {"$ne": "sandbox"}},
+        {
+            "date": {"$gte": from_d.isoformat(), "$lte": to_d.isoformat()},
+            "environment": {"$ne": "sandbox"}
+        },
         {"_id": 0, "date": 1, "total_revenue": 1, "orders_count": 1},
-    ).sort("date", 1).to_list(60)
+    ).sort("date", 1).to_list(400)
+
     daily_map = {d["date"]: {"revenue": round(d.get("total_revenue") or 0, 2), "orders": int(d.get("orders_count") or 0)} for d in daily}
     revenue_by_day = []
-    for i in range(30):
-        day = (today - timedelta(days=29 - i)).isoformat()
+    for i in range(num_days):
+        day = (from_d + timedelta(days=i)).isoformat()
         d = daily_map.get(day, {"revenue": 0, "orders": 0})
         revenue_by_day.append({"date": day, "revenue": d["revenue"], "orders": d["orders"]})
 

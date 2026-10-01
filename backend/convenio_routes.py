@@ -282,6 +282,11 @@ async def update_company(request: Request, company_id: str, data: CompanyUpdate,
         upd["cnpj_digits"] = _digits(upd["cnpj"])
     upd["updated_at"] = _now_iso()
     await db.companies.update_one({"company_id": company_id}, {"$set": upd})
+    if "email" in upd and upd["email"]:
+        await db.company_billings.update_many(
+            {"company_id": company_id},
+            {"$set": {"company_email": upd["email"]}}
+        )
     return await db.companies.find_one({"company_id": company_id}, {"_id": 0})
 
 
@@ -1561,14 +1566,11 @@ def _group_charges_by_employee(charges: List[Dict]) -> List[Dict]:
 
 @router.post("/admin/convenio/run-monthly-closing")
 async def admin_run_closing(request: Request, body: Optional[Dict] = None, user: dict = Depends(_admin_user_lazy)):
-    """Fecha manualmente um periodo. Body: {period: 'YYYY-MM'} (default: mes anterior)."""
+    """Fecha manualmente um periodo. Body: {period: 'YYYY-MM'} (default: ciclo de fechamento atual)."""
     db = request.app.db
     period = (body or {}).get("period")
     if not period:
-        # mes anterior
-        now = datetime.now(timezone.utc)
-        prev = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-        period = prev
+        period = _get_cutoff_period()
     result = await process_monthly_closing(db, period)
     return {"period": period, **result}
 
@@ -1581,6 +1583,16 @@ async def admin_list_billings(request: Request, period: Optional[str] = None, co
     if period: q["period_month"] = period
     if company_id: q["company_id"] = company_id
     items = await db.company_billings.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    # Sincroniza emails mais recentes das empresas
+    companies = await db.companies.find({}, {"_id": 0, "company_id": 1, "email": 1}).to_list(1000)
+    comp_map = {c["company_id"]: c.get("email") for c in companies if c.get("email")}
+
+    for it in items:
+        cid = it.get("company_id")
+        if cid in comp_map and comp_map[cid]:
+            it["company_email"] = comp_map[cid]
+
     return {"billings": items}
 
 
@@ -1631,25 +1643,100 @@ async def admin_billing_resend_email(request: Request, billing_id: str, user: di
     import email_service
     db = request.app.db
     b = await db.company_billings.find_one({"billing_id": billing_id}, {"_id": 0})
-    if not b or not b.get("company_email"):
-        raise HTTPException(status_code=404, detail="Faturamento ou email nao encontrado")
-    rows = "".join(
-        f"<tr><td style='padding:6px;border:1px solid #ddd'>{e['employee_name']}</td>"
-        f"<td style='padding:6px;border:1px solid #ddd'>{len(e.get('orders', []))}</td>"
-        f"<td style='padding:6px;border:1px solid #ddd;text-align:right'>R$ {e['total']:.2f}</td></tr>"
-        for e in b.get("employees", [])
-    )
+    if not b:
+        raise HTTPException(status_code=404, detail="Faturamento não encontrado")
+
+    comp = await db.companies.find_one({"company_id": b.get("company_id")}, {"_id": 0, "email": 1, "name": 1})
+    target_email = (comp.get("email") if comp and comp.get("email") else b.get("company_email") or "").strip()
+
+    if not target_email:
+        raise HTTPException(status_code=404, detail="Email da empresa nao encontrado")
+
+    if target_email != b.get("company_email"):
+        await db.company_billings.update_one({"billing_id": billing_id}, {"$set": {"company_email": target_email}})
+        b["company_email"] = target_email
+
+    from server import _get_site_settings
+    settings = await _get_site_settings(db)
+    brand_color = (settings.get("brand_primary_color") or "#E8731A").strip()
+
+    rows_html = ""
+    for idx, e in enumerate(b.get("employees", [])):
+        bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
+        emp_name = e.get("employee_name", "Funcionário")
+        order_cnt = len(e.get("orders", []))
+        total_val = float(e.get("total", 0))
+        rows_html += f"""
+        <tr style="background-color: {bg}; font-size: 14px; color: #334155;">
+            <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">{emp_name}</td>
+            <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; text-align: center;">{order_cnt} pedido(s)</td>
+            <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 700; color: #0f172a;">R$ {total_val:.2f}</td>
+        </tr>
+        """
+
     pay_link = b.get("payment_url")
-    pay_html = f"<p><a href='{pay_link}' style='background:#ea580c;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px'>Pagar via Mercado Pago</a></p>" if pay_link else ""
-    subject = f"Fechamento Convenio {b['period_month']} · R$ {b['total_amount']:.2f}"
-    html = f"""<h2>Fechamento mensal — {b['period_month']}</h2>
-<p>Empresa: <b>{b['company_name']}</b></p>
-<p>Total: <b>R$ {b['total_amount']:.2f}</b> em {b['charges_count']} cobranças.</p>
-{pay_html}
-<table style='border-collapse:collapse;margin-top:8px'>
-<thead><tr><th style='padding:6px;background:#f4f4f5;border:1px solid #ddd'>Funcionário</th><th style='padding:6px;background:#f4f4f5;border:1px solid #ddd'>Pedidos</th><th style='padding:6px;background:#f4f4f5;border:1px solid #ddd'>Total</th></tr></thead>
-<tbody>{rows}</tbody></table>"""
-    await email_service.send_email(db, b["company_email"], subject, html)
+    pay_btn_html = ""
+    if pay_link:
+        pay_btn_html = f"""
+        <div style="text-align: center; margin: 28px 0 24px 0;">
+            <a href="{pay_link}" target="_blank" style="background-color: {brand_color}; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                💳 Efetuar Pagamento da Fatura
+            </a>
+            <div style="margin-top: 8px; font-size: 12px; color: #64748b;">Link de pagamento seguro</div>
+        </div>
+        """
+
+    inner_html = f"""
+    <div style="padding: 24px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+        <!-- Card de Resumo -->
+        <div style="background-color: #0f172a; color: #ffffff; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+            <div style="text-transform: uppercase; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #34d399; margin-bottom: 6px;">
+                Faturamento Convênio Empresarial
+            </div>
+            <div style="font-size: 24px; font-weight: 800; margin-bottom: 4px;">
+                {b.get('company_name', 'Empresa')}
+            </div>
+            <div style="font-size: 13px; color: #94a3b8; margin-bottom: 16px;">
+                Ciclo de Fechamento: <strong style="color: #ffffff;">{b.get('period_month')}</strong> · ID Fatura: <span style="font-family: monospace;">{b.get('billing_id')}</span>
+            </div>
+            <div style="border-top: 1px solid #334155; padding-top: 16px; margin-top: 16px;">
+                <div style="font-size: 12px; color: #94a3b8;">Valor Total Consolidado</div>
+                <div style="font-size: 28px; font-weight: 900; color: #34d399;">R$ {float(b.get('total_amount', 0)):.2f}</div>
+            </div>
+        </div>
+
+        {pay_btn_html}
+
+        <!-- Detalhamento por Funcionário -->
+        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b; margin: 24px 0 12px 0;">
+            📋 Detalhamento dos Consumos por Funcionário
+        </h3>
+
+        <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 24px;">
+            <table width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
+                <thead>
+                    <tr style="background-color: #f8fafc; font-size: 12px; text-transform: uppercase; color: #64748b; font-weight: 700;">
+                        <th style="padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0;">Funcionário</th>
+                        <th style="padding: 12px 16px; text-align: center; border-bottom: 1px solid #e2e8f0;">Compras</th>
+                        <th style="padding: 12px 16px; text-align: right; border-bottom: 1px solid #e2e8f0;">Total Faturado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Rodapé Informativo -->
+        <div style="background-color: #f8fafc; border-radius: 8px; padding: 16px; font-size: 12px; color: #64748b; line-height: 1.5; border: 1px solid #e2e8f0;">
+            📌 <strong>Instruções de Pagamento:</strong> O valor acima corresponde ao fechamento do convênio referente ao ciclo {b.get('period_month')}. Caso necessite de segunda via ou suporte financeiro, entre em contato conosco.
+        </div>
+    </div>
+    """
+
+    full_html = await email_service.wrap_email_html(db, inner_html)
+    subject = f"Fatura Convênio - {b.get('company_name')} ({b.get('period_month')}) · R$ {float(b.get('total_amount', 0)):.2f}"
+    await email_service.send_email(db, b["company_email"], subject, full_html)
     return {"ok": True, "to": b["company_email"]}
 
 
@@ -1687,22 +1774,11 @@ async def admin_approve_company_billing(request: Request, billing_id: str, user:
     }
 
 
-@router.get("/admin/convenio/financial-closing")
-async def admin_financial_closing_report(
-    request: Request,
-    period: Optional[str] = None,
-    company_id: Optional[str] = None,
-    user: dict = Depends(_admin_user_lazy)
-):
-    """Relatório do Fechamento para Financeira (Antecipação / Factoring).
-    Exibe todas as compras realizadas no período pelo SEU VALOR INTEGRAL (total),
-    com o detalhamento de todas as parcelas e datas de vencimento.
-    """
-    db = request.app.db
-    if not period:
-        period = _get_cutoff_period()
-
-    q: Dict[str, Any] = {"cutoff_cycle": period}
+async def _get_financial_closing_data(db, period: Optional[str] = None, company_id: Optional[str] = None) -> Dict:
+    """Helper para buscar e estruturar compras do fechamento para a financeira."""
+    q: Dict[str, Any] = {}
+    if period:
+        q["created_at"] = {"$regex": f"^{period}"}
     if company_id:
         q["company_id"] = company_id
 
@@ -1718,10 +1794,11 @@ async def admin_financial_closing_report(
                 "company_id": ch.get("company_id"),
                 "employee_id": ch.get("employee_id"),
                 "employee_name": ch.get("employee_name"),
+                "user_id": ch.get("user_id"),
                 "purchase_total": float(ch.get("purchase_total") or ch.get("amount", 0)),
                 "total_installments": int(ch.get("total_installments", 1)),
                 "created_at": ch.get("created_at"),
-                "cutoff_cycle": period,
+                "cutoff_cycle": ch.get("cutoff_cycle") or period,
                 "installments_schedule": [],
             }
         purchases[pid]["installments_schedule"].append({
@@ -1733,8 +1810,44 @@ async def admin_financial_closing_report(
         })
 
     purch_list = list(purchases.values())
+
+    # Enriquecimento com Empresa (Nome, CNPJ) e Funcionário (Nome, CPF)
+    companies_cache: Dict[str, Dict] = {}
+    employees_cache: Dict[str, Dict] = {}
+    users_cache: Dict[str, Dict] = {}
+
     for p in purch_list:
         p["installments_schedule"].sort(key=lambda x: x["installment_number"])
+
+        cid = p.get("company_id")
+        if cid and cid not in companies_cache:
+            comp = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1, "cnpj": 1, "cnpj_digits": 1})
+            companies_cache[cid] = comp or {}
+        comp = companies_cache.get(cid, {})
+        p["company_name"] = comp.get("name") or cid or "N/A"
+        p["company_cnpj"] = comp.get("cnpj") or comp.get("cnpj_digits") or "N/A"
+
+        eid = p.get("employee_id")
+        if eid and eid not in employees_cache:
+            emp = await db.company_employees.find_one({"employee_id": eid}, {"_id": 0, "name": 1, "cpf": 1, "cpf_digits": 1, "user_id": 1})
+            employees_cache[eid] = emp or {}
+        emp = employees_cache.get(eid, {})
+
+        uid = emp.get("user_id") or p.get("user_id")
+        if uid and uid not in users_cache:
+            usr = await db.users.find_one({"user_id": uid}, {"_id": 0, "name": 1, "cpf": 1, "cpf_digits": 1})
+            users_cache[uid] = usr or {}
+        usr = users_cache.get(uid, {})
+
+        p["employee_name"] = emp.get("name") or usr.get("name") or p.get("employee_name") or "N/A"
+        p["employee_cpf"] = emp.get("cpf") or emp.get("cpf_digits") or usr.get("cpf") or usr.get("cpf_digits") or "N/A"
+
+        parts = []
+        for s in p["installments_schedule"]:
+            amt = s.get("amount", 0.0)
+            m = s.get("due_period_month", "")
+            parts.append(f"{s['installment_number']}/{p['total_installments']} - R$ {amt:.2f} ({m})")
+        p["cronograma_text"] = " | ".join(parts)
 
     grand_total_integral = round(sum(p["purchase_total"] for p in purch_list), 2)
 
@@ -1744,6 +1857,71 @@ async def admin_financial_closing_report(
         "grand_total_integral": grand_total_integral,
         "purchases": purch_list,
     }
+
+
+@router.get("/admin/convenio/financial-closing")
+async def admin_financial_closing_report(
+    request: Request,
+    period: Optional[str] = None,
+    company_id: Optional[str] = None,
+    user: dict = Depends(_admin_user_lazy)
+):
+    """Relatório do Fechamento para Financeira (Antecipação / Factoring).
+    Exibe todas as compras realizadas no período pelo SEU VALOR INTEGRAL (total),
+    com o detalhamento de todas as parcelas, datas de vencimento, CNPJ da empresa e CPF do funcionário.
+    """
+    db = request.app.db
+    return await _get_financial_closing_data(db, period, company_id)
+
+
+@router.get("/admin/convenio/financial-closing/export-xlsx")
+async def admin_financial_closing_export_xlsx(
+    request: Request,
+    period: Optional[str] = None,
+    company_id: Optional[str] = None,
+    user: dict = Depends(_admin_user_lazy)
+):
+    """Exporta o Relatório do Fechamento para Financeira em formato XLSX."""
+    db = request.app.db
+    data = await _get_financial_closing_data(db, period, company_id)
+    purch_list = data["purchases"]
+
+    rows = []
+    for p in purch_list:
+        rows.append({
+            "EMPRESA": p.get("company_name", ""),
+            "CNPJ DA EMPRESA": p.get("company_cnpj", ""),
+            "FUNCIONARIO": p.get("employee_name", ""),
+            "CPF DO FUNCIONARIO": p.get("employee_cpf", ""),
+            "PARCELAS": f"{p.get('total_installments', 1)}x",
+            "VALOR INTEGRAL": f"R$ {p.get('purchase_total', 0):.2f}",
+            "CRONOGRAMA": p.get("cronograma_text", ""),
+        })
+
+    if not rows:
+        rows = [{
+            "EMPRESA": "",
+            "CNPJ DA EMPRESA": "",
+            "FUNCIONARIO": "",
+            "CPF DO FUNCIONARIO": "",
+            "PARCELAS": "",
+            "VALOR INTEGRAL": "",
+            "CRONOGRAMA": "",
+        }]
+
+    df = pd.DataFrame(rows)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Fechamento Financeira", index=False)
+    output.seek(0)
+
+    filename = f"fechamento_financeira_{period or 'geral'}.xlsx"
+    return Response(
+        content=output.read(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.put("/company/employees/{employee_id}/limit")

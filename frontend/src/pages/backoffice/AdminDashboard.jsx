@@ -73,16 +73,20 @@ export default function AdminDashboard() {
   }
   if (!data) return null;
 
-  const hasFilter = !!(start || end);
-  const clearFilter = () => { setStart(''); setEnd(''); load('', ''); };
-  const setQuickRange = (days) => {
-    const today = new Date();
-    const from = new Date();
-    from.setDate(today.getDate() - (days - 1));
-    const e = today.toISOString().slice(0, 10);
-    const s = from.toISOString().slice(0, 10);
-    setStart(s); setEnd(e); load(s, e);
-  };
+  const periodTitleText = useMemo(() => {
+    if (start && end) {
+      if (start.slice(0, 7) === end.slice(0, 7) && start.endsWith('-01')) {
+        const [yr, mo] = start.split('-');
+        const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+        const mName = monthNames[parseInt(mo, 10) - 1];
+        if (mName) return `${mName} de ${yr}`;
+      }
+      return `${start.slice(8,10)}/${start.slice(5,7)} a ${end.slice(8,10)}/${end.slice(5,7)}`;
+    }
+    if (start) return `a partir de ${start.slice(8,10)}/${start.slice(5,7)}`;
+    if (end) return `até ${end.slice(8,10)}/${end.slice(5,7)}`;
+    return 'mês atual';
+  }, [start, end]);
 
   return (
     <div data-testid="admin-dashboard" className="space-y-5">
@@ -135,14 +139,15 @@ export default function AdminDashboard() {
         })}
       </div>
 
-      {tab === 'online' && <OnlineTab data={data} />}
-      {tab === 'presencial' && <PresencialTab data={operyData} loading={loading} />}
+      {tab === 'online' && <OnlineTab data={data} periodTitleText={periodTitleText} />}
+      {tab === 'presencial' && <PresencialTab data={operyData} loading={loading} periodTitleText={periodTitleText} />}
       {tab === 'total' && (
         <TotalTab
           online={data}
           opery={operyData}
           chartMode={chartMode}
           onChartModeChange={setChartMode}
+          periodTitleText={periodTitleText}
         />
       )}
     </div>
@@ -151,7 +156,7 @@ export default function AdminDashboard() {
 
 /* ============ ABA VENDAS ONLINE ============ */
 
-function OnlineTab({ data }) {
+function OnlineTab({ data, periodTitleText }) {
   const wc = data.weekly_comparison || {};
   return (
     <div className="space-y-5">
@@ -193,7 +198,7 @@ function OnlineTab({ data }) {
         <div className="bg-white rounded-2xl border border-border p-5 lg:col-span-2" data-testid="revenue-chart-card">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="font-heading font-black text-lg">Faturamento (últimos 30 dias)</h2>
+              <h2 className="font-heading font-black text-lg">Faturamento ({periodTitleText})</h2>
               <p className="text-xs text-txt-secondary">Receita líquida dos pedidos pagos por dia</p>
             </div>
             <div className="text-right">
@@ -221,7 +226,7 @@ function OnlineTab({ data }) {
 
 /* ============ ABA VENDAS PRESENCIAIS (Opery) ============ */
 
-function PresencialTab({ data, loading }) {
+function PresencialTab({ data, loading, periodTitleText }) {
   if (loading || !data) {
     return (
       <div className="flex items-center justify-center py-16" data-testid="opery-loading">
@@ -281,7 +286,7 @@ function PresencialTab({ data, loading }) {
       <div className="bg-white rounded-2xl border border-border p-5" data-testid="opery-revenue-chart">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="font-heading font-black text-lg">Faturamento presencial (últimos 30 dias)</h2>
+            <h2 className="font-heading font-black text-lg">Faturamento presencial ({periodTitleText})</h2>
             <p className="text-xs text-txt-secondary">Snapshots diários enviados pela Opery</p>
           </div>
         </div>
@@ -293,7 +298,7 @@ function PresencialTab({ data, loading }) {
 
 /* ============ ABA TOTAL CONSOLIDADO ============ */
 
-function TotalTab({ online, opery, chartMode, onChartModeChange }) {
+function TotalTab({ online, opery, chartMode, onChartModeChange, periodTitleText }) {
   const opRev = opery?.total_revenue || 0;
   const opOrders = opery?.orders_count || 0;
   const opPaidCount = opery?.paid_orders_count || 0;
@@ -355,7 +360,7 @@ function TotalTab({ online, opery, chartMode, onChartModeChange }) {
       <div className="bg-white rounded-2xl border border-border p-5" data-testid="total-chart-card">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div>
-            <h2 className="font-heading font-black text-lg">Faturamento consolidado (últimos 30 dias)</h2>
+            <h2 className="font-heading font-black text-lg">Faturamento consolidado ({periodTitleText})</h2>
             <p className="text-xs text-txt-secondary">Comparativo Online × Presencial</p>
           </div>
           <div className="inline-flex bg-bg-secondary rounded-lg p-0.5 border border-border" data-testid="chart-mode-toggle">
