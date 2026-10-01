@@ -246,15 +246,6 @@ function PresencialTab({ data, loading, periodTitleText }) {
     );
   }
   const hasData = (data.orders_count || 0) > 0 || (data.total_revenue || 0) > 0;
-  const totalRevenue = Number(data.total_revenue) || 0;
-  const totalOrdersValue = Number(data.total_orders_value) || 0;
-
-  // Arredonda para 2 casas pra evitar erros tipo 0.1 + 0.2 = 0.30000000000000004
-  const unpaidValue = Math.max(
-    0,
-    Math.round((totalOrdersValue - totalRevenue) * 100) / 100
-  );
-
 
   return (
     <div className="space-y-5" data-testid="presencial-tab">
@@ -282,9 +273,9 @@ function PresencialTab({ data, loading, periodTitleText }) {
         />
         <KpiBig
           icon={ShoppingBag}
-		  label="Valor não pago"
-		  value={formatCurrency(unpaidValue)}
-		  hint="pedidos pendentes"
+          label="Valor total pedidos"
+          value={formatCurrency(data.total_orders_value || 0)}
+          hint="pagos + pendentes"
           testId="opery-kpi-total-value"
         />
         <KpiBig
