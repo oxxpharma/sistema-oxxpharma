@@ -7,12 +7,13 @@ import { useReferral } from '../../contexts/RefContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import AddressForm from '../../components/store/AddressForm';
-import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet, Store } from 'lucide-react';
+import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet, Store, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
 import FreeShippingProgress from '../../components/store/FreeShippingProgress';
 import { evaluateFreeShipping } from '../../lib/freeShipping';
+import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
 
 const emptyAddr = { label: 'Casa', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zip_code: '', is_default: true };
 const PICKUP_KEY = 'oxx_pickup_v1';
@@ -45,6 +46,8 @@ export default function CheckoutPage() {
   const [payrollAccepted, setPayrollAccepted] = useState(false);
   const [payrollEligibility, setPayrollEligibility] = useState(null);
   const [payrollInstallments, setPayrollInstallments] = useState(1);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [myTermsAudit, setMyTermsAudit] = useState(null);
   // Iter 66.3: bonus de garantia Ozoxx
   const [bonusInfo, setBonusInfo] = useState(null);
   const [bonusUnitsToUse, setBonusUnitsToUse] = useState(0);
@@ -539,16 +542,6 @@ export default function CheckoutPage() {
                     </select>
                   </div>
 
-                  {/* Caixa de Exibição dos Termos de Adesão com Variáveis Preenchidas */}
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] font-bold text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
-                      <FileText className="w-4 h-4 text-emerald-600" /> Termo de Adesão e Autorização de Desconto
-                    </div>
-                    <div className="bg-white border border-emerald-300 rounded-lg p-3 max-h-48 overflow-y-auto text-xs font-mono whitespace-pre-wrap leading-relaxed text-slate-800 shadow-inner select-text" data-testid="payroll-terms-box">
-                      {getRenderedTermsText()}
-                    </div>
-                  </div>
-
                   {/* Status & Validação */}
                   {payrollEligibility && !payrollEligibility.eligible ? (
                     <div className="text-xs text-red-700 font-semibold bg-red-50 p-2.5 rounded-lg border border-red-200 flex items-center gap-2">
@@ -570,7 +563,28 @@ export default function CheckoutPage() {
                         data-testid="payroll-accept"
                       />
                       <span className="text-slate-800 font-medium leading-normal">
-                        Li integralmente, concordo e <b>AUTORIZO EXPRESSAMENTE</b> o desconto em folha de <b>{payrollInstallments}x de {formatCurrency(total / payrollInstallments)}</b> (total: {formatCurrency(total)}) pela empresa <b>{employeeCtx.company_name}</b>, conforme o Termo de Adesão acima.
+                        Declaro que concordo e aceito os{' '}
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            if (!myTermsAudit) {
+                              try {
+                                const res = await api.get('/api/convenio/my-terms');
+                                setMyTermsAudit(res.payroll_acceptance_audit);
+                              } catch {
+                                setMyTermsAudit(employeeCtx?.payroll_acceptance_audit || null);
+                              }
+                            }
+                            setShowTermsModal(true);
+                          }}
+                          className="font-bold text-brand-main underline hover:text-brand-hover inline-flex items-center gap-1"
+                          data-testid="view-terms-link"
+                        >
+                          Termos e Condições
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>{' '}
+                        realizados no meu cadastro e autorizo o desconto em folha de <b>{payrollInstallments}x de {formatCurrency(total / payrollInstallments)}</b> (total: {formatCurrency(total)}) pela empresa <b>{employeeCtx.company_name}</b>.
                       </span>
                     </label>
                   )}
@@ -720,6 +734,12 @@ export default function CheckoutPage() {
           </div>
         </div>
       </div>
+
+      <PayrollAcceptanceModal
+        open={showTermsModal}
+        onClose={() => setShowTermsModal(false)}
+        audit={myTermsAudit || employeeCtx?.payroll_acceptance_audit}
+      />
     </div>
   );
 }

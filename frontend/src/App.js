@@ -31,6 +31,7 @@ import MyAccount from './pages/store/MyAccount';
 import MyPoints from './pages/store/MyPoints';
 import MyConsignmentCardPage from './pages/store/MyConsignmentCardPage';
 import SearchPage from './pages/store/SearchPage';
+import CompleteEmployeeRegistration from './pages/public/CompleteEmployeeRegistration';
 
 // Auth
 import LoginPage from './pages/auth/LoginPage';
@@ -151,6 +152,7 @@ function AppRoutes() {
       {/* AUTH */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/cadastrar" element={<RegisterPage />} />
+      <Route path="/completar-cadastro-convenio" element={<CompleteEmployeeRegistration />} />
       <Route path="/esqueci-senha" element={<ForgotPasswordPage mode="reset" />} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage mode="reset" />} />
       <Route path="/primeiro-acesso" element={<ResetPasswordPage mode="first_access" />} />

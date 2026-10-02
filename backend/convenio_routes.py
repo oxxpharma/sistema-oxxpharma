@@ -207,7 +207,97 @@ def parse_user_agent_info(ua_string: str) -> Dict[str, str]:
     }
 
 
+def _gen_equipment_mac_fingerprint(client_ip: str, user_agent: str, screen_res: str, platform: str, timezone_str: str) -> str:
+    raw = f"{client_ip}|{user_agent}|{screen_res}|{platform}|{timezone_str}"
+    h = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    mac = ":".join(h[i:i+2].upper() for i in range(0, 12, 2))
+    return f"MAC-{mac} (Eq. #{h[:8].upper()})"
+
+
+async def _send_employee_invite_email(db, employee_doc: Dict, company_name: str):
+    """Envia o e-mail de convite para o funcionário finalizar seu cadastro e aceitar os termos do convênio."""
+    import email_service
+    from server import _get_site_settings
+    settings = await _get_site_settings(db)
+    store_name = (settings.get("store_name") or "OxxPharma").strip()
+
+    token = employee_doc.get("registration_token")
+    email = employee_doc.get("email")
+    name = employee_doc.get("name") or "Funcionário"
+    matricula = employee_doc.get("registration_number") or employee_doc.get("matricula") or "N/I"
+
+    app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or "http://localhost:3000"
+    app_url = app_url.rstrip("/")
+    invite_link = f"{app_url}/completar-cadastro-convenio?token={token}"
+
+    subject = f"Convênio {store_name} - Complete seu cadastro ({company_name})"
+
+    inner_html = f"""
+    <div style="font-family: Arial, sans-serif; padding: 24px; color: #333333; line-height: 1.6;">
+        <h2 style="color: #008069; margin-top: 0;">Bem-vindo ao Convênio {store_name}!</h2>
+        <p>Olá, <strong>{name}</strong>!</p>
+        <p>A empresa <strong>{company_name}</strong> fechou uma parceria com a <strong>{store_name}</strong> para disponibilizar benefícios exclusivos e a opção de pagamento via <strong>Desconto em Folha de Pagamento</strong>.</p>
+        <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 0 0 8px 0; font-size: 14px; color: #166534;"><strong>Sua Identificação no Convênio:</strong></p>
+            <p style="margin: 0; font-size: 13px; color: #15803D;">• <strong>Empresa:</strong> {company_name}<br>• <strong>Matrícula Funcional:</strong> {matricula}</p>
+        </div>
+        <p>Para ativar sua conta e liberar o acesso às compras com desconto, clique no botão abaixo para preencher os dados finais do seu cadastro e aceitar o Termo de Adesão:</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{invite_link}" style="background-color: #008069; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;">
+                Concluir Meu Cadastro e Aceitar Termos
+            </a>
+        </div>
+        <p style="font-size: 12px; color: #666666;">Se o botão não funcionar, copie e cole o link no seu navegador:<br>
+        <a href="{invite_link}" style="color: #008069; word-break: break-all;">{invite_link}</a></p>
+        <hr style="border: None; border-top: 1px solid #EEEEEE; margin: 24px 0;" />
+        <p style="font-size: 11px; color: #999999; text-align: center;">Esta é uma mensagem automática enviada pelo sistema de convênios {store_name}.</p>
+    </div>
+    """
+    wrapped_html = await email_service.wrap_email_html(db, inner_html)
+    return await email_service.send_email(db, email, subject, wrapped_html)
+
+
+async def _send_verification_code_email(db, email: str, name: str, code: str):
+    """Envia o e-mail com o código de 6 dígitos para validação da conta."""
+    import email_service
+    from server import _get_site_settings
+    settings = await _get_site_settings(db)
+    store_name = (settings.get("store_name") or "OxxPharma").strip()
+
+    subject = f"{code} é o seu código de verificação - {store_name}"
+
+    inner_html = f"""
+    <div style="font-family: Arial, sans-serif; padding: 24px; color: #333333; line-height: 1.6;">
+        <h2 style="color: #008069; margin-top: 0;">Código de Verificação de Conta</h2>
+        <p>Olá, <strong>{name}</strong>!</p>
+        <p>Você concluiu o preenchimento do seu cadastro e aceite dos Termos do Convênio na <strong>{store_name}</strong>.</p>
+        <p>Para confirmar seu e-mail e ativar a sua conta, utilize o código de 6 dígitos abaixo:</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #008069; background-color: #F0FDF4; border: 2px dashed #008069; padding: 12px 24px; border-radius: 12px; display: inline-block;">
+                {code}
+            </span>
+        </div>
+        <p style="font-size: 13px; color: #666666;">Este código é válido por 15 minutos. Caso não tenha solicitado este cadastro, por favor desconsidere este e-mail.</p>
+    </div>
+    """
+    wrapped_html = await email_service.wrap_email_html(db, inner_html)
+    return await email_service.send_email(db, email, subject, wrapped_html)
+
+
 # ==================== MODELS ====================
+
+class CompleteRegistrationPayload(BaseModel):
+    token: str
+    cpf: str
+    phone: str
+    address: Dict[str, Any]
+    password: str
+    audit_metadata: Optional[Dict[str, Any]] = None
+
+
+class CodeVerifyPayload(BaseModel):
+    token: str
+    code: str
 
 class CompanyRepresentativeCreate(BaseModel):
     name: str
@@ -675,41 +765,24 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
     payload["registration_number"] = reg_num
     payload["matricula"] = reg_num
 
-    # Dedupe dentro da propria empresa por email ou CPF
+    # Dedupe dentro da propria empresa por email
     q_dup: Dict[str, Any] = {"company_id": cid, "email": payload["email"]}
     if payload["cpf_digits"]:
         q_dup = {"company_id": cid, "$or": [{"email": payload["email"]}, {"cpf_digits": payload["cpf_digits"]}]}
 
     dup = await db.company_employees.find_one(q_dup, {"_id": 0})
     if dup:
-        raise HTTPException(status_code=409, detail="Funcionário com este E-mail ou CPF já está cadastrado nesta empresa.")
+        raise HTTPException(status_code=409, detail="Funcionário com este E-mail já está cadastrado nesta empresa.")
 
     payload["company_id"] = cid
-
     company_doc = await db.companies.find_one({"company_id": cid}, {"_id": 0})
     company_rep_id = company_doc.get("representative_user_id") if company_doc else None
+    company_name = company_doc.get("name") if company_doc else "Empresa Credenciada"
 
-    # Procura se existe usuario cadastrado no sistema (db.users) por email ou CPF
-    linked_user = None
-    if payload["email"]:
-        linked_user = await db.users.find_one({"email": payload["email"]}, {"_id": 0})
-    if not linked_user and payload["cpf_digits"]:
-        linked_user = await db.users.find_one({"cpf_digits": payload["cpf_digits"]}, {"_id": 0})
+    reg_token = f"inv_{uuid.uuid4().hex}"
 
-    # Se existe usuario cadastrado no sistema e nao houve confirmacao prévia do vinculo:
-    if linked_user and not confirm_link:
-        return {
-            "needs_confirmation": True,
-            "existing_user": {
-                "user_id": linked_user["user_id"],
-                "name": linked_user.get("name"),
-                "email": linked_user.get("email"),
-                "cpf_digits": linked_user.get("cpf_digits"),
-            },
-            "message": f"Encontramos o usuário {linked_user.get('name')} ({linked_user.get('email')}) cadastrado no sistema. Deseja vincular esta conta existente como funcionário da empresa?"
-        }
+    linked_user = await db.users.find_one({"email": payload["email"]}, {"_id": 0})
 
-    # Se NAO existe usuario, cria a conta no sistema (db.users) com as condicoes da empresa
     if not linked_user:
         import bcrypt
         pwd_hash = bcrypt.hashpw("123456".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -718,12 +791,14 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
             "user_id": emp_user_id,
             "name": payload["name"],
             "email": payload["email"],
-            "cpf_digits": payload.get("cpf_digits"),
-            "phone_digits": payload.get("phone_digits"),
             "registration_number": reg_num,
             "matricula": reg_num,
+            "registration_token": reg_token,
             "password_hash": pwd_hash,
             "role": "customer",
+            "active": False,
+            "is_email_verified": False,
+            "completion_status": "pending_data",
             "networks": ["network_2"],
             "network_type": "network_2",
             "sponsor_id": company_rep_id,
@@ -734,30 +809,347 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
         await db.users.insert_one(user_doc)
         payload["user_id"] = emp_user_id
     else:
-        # Vincula a conta do usuario existente
         payload["user_id"] = linked_user["user_id"]
-        upd_u = {}
+        upd_u = {
+            "registration_token": reg_token,
+            "registration_number": reg_num,
+            "matricula": reg_num,
+            "completion_status": "pending_data" if not linked_user.get("terms_accepted") else "completed"
+        }
         if not linked_user.get("sponsor_id") and company_rep_id:
             upd_u["sponsor_id"] = company_rep_id
             upd_u["sponsor_id_net2"] = company_rep_id
-        if not linked_user.get("cpf_digits") and payload.get("cpf_digits"):
-            upd_u["cpf_digits"] = payload["cpf_digits"]
-        if reg_num:
-            upd_u["registration_number"] = reg_num
-            upd_u["matricula"] = reg_num
-        current_nets = linked_user.get("networks") or []
-        if "network_2" not in current_nets:
-            upd_u["networks"] = list(set(current_nets + ["network_2"]))
-        if upd_u:
-            await db.users.update_one({"user_id": linked_user["user_id"]}, {"$set": upd_u})
+        await db.users.update_one({"user_id": linked_user["user_id"]}, {"$set": upd_u})
 
-    doc = {"employee_id": _gen_id("emp_"), **payload, "active": True, "created_at": _now_iso()}
+    doc = {
+        "employee_id": _gen_id("emp_"),
+        **payload,
+        "registration_token": reg_token,
+        "status": "invited",
+        "active": False,
+        "created_at": _now_iso()
+    }
     await db.company_employees.insert_one(doc)
     res = await db.company_employees.find_one({"employee_id": doc["employee_id"]}, {"_id": 0})
-    res["needs_confirmation"] = False
-    res["user_created"] = not bool(linked_user)
-    res["user_linked"] = bool(linked_user)
+
+    # Envia o e-mail de convite
+    try:
+        await _send_employee_invite_email(db, res, company_name)
+        res["invite_sent"] = True
+    except Exception as e:
+        logger.exception(f"Erro ao enviar convite: {e}")
+        res["invite_sent"] = False
+
+    res["message"] = f"Funcionário cadastrado! Convite enviado por e-mail para {payload['email']}."
     return res
+
+
+@router.post("/company/employees/{employee_id}/resend-invite")
+async def resend_employee_invite(request: Request, employee_id: str, user: dict = Depends(_company_admin_lazy)):
+    db = request.app.db
+    emp = await db.company_employees.find_one({"employee_id": employee_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Funcionário não encontrado")
+    
+    reg_token = emp.get("registration_token")
+    if not reg_token:
+        reg_token = f"inv_{uuid.uuid4().hex}"
+        await db.company_employees.update_one({"employee_id": employee_id}, {"$set": {"registration_token": reg_token}})
+        if emp.get("user_id"):
+            await db.users.update_one({"user_id": emp["user_id"]}, {"$set": {"registration_token": reg_token}})
+        emp["registration_token"] = reg_token
+    
+    company = await db.companies.find_one({"company_id": emp["company_id"]}, {"_id": 0})
+    company_name = company.get("name") if company else "Empresa Credenciada"
+    
+    await _send_employee_invite_email(db, emp, company_name)
+    return {"message": f"Convite reenviado com sucesso para {emp['email']}!"}
+
+
+@router.get("/convenio/invite-info")
+async def get_invite_info(request: Request, token: str = Query(...)):
+    db = request.app.db
+    if not token:
+        raise HTTPException(status_code=400, detail="Token obrigatório")
+    
+    emp = await db.company_employees.find_one({"registration_token": token}, {"_id": 0})
+    user_doc = await db.users.find_one({"registration_token": token}, {"_id": 0})
+    
+    if not emp and not user_doc:
+        raise HTTPException(status_code=404, detail="Convite inválido ou expirado")
+    
+    company_id = emp.get("company_id") if emp else (user_doc.get("company_admin_of") if user_doc else None)
+    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0}) if company_id else {}
+    
+    return {
+        "token": token,
+        "name": (emp.get("name") if emp else user_doc.get("name")) or "",
+        "email": (emp.get("email") if emp else user_doc.get("email")) or "",
+        "registration_number": (emp.get("registration_number") if emp else user_doc.get("registration_number")) or "",
+        "company_name": company.get("name") if company else "Empresa Conveniada",
+        "company_cnpj": company.get("cnpj") if company else "",
+        "completed": bool(user_doc and user_doc.get("is_email_verified") and user_doc.get("terms_accepted")),
+    }
+
+
+@router.post("/convenio/complete-registration")
+async def complete_employee_registration(request: Request, data: CompleteRegistrationPayload):
+    db = request.app.db
+    token = data.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token inválido")
+    
+    emp = await db.company_employees.find_one({"registration_token": token}, {"_id": 0})
+    user_doc = await db.users.find_one({"registration_token": token}, {"_id": 0})
+    
+    if not emp and not user_doc:
+        raise HTTPException(status_code=404, detail="Convite inválido ou não encontrado")
+    
+    cpf_digits = _digits(data.cpf)
+    if len(cpf_digits) != 11:
+        raise HTTPException(status_code=400, detail="CPF deve conter 11 dígitos")
+    
+    phone_digits = _digits(data.phone)
+    if not phone_digits:
+        raise HTTPException(status_code=400, detail="Telefone / Celular é obrigatório")
+    
+    if not data.password or len(data.password) < 6:
+        raise HTTPException(status_code=400, detail="A senha deve ter no mínimo 6 caracteres")
+    
+    company_id = emp.get("company_id") if emp else (user_doc.get("company_admin_of") if user_doc else None)
+    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0}) if company_id else {}
+    
+    import bcrypt
+    pwd_hash = bcrypt.hashpw(data.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    
+    cpf_fmt = f"{cpf_digits[:3]}.{cpf_digits[3:6]}.{cpf_digits[6:9]}-{cpf_digits[9:]}"
+    phone_fmt = f"({phone_digits[:2]}) {phone_digits[2:7]}-{phone_digits[7:]}" if len(phone_digits) == 11 else data.phone
+    
+    terms_settings = await db.admin_settings.find_one({"key": "payroll_terms_text"}, {"_id": 0})
+    template_text = terms_settings.get("value") if terms_settings else DEFAULT_PAYROLL_TERMS_TEXT
+    
+    dt_now = datetime.now(timezone.utc)
+    accepted_at_fmt = dt_now.strftime("%d/%m/%Y %H:%M:%S")
+    
+    terms_render_data = {
+        "employee_name": (emp.get("name") if emp else user_doc.get("name")),
+        "customer_cpf": cpf_fmt,
+        "registration_number": (emp.get("registration_number") if emp else user_doc.get("registration_number")) or "Não informada",
+        "company_name": company.get("name") or "Empresa Conveniada",
+        "company_cnpj": company.get("cnpj") or "N/I",
+        "accepted_at_fmt": accepted_at_fmt
+    }
+    rendered_terms_text = render_payroll_terms(template_text, terms_render_data)
+    
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host or "127.0.0.1"
+    meta = data.audit_metadata or {}
+    user_agent = meta.get("user_agent") or request.headers.get("user-agent", "")
+    ua_parsed = parse_user_agent_info(user_agent)
+    
+    screen_res = meta.get("screen_resolution", "Desconhecida")
+    platform = meta.get("platform", "N/A")
+    tz_str = meta.get("timezone", "America/Sao_Paulo")
+    
+    equipment_mac_fingerprint = _gen_equipment_mac_fingerprint(client_ip, user_agent, screen_res, platform, tz_str)
+    
+    user_email = (emp.get("email") if emp else user_doc.get("email")).lower()
+    sig_raw = f"{user_email}|{cpf_digits}|{client_ip}|{accepted_at_fmt}|{rendered_terms_text}"
+    digital_signature_hash = hashlib.sha256(sig_raw.encode("utf-8")).hexdigest()
+    
+    audit = {
+        "accepted_at": dt_now.isoformat(),
+        "accepted_at_fmt": accepted_at_fmt,
+        "ip_address": client_ip,
+        "mac_address_equipment": equipment_mac_fingerprint,
+        "user_agent": user_agent,
+        "device_type": ua_parsed["device_type"],
+        "os_info": ua_parsed["os_info"],
+        "browser_info": ua_parsed["browser_info"],
+        "screen_resolution": screen_res,
+        "platform": platform,
+        "language": meta.get("language", "pt-BR"),
+        "timezone": tz_str,
+        "geolocation": meta.get("geolocation"),
+        "confirmation_email": user_email,
+        "phone_number": phone_fmt,
+        "customer_name": terms_render_data["employee_name"],
+        "customer_cpf": cpf_fmt,
+        "registration_number": terms_render_data["registration_number"],
+        "company_name": terms_render_data["company_name"],
+        "company_cnpj": terms_render_data["company_cnpj"],
+        "rendered_terms_text": rendered_terms_text,
+        "digital_signature_hash": digital_signature_hash
+    }
+    
+    import random
+    verification_code = f"{random.randint(100000, 999999)}"
+    code_expires = (dt_now + timedelta(minutes=15)).isoformat()
+    
+    upd_user = {
+        "cpf": cpf_fmt,
+        "cpf_digits": cpf_digits,
+        "phone": phone_fmt,
+        "phone_digits": phone_digits,
+        "shipping_address": data.address,
+        "password_hash": pwd_hash,
+        "payroll_acceptance_audit": audit,
+        "terms_accepted": True,
+        "terms_accepted_at": dt_now.isoformat(),
+        "email_verification_code": verification_code,
+        "email_verification_expires": code_expires,
+        "completion_status": "pending_verification",
+        "updated_at": _now_iso()
+    }
+    
+    if user_doc:
+        await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": upd_user})
+    else:
+        user_id = emp.get("user_id") or _gen_id("usr_")
+        user_doc_new = {
+            "user_id": user_id,
+            "name": emp["name"],
+            "email": user_email,
+            "role": "customer",
+            "active": False,
+            "is_email_verified": False,
+            "networks": ["network_2"],
+            "network_type": "network_2",
+            "created_at": _now_iso(),
+            **upd_user
+        }
+        await db.users.insert_one(user_doc_new)
+    
+    if emp:
+        await db.company_employees.update_one(
+            {"employee_id": emp["employee_id"]},
+            {"$set": {
+                "cpf": cpf_fmt,
+                "cpf_digits": cpf_digits,
+                "phone": phone_fmt,
+                "phone_digits": phone_digits,
+                "payroll_acceptance_audit": audit,
+                "terms_accepted": True,
+                "updated_at": _now_iso()
+            }}
+        )
+    
+    try:
+        await _send_verification_code_email(db, user_email, terms_render_data["employee_name"], verification_code)
+    except Exception as e:
+        logger.exception(f"Erro ao enviar codigo de verificacao: {e}")
+    
+    return {
+        "status": "code_sent",
+        "email": user_email,
+        "message": "Dados salvos e Termos aceitos! Código de verificação de 6 dígitos enviado para o seu e-mail."
+    }
+
+
+@router.post("/convenio/verify-code")
+async def verify_registration_code(request: Request, data: CodeVerifyPayload):
+    from server import create_token
+    db = request.app.db
+    token = data.token.strip()
+    code = data.code.strip()
+    
+    if not token or not code:
+        raise HTTPException(status_code=400, detail="Token e Código de 6 dígitos são obrigatórios")
+    
+    user = await db.users.find_one({"registration_token": token}, {"_id": 0})
+    if not user:
+        user = await db.users.find_one({"email": token.lower()}, {"_id": 0})
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    
+    expected_code = user.get("email_verification_code")
+    expires_at_str = user.get("email_verification_expires")
+    
+    if not expected_code or expected_code != code:
+        raise HTTPException(status_code=400, detail="Código de verificação incorreto")
+    
+    if expires_at_str:
+        expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) > expires_at:
+            raise HTTPException(status_code=400, detail="Código expirado. Solicite um novo código.")
+    
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "active": True,
+            "is_email_verified": True,
+            "completion_status": "completed",
+            "email_verification_code": None,
+            "updated_at": _now_iso()
+        }}
+    )
+    
+    await db.company_employees.update_many(
+        {"$or": [{"email": user["email"]}, {"user_id": user["user_id"]}]},
+        {"$set": {"active": True, "status": "active", "updated_at": _now_iso()}}
+    )
+    
+    jwt_token = create_token(user["user_id"], user["email"], user.get("role", "customer"))
+    
+    return {
+        "status": "success",
+        "access_token": jwt_token,
+        "token_type": "bearer",
+        "user": {
+            "user_id": user["user_id"],
+            "name": user["name"],
+            "email": user["email"],
+            "role": user.get("role", "customer"),
+        },
+        "message": "Conta ativada com sucesso! Redirecionando..."
+    }
+
+
+@router.post("/convenio/resend-code")
+async def resend_verification_code(request: Request, body: Dict[str, Any]):
+    db = request.app.db
+    token = body.get("token") or body.get("email")
+    if not token:
+        raise HTTPException(status_code=400, detail="Token ou e-mail obrigatório")
+    
+    user = await db.users.find_one({"$or": [{"registration_token": token}, {"email": str(token).lower()}]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    
+    import random
+    new_code = f"{random.randint(100000, 999999)}"
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+    
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "email_verification_code": new_code,
+            "email_verification_expires": expires_at,
+            "updated_at": _now_iso()
+        }}
+    )
+    
+    await _send_verification_code_email(db, user["email"], user.get("name", "Cliente"), new_code)
+    return {"message": "Novo código de 6 dígitos enviado para o seu e-mail!"}
+
+
+@router.get("/convenio/my-terms")
+async def get_my_payroll_terms(request: Request):
+    user = await _current_user_lazy(request)
+    db = request.app.db
+    
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    audit = u.get("payroll_acceptance_audit")
+    
+    if not audit:
+        emp = await db.company_employees.find_one({"$or": [{"email": user.get("email")}, {"user_id": user["user_id"]}]}, {"_id": 0})
+        if emp:
+            audit = emp.get("payroll_acceptance_audit")
+    
+    if not audit:
+        raise HTTPException(status_code=404, detail="Termo de adesão não encontrado para este usuário.")
+    
+    return {"payroll_acceptance_audit": audit}
 
 
 @router.put("/company/employees/{employee_id}")
@@ -1123,6 +1515,7 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
         "payroll_limit_amount": monthly_margin,
         "payroll_limit_override": override,
         "payroll_terms_text": terms_template,
+        "payroll_acceptance_audit": user.get("payroll_acceptance_audit") or emp.get("payroll_acceptance_audit"),
         "open_charges_total": current_month_committed,
         "available_limit": available_monthly_margin,      # Retrocompatibilidade
     }

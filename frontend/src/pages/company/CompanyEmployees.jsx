@@ -2,10 +2,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Plus, Trash2, Upload, Download, Loader2, Search, Edit, UserCheck, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Upload, Download, Loader2, Search, Edit, UserCheck, Mail, Send } from 'lucide-react';
 import { toast } from 'sonner';
 
-const emptyEmp = { name: '', email: '', cpf: '', registration_number: '', matricula: '', phone: '', position: '', salary: 0, payroll_limit_override: '', active: true };
+const emptyEmp = { name: '', email: '', registration_number: '', matricula: '', position: '', salary: 0, payroll_limit_override: '', active: true };
 
 export default function CompanyEmployees() {
   const [employees, setEmployees] = useState([]);
@@ -18,6 +18,7 @@ export default function CompanyEmployees() {
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
+  const [resendingId, setResendingId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,6 +37,11 @@ export default function CompanyEmployees() {
 
   const submit = async (e, confirmLink = false) => {
     e?.preventDefault();
+    if (!form.name || !form.email || (!form.registration_number && !form.matricula)) {
+      toast.error('Preencha Nome Completo, Matrícula Funcional e E-mail.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -46,7 +52,7 @@ export default function CompanyEmployees() {
 
       if (editing) {
         await api.put(`/api/company/employees/${editing}`, payload);
-        toast.success('Funcionário atualizado com sucesso!');
+        toast.success('Funcionário atualizado!');
         setShowForm(false);
         load();
       } else {
@@ -58,11 +64,7 @@ export default function CompanyEmployees() {
           return;
         }
 
-        if (res.user_linked) {
-          toast.success(`Conta de usuário existente (${res.email}) vinculada como funcionário!`);
-        } else {
-          toast.success('Novo funcionário cadastrado e conta de usuário criada no sistema!');
-        }
+        toast.success(res.message || 'Funcionário cadastrado e convite enviado por e-mail!');
         setShowForm(false);
         setConfirmModal(null);
         load();
@@ -71,6 +73,18 @@ export default function CompanyEmployees() {
       toast.error(err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const resendInvite = async (employeeId) => {
+    setResendingId(employeeId);
+    try {
+      const res = await api.post(`/api/company/employees/${employeeId}/resend-invite`);
+      toast.success(res.message || 'Convite reenviado!');
+    } catch (err) {
+      toast.error(err.message || 'Falha ao reenviar convite');
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -136,7 +150,7 @@ export default function CompanyEmployees() {
       <div className="bg-white rounded-xl border border-border p-3 mb-3 flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-secondary" />
-          <input className="w-full pl-9 pr-3 py-2 border border-border rounded-lg text-sm" placeholder="Buscar nome, email, CPF..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()} />
+          <input className="w-full pl-9 pr-3 py-2 border border-border rounded-lg text-sm" placeholder="Buscar nome, email, matrícula..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()} />
         </div>
         <Button variant="outline" onClick={load}>Buscar</Button>
       </div>
@@ -157,10 +171,9 @@ export default function CompanyEmployees() {
             <thead className="bg-bg-secondary text-xs uppercase text-txt-secondary">
               <tr>
                 <th className="text-left px-3 py-2">Nome</th>
+                <th className="text-left px-3 py-2">Matrícula</th>
                 <th className="text-left px-3 py-2">Email</th>
                 <th className="text-left px-3 py-2">CPF</th>
-                <th className="text-left px-3 py-2">Cargo</th>
-                <th className="text-right px-3 py-2">Salário</th>
                 <th className="text-center px-3 py-2">Status</th>
                 <th />
               </tr>
@@ -169,45 +182,97 @@ export default function CompanyEmployees() {
               {employees.map(e => (
                 <tr key={e.employee_id} className="border-t border-border">
                   <td className="px-3 py-2 font-semibold">{e.name}</td>
+                  <td className="px-3 py-2 font-mono text-xs font-bold text-amber-900 bg-amber-50/50 rounded">{e.registration_number || e.matricula || '—'}</td>
                   <td className="px-3 py-2 text-txt-secondary">{e.email}</td>
                   <td className="px-3 py-2 text-txt-secondary font-mono">{e.cpf || e.cpf_digits || '—'}</td>
-                  <td className="px-3 py-2">{e.position || '—'}</td>
-                  <td className="px-3 py-2 text-right font-bold text-brand-main">R$ {(e.salary || 0).toFixed(2)}</td>
-                  <td className="px-3 py-2 text-center">{e.active ? <span className="text-emerald-600 text-xs font-bold">ATIVO</span> : <span className="text-red-500 text-xs font-bold">INATIVO</span>}</td>
+                  <td className="px-3 py-2 text-center">
+                    {e.active ? (
+                      <span className="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2 py-0.5 rounded">ATIVO</span>
+                    ) : (
+                      <span className="bg-amber-100 text-amber-800 text-[11px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1">
+                        <Mail className="w-3 h-3" /> CONVITE ENVIADO
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 flex gap-1 justify-end">
-                    <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-bg-secondary rounded"><Edit className="w-4 h-4 text-txt-secondary" /></button>
-                    <button onClick={() => del(e.employee_id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                    {!e.active && (
+                      <button
+                        onClick={() => resendInvite(e.employee_id)}
+                        disabled={resendingId === e.employee_id}
+                        title="Reenviar Convite por E-mail"
+                        className="p-1.5 hover:bg-sky-50 rounded text-sky-600 transition"
+                      >
+                        {resendingId === e.employee_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      </button>
+                    )}
+                    <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-bg-secondary rounded" title="Editar"><Edit className="w-4 h-4 text-txt-secondary" /></button>
+                    <button onClick={() => del(e.employee_id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
                   </td>
                 </tr>
               ))}
-              {employees.length === 0 && <tr><td colSpan="7" className="p-6 text-center text-txt-secondary">Nenhum funcionário cadastrado.</td></tr>}
+              {employees.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-txt-secondary">Nenhum funcionário cadastrado.</td></tr>}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* Modal Formulário de Funcionário */}
+      {/* Modal Formulário de Cadastro / Envio de Convite */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
           <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
-              <h2 className="font-heading font-black text-lg">{editing ? 'Editar funcionário' : 'Novo funcionário'}</h2>
-              <button onClick={() => setShowForm(false)} className="text-xl leading-none">&times;</button>
+            <div className="p-5 border-b border-border flex items-center justify-between shrink-0 bg-brand-light/30">
+              <div>
+                <h2 className="font-heading font-black text-lg text-txt-primary">
+                  {editing ? 'Editar funcionário' : 'Cadastrar Novo Funcionário'}
+                </h2>
+                <p className="text-xs text-txt-secondary mt-0.5">
+                  {editing ? 'Atualize os dados do funcionário' : 'Informe os 3 dados abaixo. Um convite de ativação será enviado ao e-mail.'}
+                </p>
+              </div>
+              <button onClick={() => setShowForm(false)} className="text-xl leading-none text-txt-secondary hover:text-txt-primary">&times;</button>
             </div>
             <form onSubmit={e => submit(e, false)} className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-5 space-y-3">
-                <Input label="Nome completo*" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-                <Input label="Email*" type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} hint="Gera ou vincula a conta no sistema com este e-mail" />
-                <Input label="CPF" value={form.cpf} onChange={e => setForm({ ...form, cpf: e.target.value })} placeholder="000.000.000-00" />
-                <Input label="Matrícula Funcional" value={form.registration_number || form.matricula || ''} onChange={e => setForm({ ...form, registration_number: e.target.value, matricula: e.target.value })} placeholder="Ex: 10492" hint="Nº de identificação funcional no RH (usado no termo de aceite)" />
-                <Input label="Telefone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-                <Input label="Cargo" value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} />
-                <Input label="Salário bruto (R$)" type="number" step="0.01" value={form.salary} onChange={e => setForm({ ...form, salary: e.target.value })} hint="Margem consignável mensal será 30% deste valor" />
-                <Input label="Limite consignado manual (R$)" type="number" step="0.01" value={form.payroll_limit_override || ''} onChange={e => setForm({ ...form, payroll_limit_override: e.target.value })} placeholder="Deixe vazio para usar 30% do salário" hint="Override manual opcional" />
-                <label className="flex items-center gap-2 text-sm pt-1"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Funcionário ativo</label>
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                <Input
+                  label="Nome completo do funcionário*"
+                  required
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="Ex: João da Silva"
+                />
+                <Input
+                  label="Matrícula Funcional*"
+                  required
+                  value={form.registration_number || form.matricula || ''}
+                  onChange={e => setForm({ ...form, registration_number: e.target.value, matricula: e.target.value })}
+                  placeholder="Ex: 10492"
+                  hint="Nº de registro funcional no RH da empresa"
+                />
+                <Input
+                  label="E-mail do funcionário*"
+                  type="email"
+                  required
+                  value={form.email}
+                  onChange={e => setForm({ ...form, email: e.target.value })}
+                  placeholder="joao@empresa.com.br"
+                  hint="O funcionário receberá o link único neste e-mail para completar o cadastro"
+                />
+
+                {editing && (
+                  <details className="pt-2 border-t border-border">
+                    <summary className="text-xs font-bold text-txt-secondary cursor-pointer hover:text-brand-main">Opções avançadas (opcional)</summary>
+                    <div className="mt-3 space-y-3">
+                      <Input label="CPF" value={form.cpf || ''} onChange={e => setForm({ ...form, cpf: e.target.value })} placeholder="000.000.000-00" />
+                      <Input label="Cargo" value={form.position || ''} onChange={e => setForm({ ...form, position: e.target.value })} />
+                      <Input label="Salário bruto (R$)" type="number" step="0.01" value={form.salary || 0} onChange={e => setForm({ ...form, salary: e.target.value })} />
+                    </div>
+                  </details>
+                )}
               </div>
-              <div className="p-5 border-t border-border flex gap-2 shrink-0">
-                <Button type="submit" loading={submitting}>Salvar Funcionário</Button>
+              <div className="p-5 border-t border-border flex gap-2 shrink-0 bg-bg-secondary/40">
+                <Button type="submit" loading={submitting} className="flex-1">
+                  <Send className="w-4 h-4 mr-2" /> {editing ? 'Salvar Alterações' : 'Cadastrar e Enviar Convite'}
+                </Button>
                 <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
               </div>
             </form>
