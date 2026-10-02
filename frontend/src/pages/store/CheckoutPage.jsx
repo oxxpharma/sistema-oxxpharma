@@ -487,25 +487,11 @@ export default function CheckoutPage() {
                       💳 Desconto em folha — {employeeCtx.company_name}
                     </div>
                     <span className="text-[11px] bg-emerald-200 text-emerald-800 font-semibold px-2 py-0.5 rounded-full">
-                      Cartão Consignado
+                      Convênio
                     </span>
                   </div>
 
-                  {/* Resumo dos Limites */}
-                  <div className="grid sm:grid-cols-2 gap-2 text-xs bg-white rounded-lg p-3 border border-emerald-200 shadow-sm">
-                    <div>
-                      <div className="text-txt-secondary font-medium">Margem Mensal (30% salário):</div>
-                      <div className="text-emerald-700 font-bold">
-                        {formatCurrency(employeeCtx.available_monthly_margin)} <span className="font-normal text-[10px] text-txt-secondary">disponível</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-txt-secondary font-medium">Limite Total Acumulado:</div>
-                      <div className="text-blue-700 font-bold">
-                        {formatCurrency(employeeCtx.available_total_limit)} <span className="font-normal text-[10px] text-txt-secondary">disponível</span>
-                      </div>
-                    </div>
-                  </div>
+                  
 
                   {/* Seleção de Parcelamento */}
                   <div className="space-y-1.5">
