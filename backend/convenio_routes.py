@@ -10,6 +10,7 @@ Sistema de Empresa Credenciada:
 import io
 import os
 import uuid
+import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
@@ -58,6 +59,152 @@ def _add_months(period_yyyy_mm: str, num_months: int) -> str:
         return f"{new_year:04d}-{new_month:02d}"
     except Exception:
         return period_yyyy_mm
+
+
+DEFAULT_PAYROLL_TERMS_TEXT = (
+    "ANEXO I - TERMO DE ADESÃO E AUTORIZAÇÃO DE DESCONTO\n\n"
+    "Pelo presente instrumento, eu, @nomecompleto, inscrito(a) no CPF sob nº @cpf, matrícula funcional nº @matricula, "
+    "empregado(a) da @empresa (CNPJ nº @cnpj), doravante denominada CONVENIADA, declaro, para todos os fins de direito, que, "
+    "de forma livre, voluntária, expressa, prévia e inequívoca, manifesto minha adesão ao Convênio Comercial celebrado entre a CONVENIADA "
+    "e a OXX PHARMA MAGISTRAL LTDA., CNPJ nº 03.446.178/0001-59, doravante denominada OXX PHARMA, tendo por objeto a disponibilização "
+    "de condições comerciais diferenciadas para aquisição de produtos, nos termos do instrumento principal.\n\n"
+    "Declaro que conheço e compreendo as condições do Convênio Comercial, bem como as condições comerciais aplicáveis às aquisições "
+    "realizadas junto à OXX PHARMA, estando ciente de que minha adesão é facultativa e não constitui condição para minha admissão, permanência, "
+    "promoção ou progressão profissional, inexistindo qualquer obrigação de aquisição de produtos.\n\n"
+    "Em caráter individual e específico, AUTORIZO EXPRESSAMENTE a CONVENIADA a efetuar, em minha folha de pagamento, os descontos "
+    "correspondentes aos valores por mim efetivamente devidos em razão das aquisições realizadas no âmbito do referido Convênio "
+    "(no valor total de @valor em @parcelas), observados os valores informados pela OXX PHARMA, os limites legais, regulamentares e convencionais "
+    "aplicáveis e a efetiva disponibilidade para processamento em folha.\n\n"
+    "A presente autorização restringe-se aos valores decorrentes de aquisições realizadas por mim no âmbito do Convênio Comercial, não abrangendo "
+    "quaisquer obrigações estranhas à relação comercial estabelecida com a OXX PHARMA. Eventual impossibilidade de desconto integral, por qualquer motivo, "
+    "não implicará autorização para descontos superiores aos legalmente permitidos, devendo eventual saldo remanescente ser tratado diretamente entre as partes interessadas.\n\n"
+    "A presente autorização permanecerá válida enquanto perdurar minha participação no Convênio, podendo ser revogada mediante comunicação escrita à CONVENIADA, "
+    "produzindo efeitos para as obrigações futuras após a efetiva ciência da revogação, sem prejuízo dos valores regularmente constituídos anteriormente à sua efetivação.\n\n"
+    "Declaro estar ciente de que os dados necessários à operacionalização das aquisições e dos respectivos descontos poderão ser tratados e compartilhados "
+    "entre a CONVENIADA e a OXX PHARMA, exclusivamente para as finalidades relacionadas ao Convênio, observada a legislação aplicável de proteção de dados pessoais.\n\n"
+    "Por fim, declaro que li integralmente o presente Termo, que tive ciência de seu conteúdo e que minha adesão e autorização são prestadas de forma livre e consciente, "
+    "sem qualquer vício de consentimento.\n\n"
+    "Maringá, @datahora."
+)
+
+
+def render_payroll_terms(template_text: str, data: Dict[str, Any]) -> str:
+    """Substitui as variaveis dinâmicas no modelo do termo do convenio.
+    Variáveis suportadas:
+    - @nomecompleto, @nome, {nomecompleto}, {nome}
+    - @cpf, {cpf}
+    - @matricula, @matriculafuncional, {matricula}
+    - @empresa, @razaosocial, {empresa}
+    - @cnpj, {cnpj}
+    - @valor, {valor}
+    - @parcelas, {parcelas}
+    - @datahora, @data, {data}
+    """
+    if not template_text:
+        template_text = DEFAULT_PAYROLL_TERMS_TEXT
+
+    emp_name = str(data.get("employee_name") or data.get("customer_name") or "N/A").strip()
+    cpf_val = str(data.get("customer_cpf") or data.get("cpf") or "N/A").strip()
+    mat_val = str(data.get("registration_number") or data.get("matricula") or "Não informada").strip()
+    comp_name = str(data.get("company_name") or "N/A").strip()
+    comp_cnpj = str(data.get("company_cnpj") or "N/A").strip()
+
+    tot = data.get("order_total") or data.get("total") or data.get("purchase_total")
+    tot_fmt = f"R$ {float(tot):.2f}".replace(".", ",") if tot is not None else "N/A"
+
+    inst = data.get("installments") or data.get("total_installments") or 1
+    inst_amt = data.get("installment_amount")
+    if inst_amt is not None and float(inst_amt) > 0:
+        inst_amt_fmt = f"R$ {float(inst_amt):.2f}".replace(".", ",")
+        inst_fmt = f"{inst}x de {inst_amt_fmt}"
+    elif tot is not None:
+        calc_amt = float(tot) / int(inst) if int(inst) > 0 else float(tot)
+        inst_fmt = f"{inst}x de R$ {calc_amt:.2f}".replace(".", ",")
+    else:
+        inst_fmt = f"{inst}x"
+
+    dt_fmt = str(data.get("accepted_at_fmt") or data.get("accepted_at") or _now_iso()[:19].replace("T", " ")).strip()
+
+    replacements = {
+        "@nomecompleto": emp_name,
+        "@nome": emp_name,
+        "{nomecompleto}": emp_name,
+        "{nome}": emp_name,
+
+        "@cpf": cpf_val,
+        "{cpf}": cpf_val,
+
+        "@matricula": mat_val,
+        "@matriculafuncional": mat_val,
+        "{matricula}": mat_val,
+
+        "@empresa": comp_name,
+        "@razaosocial": comp_name,
+        "{empresa}": comp_name,
+
+        "@cnpj": comp_cnpj,
+        "{cnpj}": comp_cnpj,
+
+        "@valor": tot_fmt,
+        "{valor}": tot_fmt,
+
+        "@parcelas": inst_fmt,
+        "{parcelas}": inst_fmt,
+
+        "@datahora": dt_fmt,
+        "@data": dt_fmt[:10],
+        "{data}": dt_fmt[:10],
+    }
+
+    out = str(template_text)
+    for k, v in replacements.items():
+        out = out.replace(k, str(v or ""))
+    return out
+
+
+def parse_user_agent_info(ua_string: str) -> Dict[str, str]:
+    """Helper para extrair Tipo de Dispositivo, Navegador e SO a partir do User-Agent."""
+    ua = str(ua_string or "").lower()
+    if "mobile" in ua or "android" in ua or "iphone" in ua or "ipod" in ua:
+        device_type = "Celular (Smartphone)"
+    elif "ipad" in ua or "tablet" in ua:
+        device_type = "Tablet"
+    elif ua:
+        device_type = "Computador (Desktop)"
+    else:
+        device_type = "Navegador Web"
+
+    if "windows" in ua:
+        os_info = "Windows OS"
+    elif "android" in ua:
+        os_info = "Android OS"
+    elif "iphone" in ua or "ipad" in ua or "cpu os" in ua:
+        os_info = "iOS (Apple)"
+    elif "mac" in ua:
+        os_info = "macOS (Apple)"
+    elif "linux" in ua:
+        os_info = "Linux"
+    else:
+        os_info = "Sistema Operacional Web"
+
+    if "edg/" in ua:
+        browser_info = "Microsoft Edge"
+    elif "chrome" in ua and "chromium" not in ua:
+        browser_info = "Google Chrome"
+    elif "safari" in ua and "chrome" not in ua:
+        browser_info = "Apple Safari"
+    elif "firefox" in ua:
+        browser_info = "Mozilla Firefox"
+    elif "opera" in ua or "opr/" in ua:
+        browser_info = "Opera"
+    else:
+        browser_info = "Navegador Web"
+
+    return {
+        "device_type": device_type,
+        "browser_info": browser_info,
+        "os_info": os_info,
+    }
 
 
 # ==================== MODELS ====================
@@ -162,6 +309,8 @@ class EmployeeCreate(BaseModel):
     position: Optional[str] = None
     salary: float = 0.0
     payroll_limit_override: Optional[float] = None  # Iter 66.3: override manual do limite consignado
+    registration_number: Optional[str] = None      # Matricula Funcional
+    matricula: Optional[str] = None
     active: bool = True
 
 
@@ -173,6 +322,8 @@ class EmployeeUpdate(BaseModel):
     position: Optional[str] = None
     salary: Optional[float] = None
     payroll_limit_override: Optional[float] = None
+    registration_number: Optional[str] = None
+    matricula: Optional[str] = None
     active: Optional[bool] = None
 
 
@@ -520,6 +671,9 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
     payload["email"] = payload["email"].lower().strip()
     payload["cpf_digits"] = _digits(payload.get("cpf"))
     payload["phone_digits"] = _digits(payload.get("phone"))
+    reg_num = str(payload.get("registration_number") or payload.get("matricula") or "").strip()
+    payload["registration_number"] = reg_num
+    payload["matricula"] = reg_num
 
     # Dedupe dentro da propria empresa por email ou CPF
     q_dup: Dict[str, Any] = {"company_id": cid, "email": payload["email"]}
@@ -566,6 +720,8 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
             "email": payload["email"],
             "cpf_digits": payload.get("cpf_digits"),
             "phone_digits": payload.get("phone_digits"),
+            "registration_number": reg_num,
+            "matricula": reg_num,
             "password_hash": pwd_hash,
             "role": "customer",
             "networks": ["network_2"],
@@ -586,6 +742,9 @@ async def create_employee(request: Request, data: EmployeeCreate, company_id: Op
             upd_u["sponsor_id_net2"] = company_rep_id
         if not linked_user.get("cpf_digits") and payload.get("cpf_digits"):
             upd_u["cpf_digits"] = payload["cpf_digits"]
+        if reg_num:
+            upd_u["registration_number"] = reg_num
+            upd_u["matricula"] = reg_num
         current_nets = linked_user.get("networks") or []
         if "network_2" not in current_nets:
             upd_u["networks"] = list(set(current_nets + ["network_2"]))
@@ -618,6 +777,12 @@ async def update_employee(request: Request, employee_id: str, data: EmployeeUpda
         upd["phone_digits"] = _digits(upd["phone"])
     if "email" in upd:
         upd["email"] = upd["email"].lower()
+    if "registration_number" in upd or "matricula" in upd:
+        reg_num = str(upd.get("registration_number") or upd.get("matricula") or "").strip()
+        upd["registration_number"] = reg_num
+        upd["matricula"] = reg_num
+        if emp.get("user_id"):
+            await db.users.update_one({"user_id": emp["user_id"]}, {"$set": {"registration_number": reg_num, "matricula": reg_num}})
     upd["updated_at"] = _now_iso()
     await db.company_employees.update_one({"employee_id": employee_id}, {"$set": upd})
     return await db.company_employees.find_one({"employee_id": employee_id}, {"_id": 0})
@@ -920,11 +1085,25 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
     extra_disc = float(company.get("employee_discount_pct") or 0.0)
     effective_disc = round(base_disc + extra_disc, 2)
 
+    s_doc = await db.settings.find_one({"_id": "global"}) or {}
+    terms_template = s_doc.get("payroll_terms_text") or DEFAULT_PAYROLL_TERMS_TEXT
+
+    cpf_val = emp.get("cpf") or user.get("cpf") or ""
+    if not cpf_val and emp.get("cpf_digits") and len(emp["cpf_digits"]) == 11:
+        cd = emp["cpf_digits"]
+        cpf_val = f"{cd[:3]}.{cd[3:6]}.{cd[6:9]}-{cd[9:]}"
+
+    reg_num = emp.get("registration_number") or emp.get("matricula") or user.get("registration_number") or user.get("matricula") or ""
+
     return {
         "employee_id": emp["employee_id"],
-        "employee_name": emp.get("name"),
+        "employee_name": emp.get("name") or user.get("name"),
+        "cpf": cpf_val,
+        "registration_number": reg_num,
+        "matricula": reg_num,
         "company_id": company["company_id"],
         "company_name": company.get("name"),
+        "company_cnpj": company.get("cnpj") or company.get("cnpj_digits") or "",
         "position": emp.get("position"),
         "salary": salary,
         "monthly_margin": monthly_margin,                 # 30% do salario
@@ -943,6 +1122,7 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
         "payroll_limit_percent": 30.0,
         "payroll_limit_amount": monthly_margin,
         "payroll_limit_override": override,
+        "payroll_terms_text": terms_template,
         "open_charges_total": current_month_committed,
         "available_limit": available_monthly_margin,      # Retrocompatibilidade
     }
@@ -1076,9 +1256,18 @@ async def checkout_payroll_eligibility(request: Request, data: PayrollEligibilit
 
 async def create_payroll_charge(db, order: Dict, employee_ctx: Dict, acceptance: Dict, installments: int = 1) -> List[Dict]:
     """Cria cobranças parceladas payroll (desconto em folha) para uma order.
-    Registra o aceite digital (IP, UA, parcelas, timestamp) para conformidade legal.
+    Registra o aceite digital (IP, UA, parcelas, timestamp, resumo dos termos e hash SHA-256) para conformidade legal.
     """
     now = _now_iso()
+    dt_now = datetime.now(timezone.utc)
+
+    # Formata data/hora em Horario de Brasilia (UTC-3)
+    try:
+        dt_br = dt_now.astimezone(timezone(timedelta(hours=-3)))
+        accepted_at_fmt = dt_br.strftime("%d/%m/%Y às %H:%M:%S")
+    except Exception:
+        accepted_at_fmt = now[:19].replace("T", " ")
+
     start_period = _get_cutoff_period()
     total_amt = float(order.get("total", 0))
     n = max(1, min(int(installments or 1), 12))
@@ -1099,7 +1288,7 @@ async def create_payroll_charge(db, order: Dict, employee_ctx: Dict, acceptance:
             "order_id": order["order_id"],
             "company_id": employee_ctx["company_id"],
             "employee_id": employee_ctx["employee_id"],
-            "employee_name": employee_ctx["employee_name"],
+            "employee_name": employee_ctx.get("employee_name") or order.get("customer_name"),
             "user_id": order.get("user_id"),
             "purchase_total": total_amt,
             "installment_number": idx,
@@ -1114,20 +1303,70 @@ async def create_payroll_charge(db, order: Dict, employee_ctx: Dict, acceptance:
         await db.payroll_charges.insert_one(charge)
         created_charges.append(charge)
 
-    await db.payroll_acceptances.insert_one({
+    # Obter modelo do termo
+    s_doc = await db.settings.find_one({"_id": "global"}) or {}
+    terms_template = acceptance.get("payroll_terms_text") or s_doc.get("payroll_terms_text") or DEFAULT_PAYROLL_TERMS_TEXT
+
+    customer_cpf = employee_ctx.get("cpf") or order.get("customer_cpf") or order.get("customer_cpf_digits") or ""
+    reg_number = employee_ctx.get("registration_number") or employee_ctx.get("matricula") or "Não informada"
+    company_name = employee_ctx.get("company_name") or ""
+    company_cnpj = employee_ctx.get("company_cnpj") or ""
+
+    data_for_terms = {
+        "employee_name": employee_ctx.get("employee_name") or order.get("customer_name"),
+        "customer_cpf": customer_cpf,
+        "registration_number": reg_number,
+        "company_name": company_name,
+        "company_cnpj": company_cnpj,
+        "order_total": total_amt,
+        "installments": n,
+        "installment_amount": inst_amounts[0],
+        "accepted_at_fmt": accepted_at_fmt,
+    }
+
+    rendered_terms = render_payroll_terms(terms_template, data_for_terms)
+    ua_info = parse_user_agent_info(acceptance.get("user_agent") or "")
+    ip_addr = acceptance.get("ip") or "Não registrado"
+    user_agent_str = acceptance.get("user_agent") or "Não registrado"
+
+    # SHA-256 Hash legal da assinatura
+    hash_seed = f"{order['order_id']}|{order.get('user_id')}|{customer_cpf}|{total_amt:.2f}|{n}|{now}|{ip_addr}|{rendered_terms}"
+    digital_signature_hash = hashlib.sha256(hash_seed.encode("utf-8")).hexdigest()
+
+    audit_doc = {
         "acceptance_id": _gen_id("acpt_"),
         "purchase_id": purchase_id,
         "order_id": order["order_id"],
         "employee_id": employee_ctx["employee_id"],
         "user_id": order.get("user_id"),
-        "amount": total_amt,
+        "customer_name": employee_ctx.get("employee_name") or order.get("customer_name"),
+        "customer_cpf": customer_cpf,
+        "registration_number": reg_number,
+        "company_id": employee_ctx.get("company_id"),
+        "company_name": company_name,
+        "company_cnpj": company_cnpj,
+        "order_total": total_amt,
         "installments": n,
         "installment_amount": inst_amounts[0],
-        "ip": acceptance.get("ip"),
-        "user_agent": acceptance.get("user_agent"),
-        "terms_version": acceptance.get("terms_version") or "v1",
+        "ip_address": ip_addr,
+        "user_agent": user_agent_str,
+        "device_type": ua_info["device_type"],
+        "browser_info": ua_info["browser_info"],
+        "os_info": ua_info["os_info"],
         "accepted_at": now,
-    })
+        "accepted_at_fmt": accepted_at_fmt,
+        "terms_version": acceptance.get("terms_version") or "v1",
+        "rendered_terms_text": rendered_terms,
+        "digital_signature_hash": digital_signature_hash,
+    }
+
+    await db.payroll_acceptances.insert_one(audit_doc)
+    # Anexa o registro audit no pedido
+    await db.orders.update_one(
+        {"order_id": order["order_id"]},
+        {"$set": {"payroll_acceptance_audit": audit_doc}}
+    )
+
     return created_charges
 
 

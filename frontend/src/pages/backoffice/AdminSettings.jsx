@@ -44,6 +44,7 @@ export default function AdminSettings() {
         whatsapp_enabled: !!settings.whatsapp_enabled,
         whatsapp_number: (settings.whatsapp_number || '').replace(/\D/g, ''),
         whatsapp_message_template: settings.whatsapp_message_template || '',
+        payroll_terms_text: settings.payroll_terms_text || '',
       };
       const updated = await api.put('/api/admin/settings', payload);
       setSettings(updated);
@@ -187,6 +188,78 @@ export default function AdminSettings() {
             data-testid="whatsapp-template"
           />
           <p className="text-xs text-txt-secondary mt-1">Variáveis disponíveis: <code>{'{product_name}'}</code>, <code>{'{product_price}'}</code>, <code>{'{product_url}'}</code>, <code>{'{quantity}'}</code></p>
+        </div>
+      </div>
+
+      {/* Convênio: Termo de Adesão e Autorização de Desconto em Folha */}
+      <div className="bg-white rounded-xl border border-border p-6 mt-6" data-testid="payroll-terms-settings">
+        <h2 className="font-heading font-black text-lg flex items-center gap-2 mb-1">
+          📜 Termo de Adesão e Autorização de Desconto em Folha (Convênio)
+        </h2>
+        <p className="text-xs text-txt-secondary mb-4">
+          Este texto é exibido em uma caixa rolável no checkout do funcionário ao selecionar "Desconto em folha".
+          No momento do aceite, os marcadores <code>@variável</code> são substituídos pelos dados reais do funcionário e do pedido.
+        </p>
+
+        {/* Chips de Variáveis */}
+        <div className="mb-3">
+          <label className="text-xs font-bold text-txt-primary block mb-1.5">
+            Clique em uma variável para copiar ou inserir no texto do termo:
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { code: '@nomecompleto', label: 'Nome do Funcionário' },
+              { code: '@cpf', label: 'CPF' },
+              { code: '@matricula', label: 'Matrícula Funcional' },
+              { code: '@empresa', label: 'Empresa Credenciada' },
+              { code: '@cnpj', label: 'CNPJ Empresa' },
+              { code: '@valor', label: 'Valor do Pedido' },
+              { code: '@parcelas', label: 'Parcelamento' },
+              { code: '@datahora', label: 'Data e Hora' },
+            ].map(varChip => (
+              <button
+                key={varChip.code}
+                type="button"
+                onClick={() => {
+                  const current = settings.payroll_terms_text || '';
+                  setSettings({ ...settings, payroll_terms_text: current + ' ' + varChip.code });
+                  toast.info(`Variável ${varChip.code} adicionada ao texto!`);
+                }}
+                className="text-xs bg-slate-100 hover:bg-brand-light hover:text-brand-main text-slate-800 font-mono font-semibold px-2.5 py-1 rounded-lg border border-slate-300 transition flex items-center gap-1"
+                title={`Inserir ${varChip.code} (${varChip.label})`}
+              >
+                <span>{varChip.code}</span>
+                <span className="text-[10px] text-slate-500 font-normal font-sans">({varChip.label})</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <textarea
+          rows={12}
+          value={settings.payroll_terms_text || ''}
+          onChange={e => setSettings({ ...settings, payroll_terms_text: e.target.value })}
+          className="w-full px-3 py-2.5 border border-border rounded-lg text-xs font-mono leading-relaxed bg-slate-50 shadow-inner focus:bg-white focus:ring-2 focus:ring-brand-main"
+          placeholder="ANEXO I - TERMO DE ADESÃO E AUTORIZAÇÃO DE DESCONTO..."
+          data-testid="payroll-terms-template-editor"
+        />
+        <div className="flex justify-between items-center mt-2 text-xs text-txt-secondary">
+          <span>Campos entre <code>@...</code> ou <code>{'{...}'}</code> serão preenchidos dinamicamente pelo sistema.</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('Restaurar o modelo padrão do Termo de Adesão da OxxPharma?')) {
+                setSettings({
+                  ...settings,
+                  payroll_terms_text: `ANEXO I - TERMO DE ADESÃO E AUTORIZAÇÃO DE DESCONTO\n\nPelo presente instrumento, eu, @nomecompleto, inscrito(a) no CPF sob nº @cpf, matrícula funcional nº @matricula, empregado(a) da @empresa (CNPJ nº @cnpj), doravante denominada CONVENIADA, declaro, para todos os fins de direito, que, de forma livre, voluntária, expressa, prévia e inequívoca, manifesto minha adesão ao Convênio Comercial celebrado entre a CONVENIADA e a OXX PHARMA MAGISTRAL LTDA., CNPJ nº 03.446.178/0001-59, doravante denominada OXX PHARMA, tendo por objeto a disponibilização de condições comerciais diferenciadas para aquisição de produtos, nos termos do instrumento principal.\n\nDeclaro que conheço e compreendo as condições do Convênio Comercial, bem como as condições comerciais aplicáveis às aquisições realizadas junto à OXX PHARMA, estando ciente de que minha adesão é facultativa e não constitui condição para minha admissão, permanência, promoção ou progressão profissional, inexistindo qualquer obrigação de aquisição de produtos.\n\nEm caráter individual e específico, AUTORIZO EXPRESSAMENTE a CONVENIADA a efetuar, em minha folha de pagamento, os descontos correspondentes aos valores por mim efetivamente devidos em razão das aquisições realizadas no âmbito do referido Convênio (no valor total de @valor em @parcelas), observados os valores informados pela OXX PHARMA, os limites legais, regulamentares e convencionais aplicáveis e a efetiva disponibilidade para processamento em folha.\n\nA presente autorização restringe-se aos valores decorrentes de aquisições realizadas por mim no âmbito do Convênio Comercial, não abrangendo quaisquer obrigações estranhas à relação comercial estabelecida com a OXX PHARMA. Eventual impossibilidade de desconto integral, por qualquer motivo, não implicará autorização para descontos superiores aos legalmente permitidos, devendo eventual saldo remanescente ser tratado diretamente entre as partes interessadas.\n\nA presente autorização permanecerá válida enquanto perdurar minha participação no Convênio, podendo ser revogada mediante comunicação escrita à CONVENIADA, produzindo efeitos para as obrigações futuras após a efetiva ciência da revogação, sem prejuízo dos valores regularmente constituídos anteriormente à sua efetivação.\n\nDeclaro estar ciente de que os dados necessários à operacionalização das aquisições e dos respectivos descontos poderão ser tratados e compartilhados entre a CONVENIADA e a OXX PHARMA, exclusivamente para as finalidades relacionadas ao Convênio, observada a legislação aplicável de proteção de dados pessoais.\n\nPor fim, declaro que li integralmente o presente Termo, que tive ciência de seu conteúdo e que minha adesão e autorização são prestadas de forma livre e consciente, sem qualquer vício de consentimento.\n\nMaringá, @datahora.`
+                });
+                toast.success('Modelo padrão do termo restaurado!');
+              }
+            }}
+            className="text-brand-main font-semibold hover:underline"
+          >
+            Restaurar modelo padrão
+          </button>
         </div>
       </div>
     </div>

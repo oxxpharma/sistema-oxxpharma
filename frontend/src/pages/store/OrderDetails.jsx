@@ -7,8 +7,9 @@ import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibili
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { CheckCircle2, Package, MapPin, Loader2, Award, Truck, RefreshCw, ExternalLink } from 'lucide-react';
+import { CheckCircle2, Package, MapPin, Loader2, Award, Truck, RefreshCw, ExternalLink, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
 
 const STATUS_LABELS = {
   pending: { label: 'Aguardando pagamento', variant: 'warning' },
@@ -28,6 +29,7 @@ export default function OrderDetails() {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [payCfg, setPayCfg] = useState({ environment: 'test', configured: false });
+  const [showAcceptance, setShowAcceptance] = useState(false);
 
   const load = async () => {
     try {
@@ -132,6 +134,23 @@ export default function OrderDetails() {
         )}
       </div>
 
+      {(order.payment_method === 'payroll' || order.payroll_acceptance_audit) && (
+        <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 mb-6 flex items-center justify-between gap-3" data-testid="payroll-acceptance-banner">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-600 text-white rounded-lg">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-indigo-950">Termo de Adesão e Desconto em Folha</div>
+              <div className="text-xs text-indigo-700">Assinado eletronicamente em {order.payroll_acceptance_audit?.accepted_at_fmt || formatDateTime(order.created_at)}</div>
+            </div>
+          </div>
+          <Button size="sm" variant="outline" className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 shrink-0 font-semibold" onClick={() => setShowAcceptance(true)} data-testid="view-payroll-acceptance">
+            Ver Comprovante de Aceite
+          </Button>
+        </div>
+      )}
+
       {/* Módulo de Rastreamento de Entrega Estilizado (Visual da Imagem de Referência) */}
       <OrderTrackingSection
         orderId={order.order_id}
@@ -201,6 +220,14 @@ export default function OrderDetails() {
         <Link to="/meus-pedidos"><Button variant="outline" data-testid="view-orders-btn">Meus pedidos</Button></Link>
         <Link to="/"><Button data-testid="continue-shopping-btn">Continuar comprando</Button></Link>
       </div>
+
+      {showAcceptance && (
+        <PayrollAcceptanceModal
+          order={order}
+          auditData={order.payroll_acceptance_audit}
+          onClose={() => setShowAcceptance(false)}
+        />
+      )}
     </div>
   );
 }

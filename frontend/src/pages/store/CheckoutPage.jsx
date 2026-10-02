@@ -138,6 +138,7 @@ export default function CheckoutPage() {
         payroll_accepted: paymentMethod === 'payroll' ? payrollAccepted : undefined,
         payroll_terms_version: paymentMethod === 'payroll' ? 'v1' : undefined,
         payroll_installments: paymentMethod === 'payroll' ? payrollInstallments : undefined,
+        payroll_terms_text: paymentMethod === 'payroll' ? getRenderedTermsText() : undefined,
         warranty_bonus_units: bonusUnitsToUse > 0 ? bonusUnitsToUse : undefined,
       });
       // Iter 66: Desconto em folha ja fica pago no backend
@@ -231,6 +232,30 @@ export default function CheckoutPage() {
     })();
     // eslint-disable-next-line
   }, [subtotal]);
+
+  const getRenderedTermsText = () => {
+    if (!employeeCtx) return '';
+    const template = employeeCtx.payroll_terms_text || '';
+    const empName = employeeCtx.employee_name || user?.name || 'N/A';
+    const cpfVal = employeeCtx.cpf || user?.cpf || 'N/A';
+    const matVal = employeeCtx.registration_number || employeeCtx.matricula || 'Não informada';
+    const compName = employeeCtx.company_name || 'N/A';
+    const compCnpj = employeeCtx.company_cnpj || 'N/A';
+    const totFmt = formatCurrency(total);
+    const instAmt = total / (payrollInstallments || 1);
+    const instFmt = `${payrollInstallments}x de ${formatCurrency(instAmt)} (Total: ${totFmt})`;
+    const dateFmt = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+
+    return template
+      .replace(/@nomecompleto|@nome|\{nomecompleto\}|\{nome\}/g, empName)
+      .replace(/@cpf|\{cpf\}/g, cpfVal)
+      .replace(/@matricula|@matriculafuncional|\{matricula\}/g, matVal)
+      .replace(/@empresa|@razaosocial|\{empresa\}/g, compName)
+      .replace(/@cnpj|\{cnpj\}/g, compCnpj)
+      .replace(/@valor|\{valor\}/g, totFmt)
+      .replace(/@parcelas|\{parcelas\}/g, instFmt)
+      .replace(/@datahora|@data|\{data\}/g, dateFmt);
+  };
 
   // CEP do endereço selecionado (para auto-cotação ao entrar no checkout / trocar endereço)
   const selectedAddrObj = addresses.find(a => a.address_id === selectedAddr);
@@ -514,6 +539,16 @@ export default function CheckoutPage() {
                     </select>
                   </div>
 
+                  {/* Caixa de Exibição dos Termos de Adesão com Variáveis Preenchidas */}
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="w-4 h-4 text-emerald-600" /> Termo de Adesão e Autorização de Desconto
+                    </div>
+                    <div className="bg-white border border-emerald-300 rounded-lg p-3 max-h-48 overflow-y-auto text-xs font-mono whitespace-pre-wrap leading-relaxed text-slate-800 shadow-inner select-text" data-testid="payroll-terms-box">
+                      {getRenderedTermsText()}
+                    </div>
+                  </div>
+
                   {/* Status & Validação */}
                   {payrollEligibility && !payrollEligibility.eligible ? (
                     <div className="text-xs text-red-700 font-semibold bg-red-50 p-2.5 rounded-lg border border-red-200 flex items-center gap-2">
@@ -526,16 +561,16 @@ export default function CheckoutPage() {
                       </span>
                     </div>
                   ) : (
-                    <label className="flex items-start gap-2 text-xs cursor-pointer select-none bg-white p-3 rounded-lg border border-emerald-200" data-testid="payroll-accept-label">
+                    <label className="flex items-start gap-2.5 text-xs cursor-pointer select-none bg-white p-3 rounded-lg border border-emerald-300 shadow-sm hover:border-emerald-400 transition" data-testid="payroll-accept-label">
                       <input
                         type="checkbox"
                         checked={payrollAccepted}
                         onChange={e => setPayrollAccepted(e.target.checked)}
-                        className="mt-0.5 w-4 h-4 accent-emerald-500"
+                        className="mt-0.5 w-4 h-4 accent-emerald-600 rounded"
                         data-testid="payroll-accept"
                       />
-                      <span>
-                        Autorizo o desconto em folha de <b>{payrollInstallments}x de {formatCurrency(total / payrollInstallments)}</b> (total: {formatCurrency(total)}) pela empresa <b>{employeeCtx.company_name}</b>, conforme regras do convênio e limite legal de margem consignável.
+                      <span className="text-slate-800 font-medium leading-normal">
+                        Li integralmente, concordo e <b>AUTORIZO EXPRESSAMENTE</b> o desconto em folha de <b>{payrollInstallments}x de {formatCurrency(total / payrollInstallments)}</b> (total: {formatCurrency(total)}) pela empresa <b>{employeeCtx.company_name}</b>, conforme o Termo de Adesão acima.
                       </span>
                     </label>
                   )}

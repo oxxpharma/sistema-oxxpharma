@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { Plus, Trash2, Upload, Download, Loader2, Search, Edit, UserCheck, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
-const emptyEmp = { name: '', email: '', cpf: '', phone: '', position: '', salary: 0, payroll_limit_override: '', active: true };
+const emptyEmp = { name: '', email: '', cpf: '', registration_number: '', matricula: '', phone: '', position: '', salary: 0, payroll_limit_override: '', active: true };
 
 export default function CompanyEmployees() {
   const [employees, setEmployees] = useState([]);
@@ -199,6 +199,7 @@ export default function CompanyEmployees() {
                 <Input label="Nome completo*" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
                 <Input label="Email*" type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} hint="Gera ou vincula a conta no sistema com este e-mail" />
                 <Input label="CPF" value={form.cpf} onChange={e => setForm({ ...form, cpf: e.target.value })} placeholder="000.000.000-00" />
+                <Input label="Matrícula Funcional" value={form.registration_number || form.matricula || ''} onChange={e => setForm({ ...form, registration_number: e.target.value, matricula: e.target.value })} placeholder="Ex: 10492" hint="Nº de identificação funcional no RH (usado no termo de aceite)" />
                 <Input label="Telefone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                 <Input label="Cargo" value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} />
                 <Input label="Salário bruto (R$)" type="number" step="0.01" value={form.salary} onChange={e => setForm({ ...form, salary: e.target.value })} hint="Margem consignável mensal será 30% deste valor" />

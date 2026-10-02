@@ -4,9 +4,10 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
+import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
 
 const STATUSES = [
   { value: '', label: 'Todos' },
@@ -79,6 +80,7 @@ export default function AdminOrders() {
   const [trackingModal, setTrackingModal] = useState(null);
   const [trackingCode, setTrackingCode] = useState('');
   const [nfOrder, setNfOrder] = useState(null); // Iter 55 — modal de upload de NF
+  const [acceptanceModal, setAcceptanceModal] = useState(null);
 
   const runBackfill = async () => {
     if (!window.confirm('Tentar preencher CPF e CEP de TODOS os pedidos com dados faltantes a partir do cadastro do cliente, endereços salvos e pedidos anteriores?\n\nIsso pode levar alguns segundos.')) return;
@@ -404,7 +406,22 @@ export default function AdminOrders() {
                     <div><span className="font-sans font-semibold text-txt-primary">Telefone:</span> {formatPhone(selected.customer_phone || selected.shipping_address?.phone || selected.pickup_snapshot?.phone) || '—'}</div>
                   </div>
                 </div>
-                <div><div className="text-txt-secondary text-xs">Pagamento</div><div className="font-bold">{selected.payment_method}</div><div className="text-xs">{selected.payment_status}</div></div>
+                <div>
+                  <div className="text-txt-secondary text-xs">Pagamento</div>
+                  <div className="font-bold">{selected.payment_method === 'payroll' ? 'Desconto em Folha (Convênio)' : selected.payment_method}</div>
+                  <div className="text-xs">{selected.payment_status}</div>
+                  {(selected.payment_method === 'payroll' || selected.payroll_acceptance_audit) && (
+                    <button
+                      type="button"
+                      onClick={() => setAcceptanceModal(selected)}
+                      className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-semibold transition-colors"
+                      data-testid="view-acceptance-btn"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                      Ver Aceite Digital (Termo)
+                    </button>
+                  )}
+                </div>
               </div>
 
               {selected.is_pickup ? (
@@ -560,6 +577,15 @@ export default function AdminOrders() {
           order={nfOrder}
           onClose={() => setNfOrder(null)}
           onSaved={async () => { setNfOrder(null); await load(page); }}
+        />
+      )}
+
+      {/* Aceite Digital Modal */}
+      {acceptanceModal && (
+        <PayrollAcceptanceModal
+          order={acceptanceModal}
+          auditData={acceptanceModal.payroll_acceptance_audit}
+          onClose={() => setAcceptanceModal(null)}
         />
       )}
     </div>

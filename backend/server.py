@@ -384,6 +384,7 @@ class CheckoutData(BaseModel):
     payroll_accepted: Optional[bool] = False
     payroll_terms_version: Optional[str] = "v1"
     payroll_installments: Optional[int] = 1
+    payroll_terms_text: Optional[str] = None
     # Iter 66.3: usar bonus de garantia (Ozoxx) — quantidade de unidades a consumir
     warranty_bonus_units: Optional[int] = 0
 
@@ -1941,9 +1942,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
     if payroll_charge_pending:
         await mark_order_paid(db, order["order_id"], payment_id=None, source="payroll")
         acceptance = {
-            "ip": (request.client.host if request.client else None),
+            "ip": request.headers.get("x-forwarded-for") or (request.client.host if request.client else None),
             "user_agent": request.headers.get("user-agent", "")[:300],
             "terms_version": data.payroll_terms_version or "v1",
+            "payroll_terms_text": data.payroll_terms_text,
         }
         try:
             fresh_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
@@ -5688,6 +5690,7 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
         # Iter 48: integracao IGVD (voucher de adesao)
         "igvd_voucher_enabled", "igvd_voucher_secret",
         "igvd_kit_items",  # Iter 48b: [{product_id, quantity}] — Kit de Adesao gerado no cadastro
+        "payroll_terms_text",
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
