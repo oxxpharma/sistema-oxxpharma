@@ -1028,6 +1028,32 @@ async def logout(response: Response):
 
 # ==================== USER PROFILE & ADDRESSES ====================
 
+def is_valid_cpf(cpf: str) -> bool:
+    if not cpf:
+        return False
+    digits = [int(ch) for ch in str(cpf) if ch.isdigit()]
+    if len(digits) != 11:
+        return False
+    if len(set(digits)) == 1:
+        return False
+    
+    s1 = sum(d * w for d, w in zip(digits[:9], range(10, 1, -1)))
+    r1 = (s1 * 10) % 11
+    if r1 in (10, 11):
+        r1 = 0
+    if r1 != digits[9]:
+        return False
+
+    s2 = sum(d * w for d, w in zip(digits[:10], range(11, 1, -1)))
+    r2 = (s2 * 10) % 11
+    if r2 in (10, 11):
+        r2 = 0
+    if r2 != digits[10]:
+        return False
+
+    return True
+
+
 @app.put("/api/users/me")
 async def update_profile(request: Request, user: dict = Depends(get_current_user)):
     db = request.app.db
@@ -1037,7 +1063,14 @@ async def update_profile(request: Request, user: dict = Depends(get_current_user
         if field in body:
             update[field] = body[field]
     if "cpf" in update:
-        update["cpf_digits"] = re.sub(r"\D", "", update["cpf"] or "")
+        cpf_raw = update["cpf"] or ""
+        cpf_digits = re.sub(r"\D", "", cpf_raw)
+        if cpf_digits:
+            if not is_valid_cpf(cpf_digits):
+                raise HTTPException(status_code=400, detail="CPF inválido. Por favor, verifique os dígitos informados.")
+            update["cpf_digits"] = cpf_digits
+        else:
+            update["cpf_digits"] = ""
     if update:
         await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
