@@ -37,8 +37,8 @@ export default function CompanyEmployees() {
 
   const submit = async (e, confirmLink = false) => {
     e?.preventDefault();
-    if (!form.name || !form.email || (!form.registration_number && !form.matricula)) {
-      toast.error('Preencha Nome Completo, Matrícula Funcional e E-mail.');
+    if (!form.name || !form.email || (!form.registration_number && !form.matricula) || form.salary === '' || form.salary === null) {
+      toast.error('Preencha Nome Completo, Matrícula Funcional, E-mail e Salário Bruto.');
       return;
     }
 
@@ -173,6 +173,7 @@ export default function CompanyEmployees() {
                 <th className="text-left px-3 py-2">Nome</th>
                 <th className="text-left px-3 py-2">Matrícula</th>
                 <th className="text-left px-3 py-2">Email</th>
+                <th className="text-right px-3 py-2">Salário</th>
                 <th className="text-left px-3 py-2">CPF</th>
                 <th className="text-center px-3 py-2">Status</th>
                 <th />
@@ -184,6 +185,7 @@ export default function CompanyEmployees() {
                   <td className="px-3 py-2 font-semibold">{e.name}</td>
                   <td className="px-3 py-2 font-mono text-xs font-bold text-amber-900 bg-amber-50/50 rounded">{e.registration_number || e.matricula || '—'}</td>
                   <td className="px-3 py-2 text-txt-secondary">{e.email}</td>
+                  <td className="px-3 py-2 text-right font-bold text-brand-main font-mono">R$ {Number(e.salary || 0).toFixed(2)}</td>
                   <td className="px-3 py-2 text-txt-secondary font-mono">{e.cpf || e.cpf_digits || '—'}</td>
                   <td className="px-3 py-2 text-center">
                     {e.active ? (
@@ -210,7 +212,7 @@ export default function CompanyEmployees() {
                   </td>
                 </tr>
               ))}
-              {employees.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-txt-secondary">Nenhum funcionário cadastrado.</td></tr>}
+              {employees.length === 0 && <tr><td colSpan="7" className="p-6 text-center text-txt-secondary">Nenhum funcionário cadastrado.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -226,7 +228,7 @@ export default function CompanyEmployees() {
                   {editing ? 'Editar funcionário' : 'Cadastrar Novo Funcionário'}
                 </h2>
                 <p className="text-xs text-txt-secondary mt-0.5">
-                  {editing ? 'Atualize os dados do funcionário' : 'Informe os 3 dados abaixo. Um convite de ativação será enviado ao e-mail.'}
+                  {editing ? 'Atualize os dados do funcionário' : 'Informe os dados abaixo. Um convite de ativação será enviado ao e-mail.'}
                 </p>
               </div>
               <button onClick={() => setShowForm(false)} className="text-xl leading-none text-txt-secondary hover:text-txt-primary">&times;</button>
@@ -257,6 +259,17 @@ export default function CompanyEmployees() {
                   placeholder="joao@empresa.com.br"
                   hint="O funcionário receberá o link único neste e-mail para completar o cadastro"
                 />
+                <Input
+                  label="Salário Bruto (R$)*"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={form.salary}
+                  onChange={e => setForm({ ...form, salary: e.target.value })}
+                  placeholder="Ex: 3500.00"
+                  hint="Usado para calcular o limite de desconto em folha (30% de margem mensal e 100% de limite acumulado)"
+                />
 
                 {editing && (
                   <details className="pt-2 border-t border-border">
@@ -264,7 +277,7 @@ export default function CompanyEmployees() {
                     <div className="mt-3 space-y-3">
                       <Input label="CPF" value={form.cpf || ''} onChange={e => setForm({ ...form, cpf: e.target.value })} placeholder="000.000.000-00" />
                       <Input label="Cargo" value={form.position || ''} onChange={e => setForm({ ...form, position: e.target.value })} />
-                      <Input label="Salário bruto (R$)" type="number" step="0.01" value={form.salary || 0} onChange={e => setForm({ ...form, salary: e.target.value })} />
+                      <Input label="Limite consignado manual (R$)" type="number" step="0.01" value={form.payroll_limit_override || ''} onChange={e => setForm({ ...form, payroll_limit_override: e.target.value })} placeholder="Deixe vazio para usar 30% do salário" />
                     </div>
                   </details>
                 )}
