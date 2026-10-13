@@ -1200,11 +1200,27 @@ async def delete_employee(request: Request, employee_id: str, user: dict = Depen
 
 @router.get("/company/employees/template.xlsx")
 async def employees_template_xlsx(request: Request, user: dict = Depends(_company_admin_lazy)):
-    """Retorna um XLSX modelo para importacao de funcionarios."""
+    """Retorna um XLSX modelo alinhado para importação de funcionários."""
     output = io.BytesIO()
     df = pd.DataFrame([
-        {"nome": "Joao da Silva", "email": "joao@empresa.com", "cpf": "12345678900", "telefone": "(11) 91234-5678", "cargo": "Analista", "salario": 3500.00},
-        {"nome": "Maria Souza", "email": "maria@empresa.com", "cpf": "98765432100", "telefone": "(11) 99876-5432", "cargo": "Gerente", "salario": 8000.00},
+        {
+            "nome": "João da Silva",
+            "matricula": "10492",
+            "email": "joao@empresa.com.br",
+            "salario": 3500.00,
+            "cpf": "",
+            "telefone": "",
+            "cargo": "Analista"
+        },
+        {
+            "nome": "Maria Souza",
+            "matricula": "10493",
+            "email": "maria@empresa.com.br",
+            "salario": 8000.00,
+            "cpf": "",
+            "telefone": "",
+            "cargo": "Gerente"
+        },
     ])
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Funcionarios", index=False)
@@ -1221,8 +1237,10 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
                                 company_id: Optional[str] = Query(None),
                                 dry_run: bool = Query(False),
                                 user: dict = Depends(_company_admin_lazy)):
-    """Importa funcionarios de uma planilha XLSX/XLS.
-    Colunas aceitas (case-insensitive): nome, email, cpf, telefone, cargo, salario.
+    """Importa funcionarios de uma planilha XLSX/XLS alinhada com o cadastro individual.
+    Colunas aceitas:
+      - Obrigatorias: nome, matricula, email, salario
+      - Opcionais: cpf, telefone, cargo
     Se dry_run=true, apenas retorna preview sem inserir."""
     db = request.app.db
     cid = await _resolve_company_scope(request, user, company_id)
@@ -1231,14 +1249,17 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
         df = pd.read_excel(io.BytesIO(raw), dtype=str)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Falha ao ler XLSX: {e}")
+
     df.columns = [str(c).strip().lower() for c in df.columns]
     aliases = {
-        "nome": "name", "name": "name",
-        "email": "email", "e-mail": "email",
+        "nome": "name", "name": "name", "nome completo": "name", "nome_completo": "name", "funcionario": "name", "funcionário": "name",
+        "matricula": "registration_number", "matrícula": "registration_number", "registration_number": "registration_number",
+        "matricula_funcional": "registration_number", "matrícula funcional": "registration_number", "registro": "registration_number",
+        "email": "email", "e-mail": "email", "mail": "email",
+        "salario": "salary", "salário": "salary", "salary": "salary", "salario bruto": "salary", "salário bruto": "salary", "salario_bruto": "salary",
         "cpf": "cpf",
-        "telefone": "phone", "phone": "phone", "celular": "phone",
-        "cargo": "position", "position": "position", "funcao": "position",
-        "salario": "salary", "salary": "salary", "salário": "salary",
+        "telefone": "phone", "phone": "phone", "celular": "phone", "fone": "phone",
+        "cargo": "position", "position": "position", "funcao": "position", "função": "position",
     }
     normalized = {}
     for orig in df.columns:
@@ -1246,10 +1267,23 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
         if key:
             normalized[orig] = key
     df = df.rename(columns=normalized)
-    required = {"name", "email"}
+
+    required = {"name", "registration_number", "email", "salary"}
     missing = required - set(df.columns)
     if missing:
-        raise HTTPException(status_code=400, detail=f"Colunas obrigatorias ausentes: {', '.join(missing)}")
+        missing_pt = []
+        if "name" in missing: missing_pt.append("nome")
+        if "registration_number" in missing: missing_pt.append("matricula")
+        if "email" in missing: missing_pt.append("email")
+        if "salary" in missing: missing_pt.append("salario")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Colunas obrigatórias ausentes na planilha: {', '.join(missing_pt)}. Certifique-se de usar a planilha modelo."
+        )
+
+    company_doc = await db.companies.find_one({"company_id": cid}, {"_id": 0})
+    company_rep_id = company_doc.get("representative_user_id") if company_doc else None
+    company_name = company_doc.get("name") if company_doc else "Empresa Credenciada"
 
     preview: List[Dict] = []
     inserted = 0
@@ -1260,30 +1294,54 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
         try:
             name = str(row.get("name", "")).strip()
             email = str(row.get("email", "")).strip().lower()
-            if not name or not email or email == "nan":
+            reg_num = str(row.get("registration_number", "")).strip()
+            salary_raw = row.get("salary", 0)
+
+            if not name or not email or email == "nan" or not reg_num or reg_num == "nan":
                 skipped += 1
+                errors.append(f"Linha {int(idx) + 2}: Campos obrigatórios (nome, e-mail ou matrícula) em branco.")
                 continue
-            cpf_dig = _digits(str(row.get("cpf", "")) if "cpf" in df.columns else "")
-            phone_dig = _digits(str(row.get("phone", "")) if "phone" in df.columns else "")
-            salary_raw = row.get("salary", 0) if "salary" in df.columns else 0
+
             try:
                 salary = float(str(salary_raw).replace(",", ".")) if salary_raw is not None and str(salary_raw).lower() != "nan" else 0.0
             except Exception:
                 salary = 0.0
+
+            cpf_dig = _digits(str(row.get("cpf", "")) if "cpf" in df.columns else "")
+            phone_dig = _digits(str(row.get("phone", "")) if "phone" in df.columns else "")
             position = str(row.get("position", "") or "").strip() if "position" in df.columns else ""
 
-            dup = await db.company_employees.find_one({"company_id": cid, "email": email}, {"_id": 0, "employee_id": 1})
-            row_status = "duplicate" if dup else "ready"
-            item = {"name": name, "email": email, "cpf": cpf_dig, "phone": phone_dig, "position": position, "salary": salary, "status": row_status}
-            preview.append(item)
-            if row_status == "ready" and not dry_run:
-                # busca dados da empresa para obter representante
-                company_doc = await db.companies.find_one({"company_id": cid}, {"_id": 0})
-                company_rep_id = company_doc.get("representative_user_id") if company_doc else None
+            # Dedupe dentro da empresa por email ou matricula
+            q_dup: Dict[str, Any] = {
+                "company_id": cid,
+                "$or": [
+                    {"email": email},
+                    {"registration_number": reg_num},
+                    {"matricula": reg_num}
+                ]
+            }
+            if cpf_dig:
+                q_dup["$or"].append({"cpf_digits": cpf_dig})
 
-                linked = None
-                if email:
-                    linked = await db.users.find_one({"email": email}, {"_id": 0})
+            dup = await db.company_employees.find_one(q_dup, {"_id": 0, "employee_id": 1})
+            row_status = "duplicate" if dup else "ready"
+
+            item = {
+                "name": name,
+                "email": email,
+                "registration_number": reg_num,
+                "matricula": reg_num,
+                "salary": salary,
+                "cpf": cpf_dig,
+                "phone": phone_dig,
+                "position": position,
+                "status": row_status
+            }
+            preview.append(item)
+
+            if row_status == "ready" and not dry_run:
+                reg_token = f"inv_{uuid.uuid4().hex}"
+                linked = await db.users.find_one({"email": email}, {"_id": 0})
                 if not linked and cpf_dig:
                     linked = await db.users.find_one({"cpf_digits": cpf_dig}, {"_id": 0})
 
@@ -1295,10 +1353,14 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
                         "user_id": emp_user_id,
                         "name": name,
                         "email": email,
-                        "cpf_digits": cpf_dig,
-                        "phone_digits": phone_dig,
+                        "registration_number": reg_num,
+                        "matricula": reg_num,
+                        "registration_token": reg_token,
                         "password_hash": pwd_hash,
                         "role": "customer",
+                        "active": False,
+                        "is_email_verified": False,
+                        "completion_status": "pending_data",
                         "networks": ["network_2"],
                         "network_type": "network_2",
                         "sponsor_id": company_rep_id,
@@ -1306,32 +1368,54 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
                         "created_at": _now_iso(),
                         "updated_at": _now_iso(),
                     }
+                    if cpf_dig: user_doc["cpf_digits"] = cpf_dig
+                    if phone_dig: user_doc["phone_digits"] = phone_dig
                     await db.users.insert_one(user_doc)
                     linked_user_id = emp_user_id
                 else:
                     linked_user_id = linked["user_id"]
-                    upd_u = {}
+                    upd_u = {
+                        "registration_token": reg_token,
+                        "registration_number": reg_num,
+                        "matricula": reg_num,
+                        "completion_status": "pending_data" if not linked.get("terms_accepted") else "completed"
+                    }
                     if not linked.get("sponsor_id") and company_rep_id:
                         upd_u["sponsor_id"] = company_rep_id
                         upd_u["sponsor_id_net2"] = company_rep_id
                     current_nets = linked.get("networks") or []
                     if "network_2" not in current_nets:
                         upd_u["networks"] = list(set(current_nets + ["network_2"]))
-                    if upd_u:
-                        await db.users.update_one({"user_id": linked["user_id"]}, {"$set": upd_u})
+                    await db.users.update_one({"user_id": linked["user_id"]}, {"$set": upd_u})
 
                 doc = {
                     "employee_id": _gen_id("emp_"),
                     "company_id": cid,
                     "user_id": linked_user_id,
-                    "name": name, "email": email,
-                    "cpf": cpf_dig, "cpf_digits": cpf_dig,
-                    "phone": phone_dig, "phone_digits": phone_dig,
-                    "position": position, "salary": salary,
-                    "active": True, "created_at": _now_iso(),
+                    "name": name,
+                    "email": email,
+                    "registration_number": reg_num,
+                    "matricula": reg_num,
+                    "salary": salary,
+                    "cpf": cpf_dig,
+                    "cpf_digits": cpf_dig,
+                    "phone": phone_dig,
+                    "phone_digits": phone_dig,
+                    "position": position,
+                    "registration_token": reg_token,
+                    "status": "invited",
+                    "active": False,
+                    "created_at": _now_iso(),
                 }
                 await db.company_employees.insert_one(doc)
                 inserted += 1
+
+                # Dispara o e-mail de convite para ativar cadastro e aceitar termos
+                try:
+                    await _send_employee_invite_email(db, doc, company_name)
+                except Exception as e_mail:
+                    logger.exception(f"Erro ao enviar e-mail de convite na importação para {email}: {e_mail}")
+
         except Exception as e:
             errors.append(f"linha {int(idx) + 2}: {e}")
 

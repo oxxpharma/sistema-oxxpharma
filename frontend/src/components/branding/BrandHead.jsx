@@ -29,8 +29,9 @@ export default function BrandHead() {
       const oldIcons = head.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
       oldIcons.forEach(el => el.parentNode && el.parentNode.removeChild(el));
 
-      // cache-bust simples: adiciona ?v= timestamp
-      const busted = faviconUrl + (faviconUrl.includes('?') ? '&' : '?') + 'v=' + Date.now();
+      // Se for data URL (base64), NUNCA adiciona parâmetros (?v=), pois corrompe a decodificação da imagem no navegador
+      const isDataUrl = faviconUrl.startsWith('data:');
+      const finalUrl = isDataUrl ? faviconUrl : (faviconUrl + (faviconUrl.includes('?') ? '&' : '?') + 'v=' + Date.now());
 
       // detecta tipo
       let type = 'image/png';
@@ -43,12 +44,18 @@ export default function BrandHead() {
       const link = document.createElement('link');
       link.rel = 'icon';
       link.type = type;
-      link.href = busted;
+      link.href = finalUrl;
       head.appendChild(link);
+
+      const shortcut = document.createElement('link');
+      shortcut.rel = 'shortcut icon';
+      shortcut.type = type;
+      shortcut.href = finalUrl;
+      head.appendChild(shortcut);
 
       const apple = document.createElement('link');
       apple.rel = 'apple-touch-icon';
-      apple.href = busted;
+      apple.href = finalUrl;
       head.appendChild(apple);
     }
 

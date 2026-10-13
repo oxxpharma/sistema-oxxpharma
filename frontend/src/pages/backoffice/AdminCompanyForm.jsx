@@ -371,16 +371,22 @@ export default function AdminCompanyForm() {
               {importPreview.errors?.length > 0 && <div className="text-xs text-red-600 mb-2">Erros: {importPreview.errors.join('; ')}</div>}
               <div className="max-h-64 overflow-y-auto bg-white border border-border rounded">
                 <table className="w-full text-xs">
-                  <thead className="bg-bg-secondary sticky top-0">
-                    <tr><th className="text-left px-2 py-1">Nome</th><th className="text-left px-2 py-1">Email</th><th className="text-left px-2 py-1">Cargo</th><th className="text-right px-2 py-1">Salário</th><th className="text-center px-2 py-1">Status</th></tr>
+                  <thead className="bg-bg-secondary sticky top-0 font-bold text-txt-secondary">
+                    <tr>
+                      <th className="text-left px-2 py-1">Nome</th>
+                      <th className="text-left px-2 py-1">Matrícula</th>
+                      <th className="text-left px-2 py-1">Email</th>
+                      <th className="text-right px-2 py-1">Salário</th>
+                      <th className="text-center px-2 py-1">Status</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {importPreview.preview.slice(0, 50).map((p, i) => (
                       <tr key={i} className="border-t border-border">
-                        <td className="px-2 py-1">{p.name}</td>
-                        <td className="px-2 py-1">{p.email}</td>
-                        <td className="px-2 py-1">{p.position}</td>
-                        <td className="px-2 py-1 text-right">R$ {(p.salary || 0).toFixed(2)}</td>
+                        <td className="px-2 py-1 font-medium">{p.name}</td>
+                        <td className="px-2 py-1 font-mono text-amber-900 bg-amber-50/50 rounded">{p.registration_number || p.matricula || '—'}</td>
+                        <td className="px-2 py-1 text-txt-secondary">{p.email}</td>
+                        <td className="px-2 py-1 text-right font-mono font-bold text-brand-main">R$ {Number(p.salary || 0).toFixed(2)}</td>
                         <td className="px-2 py-1 text-center">{p.status === 'ready' ? <span className="text-emerald-600 font-bold">OK</span> : <span className="text-orange-600 font-bold">DUP</span>}</td>
                       </tr>
                     ))}

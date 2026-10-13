@@ -156,10 +156,47 @@ export default function CompanyEmployees() {
       </div>
 
       {importPreview && (
-        <div className="bg-white border border-border rounded-xl p-4 mb-4">
-          <div className="text-sm mb-2">Preview: <b>{importPreview.total}</b> · a inserir: <b>{importPreview.preview.filter(p => p.status === 'ready').length}</b> · duplicadas: <b>{importPreview.preview.filter(p => p.status === 'duplicate').length}</b></div>
+        <div className="bg-white border border-border rounded-xl p-4 mb-4 shadow-sm">
+          <div className="text-sm mb-2 font-medium text-txt-primary">
+            Preview da Importação: <b>{importPreview.total}</b> funcionários no arquivo · a inserir: <b className="text-emerald-700">{importPreview.preview.filter(p => p.status === 'ready').length}</b> · duplicados/ignorados: <b className="text-amber-700">{importPreview.preview.filter(p => p.status !== 'ready').length}</b>
+          </div>
+          {importPreview.errors?.length > 0 && (
+            <div className="text-xs text-red-600 mb-2 font-medium">Avisos do arquivo: {importPreview.errors.join('; ')}</div>
+          )}
+          <div className="max-h-60 overflow-y-auto bg-white border border-border rounded-lg mb-3">
+            <table className="w-full text-xs">
+              <thead className="bg-bg-secondary sticky top-0 font-bold text-txt-secondary">
+                <tr>
+                  <th className="text-left px-3 py-1.5">Nome</th>
+                  <th className="text-left px-3 py-1.5">Matrícula</th>
+                  <th className="text-left px-3 py-1.5">E-mail</th>
+                  <th className="text-right px-3 py-1.5">Salário</th>
+                  <th className="text-center px-3 py-1.5">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importPreview.preview.slice(0, 100).map((p, i) => (
+                  <tr key={i} className="border-t border-border">
+                    <td className="px-3 py-1.5 font-medium">{p.name}</td>
+                    <td className="px-3 py-1.5 font-mono text-amber-900 bg-amber-50/50 rounded">{p.registration_number || p.matricula || '—'}</td>
+                    <td className="px-3 py-1.5 text-txt-secondary">{p.email}</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-bold text-brand-main">R$ {Number(p.salary || 0).toFixed(2)}</td>
+                    <td className="px-3 py-1.5 text-center">
+                      {p.status === 'ready' ? (
+                        <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded text-[10px]">OK (PRONTO)</span>
+                      ) : (
+                        <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded text-[10px]">DUPLICADO</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div className="flex gap-2">
-            <Button onClick={() => onImportFile(importPreview.file, false)} loading={importing}>Confirmar importação</Button>
+            <Button onClick={() => onImportFile(importPreview.file, false)} loading={importing}>
+              Confirmar Importação ({importPreview.preview.filter(p => p.status === 'ready').length} funcionários)
+            </Button>
             <Button variant="ghost" onClick={() => setImportPreview(null)}>Descartar</Button>
           </div>
         </div>
