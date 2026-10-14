@@ -203,7 +203,7 @@ export default function StoreHeader() {
         className="bg-white border-b border-gray-100/80 shadow-[0_4px_25px_-5px_rgba(0,0,0,0.06)] sticky top-0 z-40 transition-all"
         data-testid="store-header"
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-[8rem] flex items-center justify-between gap-4">
           
           {/* Logo à esquerda */}
           <Link to="/" className="flex items-center gap-2 shrink-0 py-2" data-testid="logo-link">
