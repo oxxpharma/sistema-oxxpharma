@@ -1626,6 +1626,24 @@ async def admin_list_products(
     elif sort_by == "order":
         sort_fields = [("order", 1), ("created_at", -1)]
 
+    limit = min(max(1, limit), 200)
+
+    # Garante que qualquer produto sem 'order' receba uma ordenação sequencial automática
+    has_unordered = await db.products.count_documents({"$or": [{"order": {"$exists": False}}, {"order": None}]})
+    if has_unordered > 0:
+        unordered = await db.products.find(
+            {"$or": [{"order": {"$exists": False}}, {"order": None}]}
+        ).sort("created_at", -1).to_list(2000)
+        max_doc = await db.products.find_one({"order": {"$type": "number"}}, sort=[("order", -1)])
+        cur_order = (max_doc.get("order", 0) + 1) if max_doc and max_doc.get("order") is not None else 0
+        for p in unordered:
+            pid = p.get("product_id")
+            if pid:
+                await db.products.update_one({"product_id": pid}, {"$set": {"order": cur_order}})
+            else:
+                await db.products.update_one({"_id": p["_id"]}, {"$set": {"order": cur_order}})
+            cur_order += 1
+
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort(sort_fields).skip((page-1)*limit).limit(limit).to_list(limit)
 
@@ -1641,13 +1659,21 @@ async def admin_list_products(
     }
 
 @app.post("/api/admin/products/reorder")
-async def admin_reorder_products(request: Request, body: dict = Body(...), user: dict = Depends(require_admin())):
+async def admin_reorder_products(request: Request, user: dict = Depends(require_admin())):
     db = request.app.db
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
     product_ids = body.get("product_ids")
     if product_ids and isinstance(product_ids, list):
         start_order = int(body.get("start_order", 0))
         for index, pid in enumerate(product_ids):
-            await db.products.update_one({"product_id": pid}, {"$set": {"order": start_order + index}})
+            await db.products.update_one(
+                {"$or": [{"product_id": str(pid)}, {"slug": str(pid)}]},
+                {"$set": {"order": start_order + index}}
+            )
         return {"ok": True, "count": len(product_ids)}
 
     orders = body.get("orders")
@@ -1656,7 +1682,10 @@ async def admin_reorder_products(request: Request, body: dict = Body(...), user:
             pid = item.get("product_id")
             ord_val = item.get("order")
             if pid is not None and ord_val is not None:
-                await db.products.update_one({"product_id": pid}, {"$set": {"order": int(ord_val)}})
+                await db.products.update_one(
+                    {"$or": [{"product_id": str(pid)}, {"slug": str(pid)}]},
+                    {"$set": {"order": int(ord_val)}}
+                )
         return {"ok": True, "count": len(orders)}
 
     raise HTTPException(status_code=400, detail="Lista de produtos para reordenar inválida")

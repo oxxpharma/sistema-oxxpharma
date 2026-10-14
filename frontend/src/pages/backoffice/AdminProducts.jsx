@@ -22,12 +22,12 @@ import {
   ArrowUpDown,
   LayoutList,
   LayoutGrid,
-  GripVertical
+  GripVertical,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
-
-const PAGE_LIMIT = 20;
 
 export default function AdminProducts() {
   const nav = useNavigate();
@@ -45,6 +45,25 @@ export default function AdminProducts() {
     setViewMode(mode);
     try {
       localStorage.setItem('admin_products_view_mode', mode);
+    } catch (_) {}
+  };
+
+  // Quantidade de produtos por página (personalizável até 200)
+  const [limit, setLimit] = useState(() => {
+    try {
+      const saved = localStorage.getItem('admin_products_limit');
+      return saved ? Math.min(200, Math.max(10, parseInt(saved, 10))) : 20;
+    } catch (_) {
+      return 20;
+    }
+  });
+
+  const changeLimit = (newLimit) => {
+    const val = parseInt(newLimit, 10) || 20;
+    setLimit(val);
+    setPage(1);
+    try {
+      localStorage.setItem('admin_products_limit', String(val));
     } catch (_) {}
   };
   
@@ -84,7 +103,7 @@ export default function AdminProducts() {
     setLoading(true);
     const tp = typeof targetPage === 'number' ? targetPage : 1;
     try {
-      const q = new URLSearchParams({ page: String(tp), limit: String(PAGE_LIMIT) });
+      const q = new URLSearchParams({ page: String(tp), limit: String(limit) });
       if (search.trim()) q.set('search', search.trim());
       if (category && category !== 'all') q.set('category', category);
       if (brand && brand !== 'all') q.set('brand', brand);
@@ -107,7 +126,7 @@ export default function AdminProducts() {
     } finally {
       setLoading(false);
     }
-  }, [search, category, brand, status, stockStatus, dateFrom, dateTo, sortBy]);
+  }, [search, category, brand, status, stockStatus, dateFrom, dateTo, sortBy, limit]);
 
   // Recarrega sempre que qualquer filtro mudar, voltando pra página 1
   useEffect(() => {
@@ -121,8 +140,7 @@ export default function AdminProducts() {
     status !== 'all' ||
     stockStatus !== 'all' ||
     dateFrom ||
-    dateTo ||
-    sortBy !== 'order'
+    dateTo
   );
 
   const clearFilters = () => {
@@ -144,6 +162,26 @@ export default function AdminProducts() {
       load(page);
     } catch (err) {
       toast.error(err.message || 'Erro ao excluir produto');
+    }
+  };
+
+  // Salvar nova ordenação no backend
+  const persistOrder = async (reorderedProducts) => {
+    setIsReordering(true);
+    try {
+      const startOrder = (page - 1) * limit;
+      const res = await api.post('/api/admin/products/reorder', {
+        product_ids: reorderedProducts.map(p => p.product_id),
+        start_order: startOrder,
+      });
+      if (res?.ok) {
+        toast.success('Posições salvas na Ordem Personalizada!', { id: 'reorder-toast', duration: 2500 });
+      }
+    } catch (err) {
+      toast.error('Erro ao salvar nova ordem: ' + (err.message || 'Falha na comunicação'));
+      load(page);
+    } finally {
+      setIsReordering(false);
     }
   };
 
@@ -185,21 +223,28 @@ export default function AdminProducts() {
     setDraggedIndex(null);
     setDragOverIndex(null);
 
-    // Enviar nova ordem para o backend
-    setIsReordering(true);
-    try {
-      const startOrder = (page - 1) * PAGE_LIMIT;
-      await api.post('/api/admin/products/reorder', {
-        product_ids: reordered.map(p => p.product_id),
-        start_order: startOrder,
-      });
-      toast.success('Ordem dos produtos atualizada com sucesso!', { id: 'reorder-toast', duration: 2500 });
-    } catch (err) {
-      toast.error('Erro ao salvar nova ordem: ' + (err.message || 'Falha na comunicação'));
-      load(page);
-    } finally {
-      setIsReordering(false);
+    // Se não estiver no modo de ordem personalizada, seleciona automaticamente
+    if (sortBy !== 'order') {
+      setSortBy('order');
+      toast.info('Filtro alterado para "Ordem personalizada" para fixar a nova posição.', { duration: 3000 });
     }
+
+    await persistOrder(reordered);
+  };
+
+  // Botões de mover 1 posição para cima / para baixo
+  const moveProduct = async (index, newIndex) => {
+    if (newIndex < 0 || newIndex >= products.length) return;
+    const reordered = [...products];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(newIndex, 0, moved);
+    setProducts(reordered);
+
+    if (sortBy !== 'order') {
+      setSortBy('order');
+    }
+
+    await persistOrder(reordered);
   };
 
   return (
@@ -214,11 +259,28 @@ export default function AdminProducts() {
             </span>
           </h1>
           <p className="text-sm text-txt-secondary mt-1">
-            Gerencie o catálogo, preços, estoque, categorias e ordene arrastando os produtos.
+            Gerencie o catálogo, preços, estoque e posições dos produtos na vitrine.
           </p>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Seletor de Itens por Página */}
+          <div className="flex items-center gap-1.5 bg-white border border-border px-3 py-1.5 rounded-xl shadow-2xs text-xs">
+            <span className="text-txt-secondary font-medium hidden sm:inline">Exibir:</span>
+            <select
+              value={limit}
+              onChange={e => changeLimit(e.target.value)}
+              className="bg-transparent font-bold text-gray-800 focus:outline-none cursor-pointer"
+              title="Quantidade de produtos por página (até 200)"
+              data-testid="limit-select"
+            >
+              <option value="20">20 por pág.</option>
+              <option value="50">50 por pág.</option>
+              <option value="100">100 por pág.</option>
+              <option value="200">200 por pág.</option>
+            </select>
+          </div>
+
           {/* Switch Lista vs Cards */}
           <div className="flex items-center bg-gray-100/90 p-1 rounded-xl border border-gray-200">
             <button
@@ -417,37 +479,54 @@ export default function AdminProducts() {
               />
             </div>
 
-            {/* Ordenação */}
+            {/* Linha de Ordenação e Itens por Página */}
             <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 xl:col-span-6 flex items-center justify-between pt-2 border-t border-gray-100 flex-wrap gap-3">
-              <div className="flex items-center gap-2">
-                <ArrowUpDown className="w-4 h-4 text-txt-secondary" />
-                <span className="text-xs font-semibold text-txt-secondary">Ordenar lista por:</span>
-                <select
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value)}
-                  className="h-9 px-3 bg-bg-secondary/60 border border-border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-main/20 focus:bg-white"
-                  data-testid="filter-sort"
-                >
-                  <option value="order">Ordem personalizada (arraste para mudar)</option>
-                  <option value="created_at_desc">Mais recentes primeiro</option>
-                  <option value="created_at_asc">Mais antigos primeiro</option>
-                  <option value="name_asc">Nome (A - Z)</option>
-                  <option value="name_desc">Nome (Z - A)</option>
-                  <option value="price_asc">Menor preço</option>
-                  <option value="price_desc">Maior preço</option>
-                  <option value="stock_desc">Maior estoque</option>
-                  <option value="stock_asc">Menor estoque</option>
-                </select>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <ArrowUpDown className="w-4 h-4 text-txt-secondary" />
+                  <span className="text-xs font-semibold text-txt-secondary">Ordenar por:</span>
+                  <select
+                    value={sortBy}
+                    onChange={e => setSortBy(e.target.value)}
+                    className="h-9 px-3 bg-bg-secondary/60 border border-border rounded-lg text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-main/20 focus:bg-white"
+                    data-testid="filter-sort"
+                  >
+                    <option value="order">✨ Ordem personalizada (salva por arraste)</option>
+                    <option value="created_at_desc">Mais recentes primeiro</option>
+                    <option value="created_at_asc">Mais antigos primeiro</option>
+                    <option value="name_asc">Nome (A - Z)</option>
+                    <option value="name_desc">Nome (Z - A)</option>
+                    <option value="price_asc">Menor preço</option>
+                    <option value="price_desc">Maior preço</option>
+                    <option value="stock_desc">Maior estoque</option>
+                    <option value="stock_asc">Menor estoque</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-txt-secondary">Exibir:</span>
+                  <select
+                    value={limit}
+                    onChange={e => changeLimit(e.target.value)}
+                    className="h-9 px-2.5 bg-bg-secondary/60 border border-border rounded-lg text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-main/20 focus:bg-white"
+                    data-testid="filter-limit"
+                  >
+                    <option value="20">20 produtos</option>
+                    <option value="50">50 produtos</option>
+                    <option value="100">100 produtos</option>
+                    <option value="200">200 produtos (máximo)</option>
+                  </select>
+                </div>
               </div>
 
               <div className="flex items-center gap-3 text-xs">
                 {isReordering ? (
                   <span className="inline-flex items-center gap-1.5 text-brand-main font-semibold animate-pulse">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando nova ordem...
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando posições personalizadas...
                   </span>
                 ) : (
                   <span className="text-txt-secondary hidden md:inline">
-                    💡 <em>Dica: Arraste os itens para cima ou para baixo para reordenar a vitrine.</em>
+                    💡 <em>Arraste qualquer produto ou use as setas para salvar sua ordem personalizada.</em>
                   </span>
                 )}
                 {hasActiveFilters && (
@@ -517,7 +596,7 @@ export default function AdminProducts() {
                   }`}
                   data-testid={`product-card-${p.product_id}`}
                 >
-                  {/* Top: Imagem com Grip Handle e Badges */}
+                  {/* Top: Imagem com Grip Handle, Reordenar e Badges */}
                   <div className="relative aspect-square bg-gray-50 flex items-center justify-center overflow-hidden border-b border-gray-100">
                     {(p.images || [])[0] ? (
                       <img
@@ -529,12 +608,32 @@ export default function AdminProducts() {
                       <ImageIcon className="w-12 h-12 text-gray-300" />
                     )}
 
-                    {/* Grip Handle para Arrastar */}
-                    <div
-                      className="absolute top-2.5 left-2.5 p-1.5 rounded-lg bg-white/90 backdrop-blur-xs text-gray-500 hover:text-brand-main shadow-xs cursor-grab active:cursor-grabbing border border-gray-200/80 transition-colors"
-                      title="Clique e arraste para reordenar"
-                    >
-                      <GripVertical className="w-4 h-4" />
+                    {/* Controles de Ordem (Grip Handle + Setas para cima/baixo) */}
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1 bg-white/90 backdrop-blur-xs p-1 rounded-lg border border-gray-200/80 shadow-xs">
+                      <div
+                        className="p-1 text-gray-500 hover:text-brand-main cursor-grab active:cursor-grabbing"
+                        title="Arraste para reordenar"
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={(e) => { e.stopPropagation(); moveProduct(idx, idx - 1); }}
+                        className="p-0.5 text-gray-400 hover:text-brand-main disabled:opacity-20"
+                        title="Subir posição"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === products.length - 1}
+                        onClick={(e) => { e.stopPropagation(); moveProduct(idx, idx + 1); }}
+                        className="p-0.5 text-gray-400 hover:text-brand-main disabled:opacity-20"
+                        title="Descer posição"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
                     </div>
 
                     {/* Badges de Status */}
@@ -628,12 +727,25 @@ export default function AdminProducts() {
             })}
           </div>
 
-          <div className="bg-white rounded-2xl border border-border p-4 shadow-xs">
+          <div className="bg-white rounded-2xl border border-border p-4 shadow-xs flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 text-xs text-txt-secondary">
+              <span>Produtos por página:</span>
+              <select
+                value={limit}
+                onChange={e => changeLimit(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-md px-2 py-1 font-bold text-gray-800"
+              >
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </div>
             <Pagination
               page={page}
               pages={pages}
               total={total}
-              limit={PAGE_LIMIT}
+              limit={limit}
               onChange={(p) => load(p)}
               testId="products-pagination"
             />
@@ -646,8 +758,8 @@ export default function AdminProducts() {
             <table className="w-full text-sm">
               <thead className="bg-bg-secondary/70 text-xs uppercase text-txt-secondary border-b border-border">
                 <tr>
-                  <th className="p-3.5 pl-4 w-10 text-center font-semibold" title="Arrastar para reordenar">
-                    <GripVertical className="w-4 h-4 mx-auto text-gray-400" />
+                  <th className="p-3.5 pl-4 w-16 text-center font-semibold" title="Arrastar ou mover para reordenar">
+                    Ordem
                   </th>
                   <th className="text-left p-3.5 font-semibold">Produto</th>
                   <th className="text-left p-3.5 font-semibold">Categoria</th>
@@ -680,9 +792,36 @@ export default function AdminProducts() {
                       }`}
                       data-testid={`product-row-${p.product_id}`}
                     >
-                      {/* Alça de Arraste (Drag Handle) */}
-                      <td className="p-3 pl-4 text-center cursor-grab active:cursor-grabbing text-gray-400 hover:text-brand-main">
-                        <GripVertical className="w-4 h-4 mx-auto" />
+                      {/* Alça de Arraste + Botões Subir/Descer */}
+                      <td className="p-2 pl-3 text-center">
+                        <div className="flex items-center justify-center gap-0.5">
+                          <div
+                            className="p-1 rounded text-gray-400 hover:text-brand-main hover:bg-orange-50 cursor-grab active:cursor-grabbing"
+                            title="Clique e arraste para reordenar"
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+                          <div className="flex flex-col">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => moveProduct(idx, idx - 1)}
+                              className="p-0.5 text-gray-400 hover:text-brand-main disabled:opacity-20"
+                              title="Subir posição"
+                            >
+                              <ChevronUp className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === products.length - 1}
+                              onClick={() => moveProduct(idx, idx + 1)}
+                              className="p-0.5 text-gray-400 hover:text-brand-main disabled:opacity-20"
+                              title="Descer posição"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
                       </td>
 
                       {/* Produto */}
@@ -786,12 +925,25 @@ export default function AdminProducts() {
             </table>
           </div>
 
-          <div className="px-5 py-4 border-t border-border">
+          <div className="px-5 py-4 border-t border-border flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 text-xs text-txt-secondary">
+              <span>Produtos por página:</span>
+              <select
+                value={limit}
+                onChange={e => changeLimit(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-md px-2 py-1 font-bold text-gray-800 cursor-pointer"
+              >
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200 (máximo)</option>
+              </select>
+            </div>
             <Pagination
               page={page}
               pages={pages}
               total={total}
-              limit={PAGE_LIMIT}
+              limit={limit}
               onChange={(p) => load(p)}
               testId="products-pagination"
             />
