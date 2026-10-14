@@ -131,6 +131,7 @@ function AppRoutes() {
         <Route path="/produto/:id" element={<ProductDetails />} />
         <Route path="/categoria/:slug" element={<CategoryPage />} />
         <Route path="/subcategoria/:slug" element={<SubcategoryPage />} />
+        <Route path="/produtos" element={<SearchPage />} />
         <Route path="/buscar" element={<SearchPage />} />
         <Route path="/carrinho" element={<CartPage />} />
         <Route path="/checkout" element={<Guard requireAuth><CheckoutPage /></Guard>} />

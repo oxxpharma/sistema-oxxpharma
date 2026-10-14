@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
 const TABS = [
   { key: 'identity', label: 'Identidade', icon: Palette },
+  { key: 'navigation', label: 'Menu Superior (Topbar)', icon: Layout },
   { key: 'logo_sizes', label: 'Logo por local', icon: ImageIcon },
   { key: 'hero', label: 'Banner principal', icon: Layout },
   { key: 'announcement', label: 'Barra de aviso', icon: Megaphone },
@@ -47,6 +48,8 @@ export default function AdminAppearance() {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('identity');
   const [userCategories, setUserCategories] = useState([]);
+  const [cmsPages, setCmsPages] = useState([]);
+  const [categoriesList, setCategoriesList] = useState([]);
   // Iter 44: aparencia por marca. Carrega tenants e escolhe um pra editar.
   const [tenants, setTenants] = useState([]);
   const [editingTenant, setEditingTenant] = useState(
@@ -56,12 +59,16 @@ export default function AdminAppearance() {
   const load = async (tid) => {
     setLoading(true);
     try {
-      const [tenantsResp, ucs] = await Promise.all([
+      const [tenantsResp, ucs, pagesResp, catsResp] = await Promise.all([
         api.get('/api/admin/tenants').catch(() => ({ items: [] })),
         api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
+        api.get('/api/admin/pages').catch(() => ({ pages: [] })),
+        api.get('/api/categories').catch(() => ({ categories: [] })),
       ]);
       const list = tenantsResp.items || [];
       setTenants(list);
+      setCmsPages(pagesResp.pages || []);
+      setCategoriesList(catsResp.categories || []);
       // Resolve tenant ativo
       const stored = localStorage.getItem('appearance_tenant') || '';
       const resolved = tid || stored || (list.find(x => x.is_primary)?.tenant_id) || list[0]?.tenant_id || 'oxxpharma';
@@ -144,6 +151,26 @@ export default function AdminAppearance() {
   const setFooterPage = (i, patch) => set('footer_pages', s.footer_pages.map((p, idx) => idx === i ? { ...p, ...patch } : p));
   const removeFooterPage = (i) => set('footer_pages', s.footer_pages.filter((_, idx) => idx !== i));
   const addFooterPage = () => set('footer_pages', [...(s.footer_pages || []), { label: '', slug: '' }]);
+
+  const setNavItem = (i, patch) => set('header_nav_items', (s.header_nav_items || []).map((p, idx) => idx === i ? { ...p, ...patch } : p));
+  const removeNavItem = (i) => set('header_nav_items', (s.header_nav_items || []).filter((_, idx) => idx !== i));
+  const addNavItem = () => set('header_nav_items', [...(s.header_nav_items || []), { label: '', url: '' }]);
+  const moveNavItem = (fromIdx, toIdx) => {
+    const list = [...(s.header_nav_items || [])];
+    if (toIdx < 0 || toIdx >= list.length) return;
+    const [item] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, item);
+    set('header_nav_items', list);
+  };
+  const resetDefaultNavItems = () => {
+    set('header_nav_items', [
+      { label: 'Protocolo Dr.Bactéria', url: '/p/protocolo-dr-bacteria' },
+      { label: 'Óleos Ozonizados', url: '/categoria/oleos-ozonizados' },
+      { label: 'Quem Somos', url: '/p/sobre' },
+      { label: 'Blog', url: '/p/blog' },
+      { label: 'Contato', url: '/p/contato' },
+    ]);
+  };
 
   const setLogoSize = (slotKey, field, value) => {
     const sizes = { ...(s.logo_sizes || {}) };
@@ -241,6 +268,162 @@ export default function AdminAppearance() {
             <Field label="Facebook (URL)" value={s.social_facebook} onChange={(v) => set('social_facebook', v)} />
             <Field label="YouTube (URL)" value={s.social_youtube} onChange={(v) => set('social_youtube', v)} />
             <Field label="WhatsApp (URL ou número)" value={s.social_whatsapp} onChange={(v) => set('social_whatsapp', v)} placeholder="https://wa.me/5511999999999" />
+          </Card>
+        </div>
+      )}
+
+      {tab === 'navigation' && (
+        <div className="space-y-5 max-w-4xl">
+          <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 text-xs text-sky-900 flex items-start gap-3">
+            <Layout className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm text-sky-950 mb-1">Estrutura do Menu Superior (Topbar)</p>
+              <p>Os itens <b>Início</b> (leva para a página principal) e <b>Produtos</b> (com submenu automático em cascata de Categorias e Subcategorias ativas) são fixos e integrados ao sistema. Abaixo, você pode personalizar livremente os demais itens da barra superior, apontando para páginas criadas no CMS, categorias ou links externos.</p>
+            </div>
+          </div>
+
+          <Card title="Itens Personalizados do Menu">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <p className="text-xs text-txt-secondary">
+                Adicione, ordene e configure para onde cada botão do menu superior irá direcionar o cliente.
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={resetDefaultNavItems} className="text-xs">
+                <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restaurar Padrão
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {(s.header_nav_items || []).map((item, idx) => (
+                <div key={idx} className="bg-bg-secondary/40 border border-border rounded-xl p-3 flex flex-col md:flex-row items-stretch md:items-end gap-3 transition hover:border-brand-main/40">
+                  <div className="flex items-center gap-1 self-start md:self-center">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => moveNavItem(idx, idx - 1)}
+                      className="p-1 rounded hover:bg-white text-txt-secondary disabled:opacity-30"
+                      title="Mover para cima"
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === (s.header_nav_items || []).length - 1}
+                      onClick={() => moveNavItem(idx, idx + 1)}
+                      className="p-1 rounded hover:bg-white text-txt-secondary disabled:opacity-30"
+                      title="Mover para baixo"
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-mono font-bold text-txt-secondary w-5 text-center">{idx + 1}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-[180px]">
+                    <label className="text-[11px] font-semibold text-txt-secondary block mb-1">Rótulo / Nome no Menu*</label>
+                    <input
+                      type="text"
+                      value={item.label || ''}
+                      onChange={(e) => setNavItem(idx, { label: e.target.value })}
+                      placeholder="Ex: Protocolo Dr.Bactéria"
+                      className="w-full px-3 py-1.5 border border-border bg-white rounded-lg text-sm font-medium focus:outline-none focus:border-brand-main"
+                    />
+                  </div>
+
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="text-[11px] font-semibold text-txt-secondary block mb-1">Vincular a uma Página / Categoria</label>
+                    <select
+                      className="w-full px-2.5 py-1.5 border border-border bg-white rounded-lg text-xs focus:outline-none focus:border-brand-main"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        if (val.startsWith('page:')) {
+                          const slug = val.replace('page:', '');
+                          const page = cmsPages.find(p => p.slug === slug);
+                          setNavItem(idx, {
+                            url: `/p/${slug}`,
+                            label: item.label || page?.title || slug
+                          });
+                        } else if (val.startsWith('cat:')) {
+                          const slug = val.replace('cat:', '');
+                          const cat = categoriesList.find(c => c.slug === slug);
+                          setNavItem(idx, {
+                            url: `/categoria/${slug}`,
+                            label: item.label || cat?.name || slug
+                          });
+                        }
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="" disabled>Escolher atalho rápido...</option>
+                      {cmsPages.length > 0 && (
+                        <optgroup label="Páginas Criadas (Editor Visual)">
+                          {cmsPages.map(p => (
+                            <option key={p.page_id || p.slug} value={`page:${p.slug}`}>
+                              Página: {p.title || p.slug} (/p/{p.slug})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {categoriesList.length > 0 && (
+                        <optgroup label="Categorias de Produtos">
+                          {categoriesList.map(c => (
+                            <option key={c.category_id || c.slug} value={`cat:${c.slug}`}>
+                              Categoria: {c.name} (/categoria/{c.slug})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="text-[11px] font-semibold text-txt-secondary block mb-1">Link de Destino (URL)*</label>
+                    <input
+                      type="text"
+                      value={item.url || ''}
+                      onChange={(e) => setNavItem(idx, { url: e.target.value })}
+                      placeholder="Ex: /p/sobre ou /categoria/oleos-ozonizados"
+                      className="w-full px-3 py-1.5 border border-border bg-white rounded-lg text-sm font-mono focus:outline-none focus:border-brand-main"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end pb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => removeNavItem(idx)}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
+                      title="Excluir link"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              <div className="pt-2 flex gap-3">
+                <Button type="button" variant="outline" size="sm" onClick={addNavItem}>
+                  <PlusCircle className="w-4 h-4 mr-1.5" /> Adicionar Item ao Menu
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Visual Preview */}
+          <Card title="Pré-visualização do Menu Superior">
+            <p className="text-xs text-txt-secondary mb-3">Veja como a barra do menu superior será exibida no topo do site:</p>
+            <div className="border border-border rounded-xl p-4 bg-white shadow-sm flex items-center justify-center gap-6 flex-wrap text-sm text-gray-700 font-medium overflow-x-auto">
+              <span className="relative pb-1 text-gray-900 font-semibold cursor-pointer">
+                Início
+                <span className="absolute -bottom-1 left-0 right-0 h-[2.5px] bg-brand-main rounded-full" />
+              </span>
+              <span className="hover:text-brand-main cursor-pointer flex items-center gap-1">
+                Produtos <span className="text-[10px]">∨</span>
+              </span>
+              {(s.header_nav_items || []).map((nav, i) => (
+                <span key={i} className="hover:text-brand-main cursor-pointer">
+                  {nav.label || 'Item'}
+                </span>
+              ))}
+            </div>
           </Card>
         </div>
       )}

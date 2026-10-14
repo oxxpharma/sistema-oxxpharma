@@ -1423,6 +1423,54 @@ async def list_products(request: Request, category: Optional[str] = None, subcat
     return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
 
+@app.get("/api/search/live")
+async def live_search(request: Request, q: str = Query("", min_length=1)):
+    """Busca avançada instantânea entre produtos, categorias e subcategorias."""
+    db = request.app.db
+    query_str = q.strip()
+    if not query_str:
+        return {"products": [], "categories": [], "subcategories": []}
+
+    # 1. Categorias ativas correspondentes
+    cats = await db.categories.find(
+        {"active": True, "name": {"$regex": re.escape(query_str), "$options": "i"}},
+        {"_id": 0, "category_id": 1, "name": 1, "slug": 1}
+    ).limit(6).to_list(6)
+
+    # 2. Subcategorias ativas correspondentes
+    subs = await db.subcategories.find(
+        {"active": True, "name": {"$regex": re.escape(query_str), "$options": "i"}},
+        {"_id": 0, "subcategory_id": 1, "name": 1, "slug": 1, "category_ids": 1}
+    ).limit(8).to_list(8)
+
+    # 3. Produtos ativos correspondentes (nome, descrição, marca, palavras-chave)
+    prod_q = {
+        "active": True,
+        "$or": [
+            {"name": {"$regex": re.escape(query_str), "$options": "i"}},
+            {"description": {"$regex": re.escape(query_str), "$options": "i"}},
+            {"brand": {"$regex": re.escape(query_str), "$options": "i"}},
+            {"seo_keywords": {"$regex": re.escape(query_str), "$options": "i"}},
+        ]
+    }
+    products = await db.products.find(
+        prod_q,
+        {"_id": 0, "product_id": 1, "name": 1, "price": 1, "sale_price": 1, "effective_price": 1, "images": 1, "category": 1, "brand": 1}
+    ).limit(6).to_list(6)
+
+    user = await get_optional_user(request)
+    _tenant = tenant_service.get_tenant(request)
+    products = [store_extras.apply_pricing_to_product(p, user, tenant=_tenant) for p in products]
+
+    return {
+        "query": query_str,
+        "products": products,
+        "categories": cats,
+        "subcategories": subs
+    }
+
+
+
 def _apply_convenio_discount(product: Dict, emp_ctx: Dict) -> Dict:
     """Aplica desconto % da empresa credenciada sobre o effective_price ja calculado.
     Nao stacka com combo (que sobrepoe qualquer preco). Adiciona metadata `convenio_discount`."""
@@ -8393,6 +8441,14 @@ DEFAULT_SITE_SETTINGS = {
         {"label": "Sobre nós", "slug": "sobre"},
         {"label": "Política de Privacidade", "slug": "politica-de-privacidade"},
         {"label": "Termos de Uso", "slug": "termos"},
+    ],
+    # ============ Menu de navegação superior (Topbar customizável) ============
+    "header_nav_items": [
+        {"label": "Protocolo Dr.Bactéria", "url": "/p/protocolo-dr-bacteria"},
+        {"label": "Óleos Ozonizados", "url": "/produtos?categoria=oleos-ozonizados"},
+        {"label": "Quem Somos", "url": "/p/sobre"},
+        {"label": "Blog", "url": "/p/blog"},
+        {"label": "Contato", "url": "/p/contato"},
     ],
     "announcement_bar_enabled": False,
     "announcement_bar_text": "",
