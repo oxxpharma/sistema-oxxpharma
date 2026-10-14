@@ -1537,21 +1537,103 @@ async def admin_get_product(request: Request, product_id: str, user: dict = Depe
 
 
 @app.get("/api/admin/products")
-async def admin_list_products(request: Request, category: Optional[str] = None, search: Optional[str] = None, page: int = 1, limit: int = 20, user: dict = Depends(require_admin())):
+async def admin_list_products(
+    request: Request,
+    category: Optional[str] = None,
+    brand: Optional[str] = None,
+    status: Optional[str] = None,
+    stock_status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    user: dict = Depends(require_admin())
+):
     db = request.app.db
-    q = {}
-    if category:
-        # Iter 61: aceita produtos cujo `category` legado bate OU `categories[]` contem o id
-        q["$or"] = [{"category": category}, {"categories": category}]
+    conditions = []
+
+    if category and category != "all":
+        conditions.append({
+            "$or": [
+                {"category": category},
+                {"category": {"$regex": f"^{re.escape(category)}$", "$options": "i"}},
+                {"categories": category},
+                {"category_id": category},
+                {"category_slug": category}
+            ]
+        })
+
+    if brand and brand != "all":
+        conditions.append({"brand": brand})
+
+    if status == "active":
+        conditions.append({"active": True})
+    elif status == "inactive":
+        conditions.append({"active": False})
+
+    if stock_status == "in_stock":
+        conditions.append({"stock": {"$gt": 0}})
+    elif stock_status == "out_of_stock":
+        conditions.append({"$or": [{"stock": {"$lte": 0}}, {"stock": None}]})
+
+    if date_from:
+        from_str = f"{date_from}T00:00:00"
+        conditions.append({"$or": [
+            {"created_at": {"$gte": from_str}},
+            {"created_at": {"$gte": date_from}}
+        ]})
+
+    if date_to:
+        to_str = f"{date_to}T23:59:59.999999"
+        conditions.append({"$or": [
+            {"created_at": {"$lte": to_str}},
+            {"created_at": {"$lte": f"{date_to}T23:59:59"}}
+        ]})
+
     if search:
-        search_or = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}]
-        if q.get("$or"):
-            q = {"$and": [q, {"$or": search_or}]}
-        else:
-            q["$or"] = search_or
+        s_clean = search.strip()
+        conditions.append({
+            "$or": [
+                {"name": {"$regex": s_clean, "$options": "i"}},
+                {"description": {"$regex": s_clean, "$options": "i"}},
+                {"brand": {"$regex": s_clean, "$options": "i"}},
+                {"sku": {"$regex": s_clean, "$options": "i"}},
+            ]
+        })
+
+    q = {"$and": conditions} if conditions else {}
+
+    sort_fields = [("created_at", -1)]
+    if sort_by == "created_at_asc":
+        sort_fields = [("created_at", 1)]
+    elif sort_by == "name_asc":
+        sort_fields = [("name", 1)]
+    elif sort_by == "name_desc":
+        sort_fields = [("name", -1)]
+    elif sort_by == "price_asc":
+        sort_fields = [("price", 1)]
+    elif sort_by == "price_desc":
+        sort_fields = [("price", -1)]
+    elif sort_by == "stock_asc":
+        sort_fields = [("stock", 1)]
+    elif sort_by == "stock_desc":
+        sort_fields = [("stock", -1)]
+
     total = await db.products.count_documents(q)
-    products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+    products = await db.products.find(q, {"_id": 0}).sort(sort_fields).skip((page-1)*limit).limit(limit).to_list(limit)
+
+    distinct_brands = await db.products.distinct("brand")
+    available_brands = sorted([b for b in distinct_brands if b and isinstance(b, str) and b.strip()])
+
+    return {
+        "products": products,
+        "total": total,
+        "page": page,
+        "pages": max(1, (total + limit - 1) // limit),
+        "available_brands": available_brands
+    }
 
 @app.post("/api/admin/products")
 async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_admin())):
@@ -8503,8 +8585,9 @@ DEFAULT_SITE_SETTINGS = {
     "points_visibility_audiences": [],
     "points_visibility_label": "pontos",
     "logo_sizes": {
-        "store_header":  {"height": 40, "max_width": 180},
-        "store_footer":  {"height": 36, "max_width": 160},
+        "store_header":         {"height": 40, "max_width": 180},
+        "store_header_mobile":  {"height": 32, "max_width": 140},
+        "store_footer":         {"height": 36, "max_width": 160},
         "admin_sidebar": {"height": 36, "max_width": 160},
         "admin_topbar":  {"height": 28, "max_width": 140},
         "auth_pages":    {"height": 48, "max_width": 200},

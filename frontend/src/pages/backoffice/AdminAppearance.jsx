@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink, Monitor, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
@@ -32,14 +32,15 @@ const LOGO_SLOTS = [
 ];
 
 const DEFAULT_SIZES = {
-  store_header:  { height: 40, max_width: 180 },
-  store_footer:  { height: 36, max_width: 160 },
-  admin_sidebar: { height: 36, max_width: 160 },
-  admin_topbar:  { height: 28, max_width: 140 },
-  auth_pages:    { height: 48, max_width: 200 },
-  invoice:       { height: 56, max_width: 220 },
-  email_header:  { height: 48, max_width: 200 },
-  email_footer:  { height: 32, max_width: 140 },
+  store_header:        { height: 40, max_width: 180 },
+  store_header_mobile: { height: 32, max_width: 140 },
+  store_footer:        { height: 36, max_width: 160 },
+  admin_sidebar:       { height: 36, max_width: 160 },
+  admin_topbar:        { height: 28, max_width: 140 },
+  auth_pages:          { height: 48, max_width: 200 },
+  invoice:             { height: 56, max_width: 220 },
+  email_header:        { height: 48, max_width: 200 },
+  email_footer:        { height: 32, max_width: 140 },
 };
 
 export default function AdminAppearance() {
@@ -434,6 +435,143 @@ export default function AdminAppearance() {
             Ajuste a <b>altura</b> e a <b>largura máxima</b> da logo em cada local. Se a logo não estiver configurada na aba <b>Identidade</b>, o sistema mostra automaticamente o <b>nome da loja</b>.
           </div>
           {LOGO_SLOTS.map(slot => {
+            // Caso especial: Cabeçalho com configuração separada Desktop & Mobile
+            if (slot.key === 'store_header') {
+              const deskSize = getLogoSize('store_header');
+              const mobSize = getLogoSize('store_header_mobile');
+              return (
+                <Card key={slot.key} title="Cabeçalho da loja (Desktop & Mobile)">
+                  <p className="text-xs text-txt-secondary -mt-1 mb-4">
+                    Configure individualmente o tamanho da logo para telas grandes (Desktop) e dispositivos móveis (Mobile).
+                  </p>
+
+                  <div className="space-y-6">
+                    {/* Painel Desktop */}
+                    <div className="p-4 rounded-xl border border-border bg-white shadow-xs">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Monitor className="w-4 h-4 text-brand-main" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-txt-primary">Versão Desktop (Computadores / Telas Grandes)</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                          <label className="text-xs font-semibold block mb-1">Altura (px)</label>
+                          <input
+                            type="number" min="8" max="300" value={deskSize.height}
+                            onChange={(e) => setLogoSize('store_header', 'height', e.target.value)}
+                            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                            data-testid="logosize-store_header-h"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold block mb-1">Largura máx. (px)</label>
+                          <input
+                            type="number" min="20" max="600" value={deskSize.max_width}
+                            onChange={(e) => setLogoSize('store_header', 'max_width', e.target.value)}
+                            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                            data-testid="logosize-store_header-w"
+                          />
+                        </div>
+                        <div>
+                          <Button variant="outline" size="sm" onClick={() => resetLogoSize('store_header')} data-testid="logosize-store_header-reset">
+                            Restaurar padrão Desktop
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-txt-secondary mb-1.5">Prévia Desktop</div>
+                        <div className="rounded-lg border border-border p-4 bg-bg-secondary flex items-center">
+                          {s.logo_url ? (
+                            <img
+                              src={s.logo_url}
+                              alt="preview desktop"
+                              className="object-contain"
+                              style={{ height: `${deskSize.height}px`, maxWidth: `${deskSize.max_width}px` }}
+                            />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="rounded-lg bg-brand-main flex items-center justify-center"
+                                style={{ width: `${Math.round(deskSize.height * 0.85)}px`, height: `${Math.round(deskSize.height * 0.85)}px` }}
+                              >
+                                <span className="text-white font-heading font-black" style={{ fontSize: `${Math.round(deskSize.height * 0.45)}px` }}>
+                                  {(s.store_name || 'O')[0].toUpperCase()}
+                                </span>
+                              </div>
+                              <span className="font-heading font-black" style={{ fontSize: `${Math.max(14, Math.round(deskSize.height * 0.45))}px` }}>
+                                {s.store_name || 'OxxPharma'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Painel Mobile */}
+                    <div className="p-4 rounded-xl border border-border bg-white shadow-xs">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Smartphone className="w-4 h-4 text-brand-main" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-txt-primary">Versão Mobile (Smartphones / Telas Pequenas)</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                          <label className="text-xs font-semibold block mb-1">Altura (px)</label>
+                          <input
+                            type="number" min="8" max="300" value={mobSize.height}
+                            onChange={(e) => setLogoSize('store_header_mobile', 'height', e.target.value)}
+                            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                            data-testid="logosize-store_header_mobile-h"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold block mb-1">Largura máx. (px)</label>
+                          <input
+                            type="number" min="20" max="600" value={mobSize.max_width}
+                            onChange={(e) => setLogoSize('store_header_mobile', 'max_width', e.target.value)}
+                            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
+                            data-testid="logosize-store_header_mobile-w"
+                          />
+                        </div>
+                        <div>
+                          <Button variant="outline" size="sm" onClick={() => resetLogoSize('store_header_mobile')} data-testid="logosize-store_header_mobile-reset">
+                            Restaurar padrão Mobile
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-txt-secondary mb-1.5">Prévia Mobile</div>
+                        <div className="rounded-lg border border-border p-3 bg-bg-secondary flex items-center max-w-sm">
+                          {s.logo_url ? (
+                            <img
+                              src={s.logo_url}
+                              alt="preview mobile"
+                              className="object-contain"
+                              style={{ height: `${mobSize.height}px`, maxWidth: `${mobSize.max_width}px` }}
+                            />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="rounded-lg bg-brand-main flex items-center justify-center"
+                                style={{ width: `${Math.round(mobSize.height * 0.85)}px`, height: `${Math.round(mobSize.height * 0.85)}px` }}
+                              >
+                                <span className="text-white font-heading font-black" style={{ fontSize: `${Math.round(mobSize.height * 0.45)}px` }}>
+                                  {(s.store_name || 'O')[0].toUpperCase()}
+                                </span>
+                              </div>
+                              <span className="font-heading font-black" style={{ fontSize: `${Math.max(12, Math.round(mobSize.height * 0.45))}px` }}>
+                                {s.store_name || 'OxxPharma'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              );
+            }
+
             const size = getLogoSize(slot.key);
             const isDarkBg = slot.key === 'admin_sidebar';
             return (
