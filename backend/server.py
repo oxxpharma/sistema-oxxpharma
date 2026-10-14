@@ -1605,8 +1605,11 @@ async def admin_list_products(
 
     q = {"$and": conditions} if conditions else {}
 
-    sort_fields = [("created_at", -1)]
-    if sort_by == "created_at_asc":
+    # Ordenação: padrão é a ordem personalizada manual (order ASC, created_at DESC)
+    sort_fields = [("order", 1), ("created_at", -1)]
+    if sort_by == "created_at_desc":
+        sort_fields = [("created_at", -1)]
+    elif sort_by == "created_at_asc":
         sort_fields = [("created_at", 1)]
     elif sort_by == "name_asc":
         sort_fields = [("name", 1)]
@@ -1620,6 +1623,8 @@ async def admin_list_products(
         sort_fields = [("stock", 1)]
     elif sort_by == "stock_desc":
         sort_fields = [("stock", -1)]
+    elif sort_by == "order":
+        sort_fields = [("order", 1), ("created_at", -1)]
 
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort(sort_fields).skip((page-1)*limit).limit(limit).to_list(limit)
@@ -1635,13 +1640,36 @@ async def admin_list_products(
         "available_brands": available_brands
     }
 
+@app.post("/api/admin/products/reorder")
+async def admin_reorder_products(request: Request, body: dict = Body(...), user: dict = Depends(require_admin())):
+    db = request.app.db
+    product_ids = body.get("product_ids")
+    if product_ids and isinstance(product_ids, list):
+        start_order = int(body.get("start_order", 0))
+        for index, pid in enumerate(product_ids):
+            await db.products.update_one({"product_id": pid}, {"$set": {"order": start_order + index}})
+        return {"ok": True, "count": len(product_ids)}
+
+    orders = body.get("orders")
+    if orders and isinstance(orders, list):
+        for item in orders:
+            pid = item.get("product_id")
+            ord_val = item.get("order")
+            if pid is not None and ord_val is not None:
+                await db.products.update_one({"product_id": pid}, {"$set": {"order": int(ord_val)}})
+        return {"ok": True, "count": len(orders)}
+
+    raise HTTPException(status_code=400, detail="Lista de produtos para reordenar inválida")
+
 @app.post("/api/admin/products")
 async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     payload = data.model_dump()
     base = _slugify(payload.get("slug") or payload["name"])
     payload["slug"] = await _ensure_unique_slug(db, "products", base)
-    prod = {"product_id": gen_id("prod_"), **payload, "created_at": now_iso()}
+    min_order_doc = await db.products.find_one({}, sort=[("order", 1)])
+    min_ord = min_order_doc.get("order", 0) if min_order_doc and min_order_doc.get("order") is not None else 0
+    prod = {"product_id": gen_id("prod_"), **payload, "order": min_ord - 1, "created_at": now_iso()}
     await db.products.insert_one(prod)
     return await db.products.find_one({"product_id": prod["product_id"]}, {"_id": 0})
 
