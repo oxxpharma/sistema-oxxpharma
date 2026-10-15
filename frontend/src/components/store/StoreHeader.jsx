@@ -51,14 +51,22 @@ export default function StoreHeader() {
   const searchInputRef = useRef(null);
   const closeTimeoutRef = useRef(null);
 
+  // Responsável por empresa conveniada
+  const isCompanyAdmin = Boolean(
+    user?.role === 'company_admin' || user?.company_admin_of || user?.company_id
+  );
+
   // Redes do usuário
   const userNetworks = Array.isArray(user?.networks) && user.networks.length
     ? user.networks
     : [user?.network_type].filter(Boolean);
-  const isPropagandista = userNetworks.includes('network_2');
-  const inMmnNetwork = userNetworks.some(n => n === 'network_1' || n === 'network_2');
-  const showMyNetwork = isAuthenticated && (isAdmin || inMmnNetwork);
-  const showPropagandistaArea = isAuthenticated && (isAdmin || isPropagandista);
+
+  // Propagandista estrito: quem foi promovido ou tem role=propagandista
+  // Responsáveis por empresas conveniadas NUNCA são propagandistas
+  const isPropagandista = !isCompanyAdmin && (user?.role === 'propagandista' || user?.is_propagandista === true);
+  const inMmnNetwork = !isCompanyAdmin && userNetworks.some(n => n === 'network_1' || n === 'network_2');
+  const showMyNetwork = isAuthenticated && !isCompanyAdmin && (isAdmin || inMmnNetwork);
+  const showPropagandistaArea = isAuthenticated && !isCompanyAdmin && (isAdmin || isPropagandista);
 
   // Carrega categorias e subcategorias ativas para o submenu
   useEffect(() => {
@@ -456,6 +464,17 @@ export default function StoreHeader() {
                         <Share2 className="w-4 h-4 text-brand-main" /> {settings?.referral_menu_label || 'Indique e ganhe benefícios'}
                       </Link>
 
+                      {isCompanyAdmin && (
+                        <Link
+                          to="/empresa"
+                          className="flex items-center gap-3 px-3 py-2 text-sm text-brand-main font-semibold hover:bg-orange-50 rounded-xl transition"
+                          onClick={() => setMenuOpen(false)}
+                          data-testid="gerenciar-empresa-link"
+                        >
+                          <Building2 className="w-4 h-4 text-brand-main" /> Gerenciar Empresa
+                        </Link>
+                      )}
+
                       {showMyNetwork && (
                         <Link
                           to="/minha-rede"
@@ -633,6 +652,21 @@ export default function StoreHeader() {
                   <Link to="/minha-conta" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm text-gray-700">Minha conta</Link>
                   <Link to="/meus-pedidos" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm text-gray-700">Meus pedidos</Link>
                   <Link to="/indique-ganhe" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm text-brand-main font-semibold">{settings?.referral_menu_label || 'Indique e ganhe benefícios'}</Link>
+                  {isCompanyAdmin && (
+                    <Link to="/empresa" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm font-semibold text-brand-main">
+                      Gerenciar Empresa
+                    </Link>
+                  )}
+                  {showMyNetwork && (
+                    <Link to="/minha-rede" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm text-gray-700">
+                      Minha Rede
+                    </Link>
+                  )}
+                  {showPropagandistaArea && (
+                    <Link to="/propagandista/empresas" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm text-gray-700">
+                      Minhas Empresas
+                    </Link>
+                  )}
                   {isAdmin && <Link to="/backoffice" onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm font-semibold text-gray-900">Painel Admin</Link>}
                   <button onClick={async () => { await logout(); setMobileOpen(false); navigate('/'); }} className="block w-full text-left px-3 py-2 text-sm text-red-500 font-medium">Sair da conta</button>
                 </div>

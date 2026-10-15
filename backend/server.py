@@ -6267,18 +6267,23 @@ async def promote_to_propagandista(request: Request, user_id: str, user: dict = 
     target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Usuario nao encontrado")
-    if target.get("network_type") != NETWORK_CUSTOMER:
-        raise HTTPException(status_code=400, detail="Somente clientes podem ser promovidos a Propagandista")
+    if target.get("role") == "company_admin" or target.get("company_admin_of") or target.get("company_id"):
+        raise HTTPException(status_code=400, detail="Responsaveis por empresa conveniada nao podem ser promovidos a Propagandista")
     # network_sponsor_id = sponsor_id atual (se existir E for da rede ou for outro Propagandista)
     network_sponsor_id = None
     if target.get("sponsor_id"):
         sp = await db.users.find_one({"user_id": target["sponsor_id"]}, {"_id": 0})
-        if sp and sp.get("network_type") == NETWORK_2:
+        if sp and (sp.get("network_type") == NETWORK_2 or "network_2" in (sp.get("networks") or [])):
             network_sponsor_id = sp["user_id"]
+    current_nets = target.get("networks") or []
+    nets = list(set(current_nets + [NETWORK_2]))
     await db.users.update_one(
         {"user_id": user_id},
         {"$set": {
             "network_type": NETWORK_2,
+            "networks": nets,
+            "role": "propagandista",
+            "is_propagandista": True,
             "network_sponsor_id": network_sponsor_id,
             "promoted_at": now_iso(),
         }},
@@ -6287,18 +6292,27 @@ async def promote_to_propagandista(request: Request, user_id: str, user: dict = 
 
 @app.post("/api/admin/users/{user_id}/revoke-network")
 async def revoke_network(request: Request, user_id: str, user: dict = Depends(require_admin())):
-    """Reverte usuario network_2 para customer (so permite em network_2)."""
+    """Reverte status de Propagandista."""
     db = request.app.db
     target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Usuario nao encontrado")
-    if target.get("network_type") != NETWORK_2:
-        raise HTTPException(status_code=400, detail="So eh possivel reverter Propagandistas (network_2)")
+    current_nets = target.get("networks") or []
+    nets = [n for n in current_nets if n != NETWORK_2]
+    upd = {
+        "network_type": nets[0] if nets else NETWORK_CUSTOMER,
+        "networks": nets,
+        "network_sponsor_id": None,
+        "revoked_at": now_iso(),
+        "is_propagandista": False,
+    }
+    if target.get("role") == "propagandista":
+        upd["role"] = "customer"
     await db.users.update_one(
         {"user_id": user_id},
-        {"$set": {"network_type": NETWORK_CUSTOMER, "network_sponsor_id": None, "revoked_at": now_iso()}},
+        {"$set": upd},
     )
-    return {"message": "Rede removida"}
+    return {"message": "Status de Propagandista revogado com sucesso"}
 
 # ==================== ADMIN: CANDIDATES "EM ALTA" PARA PROPAGANDISTA ====================
 
@@ -9020,7 +9034,7 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
     # Iter 38: somente super_admin pode promover alguem a admin/super_admin
     if "role" in update:
         new_role = update["role"]
-        if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin"):
+        if new_role not in ("customer", "comercial", "financeiro", "admin", "super_admin", "propagandista", "company_admin", "estoque"):
             raise HTTPException(status_code=400, detail="Papel invalido")
         current_role = target.get("role") or "customer"
         editor_role = _role_of(user)
@@ -9038,6 +9052,17 @@ async def admin_update_user(request: Request, user_id: str, user: dict = Depends
             update["access_level"] = 1
         else:
             update["access_level"] = 99
+
+        # Sincroniza status de propagandista
+        if new_role == "propagandista":
+            update["is_propagandista"] = True
+            current_nets = update.get("networks") or target.get("networks") or []
+            if "network_2" not in current_nets:
+                update["networks"] = list(current_nets) + ["network_2"]
+        elif target.get("role") == "propagandista" and new_role != "propagandista":
+            update["is_propagandista"] = False
+        elif new_role == "company_admin":
+            update["is_propagandista"] = False
     # Validar email unico
     if "email" in update and update["email"]:
         update["email"] = update["email"].lower()

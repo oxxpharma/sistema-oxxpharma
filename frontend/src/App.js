@@ -98,7 +98,7 @@ import AdminRecalcCommissions from './pages/backoffice/AdminRecalcCommissions';
 import AdminRoles from './pages/backoffice/AdminRoles';
 import AdminAuditLogs from './pages/backoffice/AdminAuditLogs';
 
-function Guard({ children, requireAuth = false, requireAdmin = false, requireCompanyAdmin = false }) {
+function Guard({ children, requireAuth = false, requireAdmin = false, requireCompanyAdmin = false, requirePropagandista = false }) {
   const { isAuthenticated, isAdmin, loading, user } = useAuth();
   const location = useLocation();
   if (loading) {
@@ -117,7 +117,14 @@ function Guard({ children, requireAuth = false, requireAdmin = false, requireCom
   if (requireCompanyAdmin) {
     const r = user?.role;
     if (!isAuthenticated) return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
-    if (r !== 'company_admin' && r !== 'admin' && r !== 'super_admin') return <Navigate to="/" replace />;
+    if (r !== 'company_admin' && !user?.company_admin_of && !user?.company_id && r !== 'admin' && r !== 'super_admin') return <Navigate to="/" replace />;
+  }
+  if (requirePropagandista) {
+    if (!isAuthenticated) return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+    const isCompanyAdmin = user?.role === 'company_admin' || Boolean(user?.company_admin_of) || Boolean(user?.company_id);
+    if (isCompanyAdmin) return <Navigate to="/empresa" replace />;
+    const isProp = user?.role === 'propagandista' || user?.is_propagandista === true || isAdmin;
+    if (!isProp) return <Navigate to="/" replace />;
   }
   return children;
 }
@@ -224,7 +231,7 @@ function AppRoutes() {
       </Route>
 
       {/* PAINEL PROPAGANDISTA — role: propagandista */}
-      <Route path="/propagandista" element={<Guard requireAuth><PropagandistaLayout /></Guard>}>
+      <Route path="/propagandista" element={<Guard requirePropagandista><PropagandistaLayout /></Guard>}>
         <Route index element={<PropagandistaDashboard />} />
         <Route path="comissoes" element={<PropagandistaDashboard />} />
         <Route path="empresas" element={<PropagandistaCompanies />} />

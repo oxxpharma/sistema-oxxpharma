@@ -12,6 +12,7 @@ const NETWORK_OPTIONS = [
 ];
 const ROLE_OPTIONS_BASE = [
   { value: 'customer', label: 'Cliente' },
+  { value: 'propagandista', label: 'Propagandista (Representante Comercial)' },
   { value: 'comercial', label: 'Comercial (backoffice sem financeiro/integrações)' },
   { value: 'financeiro', label: 'Financeiro (cashbacks, saques, cartão)' },
   { value: 'estoque', label: 'Estoque (Produtos, Categorias, Pedidos e Cupons)' },

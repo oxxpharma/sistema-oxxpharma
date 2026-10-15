@@ -593,6 +593,7 @@ async def create_company_representative(
         current_nets = existing_user.get("networks") or []
         upd = {
             "role": "company_admin",
+            "is_propagandista": False,
             "company_admin_of": company_id,
             "networks": list(set(current_nets + ["network_2"])),
             "updated_at": _now_iso(),
@@ -612,6 +613,7 @@ async def create_company_representative(
             "phone_digits": phone_dig,
             "password_hash": pwd_hash,
             "role": "company_admin",
+            "is_propagandista": False,
             "company_admin_of": company_id,
             "networks": ["network_2"],
             "network_type": "network_2",
@@ -1860,13 +1862,17 @@ class PropagandistaCommissionQuery(BaseModel):
 
 
 def _is_propagandista_user(user: dict) -> bool:
-    """Iter 68: usuario e propagandista se role=propagandista, se tem network_2 nas redes ou se e admin."""
+    """Usuario e propagandista apenas se promovido explicitamente (role=propagandista ou is_propagandista=True) ou admin.
+    Responsaveis de empresa (company_admin) NUNCA sao propagandistas e nao podem cadastrar empresas.
+    """
+    if not user:
+        return False
+    # Responsavel por empresa conveniada nunca tem acesso a area de propagandista
+    if user.get("role") == "company_admin" or user.get("company_admin_of") or user.get("company_id"):
+        return False
     if user.get("role") in ("propagandista", "admin", "super_admin"):
         return True
-    nets = user.get("networks")
-    if isinstance(nets, list) and "network_2" in nets:
-        return True
-    if user.get("network_type") == "network_2":
+    if user.get("is_propagandista") is True:
         return True
     return False
 
@@ -1937,6 +1943,7 @@ async def propagandista_create_company(request: Request, data: PropagandistaComp
         upd_user = {
             "name": rep_name,
             "role": "company_admin",
+            "is_propagandista": False,
             "networks": list(set(current_nets + ["network_2"])),
             "sponsor_id": user_exists.get("sponsor_id") or propagandista_id,
             "sponsor_id_net2": user_exists.get("sponsor_id_net2") or propagandista_id,
@@ -1955,6 +1962,7 @@ async def propagandista_create_company(request: Request, data: PropagandistaComp
             "phone_digits": _digits(rep_phone),
             "password_hash": pwd_hash,
             "role": "company_admin",
+            "is_propagandista": False,
             "networks": ["network_2"],
             "network_type": "network_2",
             "sponsor_id": propagandista_id,

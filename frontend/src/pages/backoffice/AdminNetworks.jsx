@@ -138,7 +138,15 @@ export default function AdminNetworks() {
                         <Button size="xs" onClick={() => promote(u.user_id)} data-testid={`promote-${u.user_id}`}>Promover</Button>
                       )}
                       {tab === 'network_2' && (
-                        <Button size="xs" variant="danger" onClick={() => revoke(u.user_id)} data-testid={`revoke-${u.user_id}`}>Revogar</Button>
+                        u.role === 'company_admin' || u.company_admin_of ? (
+                          <span className="inline-block text-[11px] px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
+                            Responsável Empresa
+                          </span>
+                        ) : u.role === 'propagandista' || u.is_propagandista ? (
+                          <Button size="xs" variant="danger" onClick={() => revoke(u.user_id)} data-testid={`revoke-${u.user_id}`}>Revogar</Button>
+                        ) : (
+                          <Button size="xs" onClick={() => promote(u.user_id)} data-testid={`promote-${u.user_id}`}>Promover</Button>
+                        )
                       )}
                     </td>
                   </tr>
