@@ -91,6 +91,13 @@ async def get_admin_config(db) -> Dict:
     secret = (s.get("mp_webhook_secret") or "").strip() or os.environ.get("MP_WEBHOOK_SECRET", "")
 
     ipag_cfg = await ipag_service.get_ipag_admin_config(db)
+    sb_id = ipag_cfg.get("sandbox_api_id") or ""
+    prod_id = ipag_cfg.get("prod_api_id") or ""
+    sb_key_masked = ipag_cfg.get("sandbox_api_key_masked") or ""
+    prod_key_masked = ipag_cfg.get("prod_api_key_masked") or ""
+    sb_configured = ipag_cfg.get("sandbox_configured", False)
+    prod_configured = ipag_cfg.get("production_configured", False)
+    ipag_env = ipag_cfg.get("ipag_environment", "sandbox")
 
     return {
         "active_payment_provider": active_provider,
@@ -103,7 +110,14 @@ async def get_admin_config(db) -> Dict:
         "production_configured": bool(prod_tok),
         "webhook_secret_masked": mask(secret),
         "webhook_secret_configured": bool(secret),
-        # iPag config
+        # iPag config (fornecido tanto no root quanto aninhado para máxima compatibilidade)
+        "ipag_environment": ipag_env,
+        "ipag_sandbox_api_id": sb_id,
+        "ipag_sandbox_api_key_masked": sb_key_masked,
+        "ipag_sandbox_configured": sb_configured,
+        "ipag_prod_api_id": prod_id,
+        "ipag_prod_api_key_masked": prod_key_masked,
+        "ipag_prod_configured": prod_configured,
         "ipag": ipag_cfg,
     }
 
@@ -117,13 +131,29 @@ async def update_credentials(db, updates: Dict) -> Dict:
         "ipag_environment", "ipag_sandbox_api_id", "ipag_sandbox_api_key",
         "ipag_prod_api_id", "ipag_prod_api_key",
     }
-    set_doc = {k: v for k, v in updates.items() if k in allowed}
+    set_doc = {}
+    for k, v in updates.items():
+        if k in allowed:
+            if isinstance(v, str):
+                set_doc[k] = v.strip()
+            else:
+                set_doc[k] = v
+
     if "active_payment_provider" in set_doc and set_doc["active_payment_provider"] not in ("mercadopago", "ipag", "mock"):
         raise ValueError("active_payment_provider deve ser 'mercadopago', 'ipag' ou 'mock'")
     if "mp_environment" in set_doc and set_doc["mp_environment"] not in ("test", "production"):
         raise ValueError("mp_environment deve ser 'test' ou 'production'")
     if "ipag_environment" in set_doc and set_doc["ipag_environment"] not in ("sandbox", "production"):
         raise ValueError("ipag_environment deve ser 'sandbox' ou 'production'")
+
+    # Se as chaves/tokens secretas vierem vazias, não apaga o valor já salvo anteriormente
+    secret_fields = {
+        "mp_test_access_token", "mp_prod_access_token", "mp_webhook_secret",
+        "ipag_sandbox_api_key", "ipag_prod_api_key"
+    }
+    for sf in secret_fields:
+        if sf in set_doc and not set_doc[sf]:
+            del set_doc[sf]
 
     if set_doc:
         from datetime import datetime, timezone

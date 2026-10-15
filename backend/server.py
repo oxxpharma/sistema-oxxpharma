@@ -150,6 +150,13 @@ DEFAULT_SETTINGS = {
     "d4sign_environment": "production",
     "d4sign_oxx_signer_name": "OxxPharma Magistral",
     "d4sign_oxx_signer_email": "convenio@oxxpharma.com",
+    # iPag Gateway
+    "active_payment_provider": "mercadopago",
+    "ipag_environment": "sandbox",
+    "ipag_sandbox_api_id": "",
+    "ipag_sandbox_api_key": "",
+    "ipag_prod_api_id": "",
+    "ipag_prod_api_key": "",
 }
 
 async def get_settings(db):

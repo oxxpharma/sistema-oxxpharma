@@ -26,15 +26,17 @@ export default function AdminPayments() {
     try {
       const r = await api.get('/api/admin/payments-config');
       setCfg(r);
+      const ipagSbId = r.ipag_sandbox_api_id ?? r.ipag?.sandbox_api_id ?? '';
+      const ipagPrId = r.ipag_prod_api_id ?? r.ipag?.prod_api_id ?? '';
       setForm({
         mp_test_public_key: r.test_public_key || '',
         mp_test_access_token: '',
         mp_prod_public_key: r.prod_public_key || '',
         mp_prod_access_token: '',
         mp_webhook_secret: '',
-        ipag_sandbox_api_id: r.ipag_sandbox_api_id || '',
+        ipag_sandbox_api_id: ipagSbId,
         ipag_sandbox_api_key: '',
-        ipag_prod_api_id: r.ipag_prod_api_id || '',
+        ipag_prod_api_id: ipagPrId,
         ipag_prod_api_key: '',
       });
     } finally { setLoading(false); }
@@ -63,21 +65,48 @@ export default function AdminPayments() {
   const saveCredentials = async () => {
     setSaving(true);
     try {
-      const payload = {};
-      if (form.mp_test_public_key !== cfg.test_public_key) payload.mp_test_public_key = form.mp_test_public_key;
-      if (form.mp_test_access_token) payload.mp_test_access_token = form.mp_test_access_token;
-      if (form.mp_prod_public_key !== cfg.prod_public_key) payload.mp_prod_public_key = form.mp_prod_public_key;
-      if (form.mp_prod_access_token) payload.mp_prod_access_token = form.mp_prod_access_token;
-      if (form.mp_webhook_secret) payload.mp_webhook_secret = form.mp_webhook_secret;
+      const payload = {
+        mp_test_public_key: form.mp_test_public_key || '',
+        mp_prod_public_key: form.mp_prod_public_key || '',
+        ipag_sandbox_api_id: (form.ipag_sandbox_api_id || '').trim(),
+        ipag_prod_api_id: (form.ipag_prod_api_id || '').trim(),
+      };
 
-      if (form.ipag_sandbox_api_id !== cfg.ipag_sandbox_api_id) payload.ipag_sandbox_api_id = form.ipag_sandbox_api_id;
-      if (form.ipag_sandbox_api_key) payload.ipag_sandbox_api_key = form.ipag_sandbox_api_key;
-      if (form.ipag_prod_api_id !== cfg.ipag_prod_api_id) payload.ipag_prod_api_id = form.ipag_prod_api_id;
-      if (form.ipag_prod_api_key) payload.ipag_prod_api_key = form.ipag_prod_api_key;
+      if (form.mp_test_access_token && form.mp_test_access_token.trim()) {
+        payload.mp_test_access_token = form.mp_test_access_token.trim();
+      }
+      if (form.mp_prod_access_token && form.mp_prod_access_token.trim()) {
+        payload.mp_prod_access_token = form.mp_prod_access_token.trim();
+      }
+      if (form.mp_webhook_secret && form.mp_webhook_secret.trim()) {
+        payload.mp_webhook_secret = form.mp_webhook_secret.trim();
+      }
+      if (form.ipag_sandbox_api_key && form.ipag_sandbox_api_key.trim()) {
+        payload.ipag_sandbox_api_key = form.ipag_sandbox_api_key.trim();
+      }
+      if (form.ipag_prod_api_key && form.ipag_prod_api_key.trim()) {
+        payload.ipag_prod_api_key = form.ipag_prod_api_key.trim();
+      }
 
-      await api.put('/api/admin/payments-config', payload);
+      const updated = await api.put('/api/admin/payments-config', payload);
+      setCfg(updated);
+
+      const sbId = updated.ipag_sandbox_api_id ?? updated.ipag?.sandbox_api_id ?? form.ipag_sandbox_api_id;
+      const prId = updated.ipag_prod_api_id ?? updated.ipag?.prod_api_id ?? form.ipag_prod_api_id;
+
+      setForm(prev => ({
+        ...prev,
+        mp_test_public_key: updated.test_public_key ?? prev.mp_test_public_key,
+        mp_test_access_token: '',
+        mp_prod_public_key: updated.prod_public_key ?? prev.mp_prod_public_key,
+        mp_prod_access_token: '',
+        mp_webhook_secret: '',
+        ipag_sandbox_api_id: sbId,
+        ipag_sandbox_api_key: '',
+        ipag_prod_api_id: prId,
+        ipag_prod_api_key: '',
+      }));
       toast.success('Credenciais de pagamento salvas com sucesso');
-      await load();
     } catch (e) { toast.error(e?.message); }
     finally { setSaving(false); }
   };
@@ -98,7 +127,8 @@ export default function AdminPayments() {
   };
 
   const setIpagEnv = async (env) => {
-    if (env === 'production' && !cfg.ipag_prod_configured && form.ipag_prod_api_key === '') {
+    const isProdConfigured = cfg.ipag_prod_configured || cfg.ipag?.production_configured;
+    if (env === 'production' && !isProdConfigured && form.ipag_prod_api_key === '') {
       toast.error('Configure as credenciais de PRODUÇÃO do iPag antes de ativar');
       return;
     }
@@ -181,8 +211,8 @@ export default function AdminPayments() {
               Gateway v2 API direta (Pix QR Code, Cartão de Crédito e Boleto).
             </p>
             <div className="mt-3 text-[11px] flex items-center gap-2">
-              <span>Ambiente: <b>{cfg.ipag_environment === 'production' ? 'PRODUÇÃO' : 'Sandbox'}</b></span>
-              {cfg.ipag_sandbox_configured || cfg.ipag_prod_configured ? (
+              <span>Ambiente: <b>{(cfg.ipag_environment || cfg.ipag?.ipag_environment) === 'production' ? 'PRODUÇÃO' : 'Sandbox'}</b></span>
+              {(cfg.ipag_sandbox_configured || cfg.ipag?.sandbox_configured || cfg.ipag_prod_configured || cfg.ipag?.production_configured) ? (
                 <span className="text-emerald-600 font-bold">✓ Configurado</span>
               ) : (
                 <span className="text-amber-600">⚠ Pendente</span>
@@ -274,20 +304,20 @@ export default function AdminPayments() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <button onClick={() => setIpagEnv('sandbox')} disabled={saving}
-                className={`text-left p-4 rounded-xl border-2 transition ${cfg.ipag_environment === 'sandbox' ? 'border-indigo-500 bg-indigo-50/40' : 'border-border bg-white hover:border-slate-300'}`}>
+                className={`text-left p-4 rounded-xl border-2 transition ${(cfg.ipag_environment || cfg.ipag?.ipag_environment) === 'sandbox' ? 'border-indigo-500 bg-indigo-50/40' : 'border-border bg-white hover:border-slate-300'}`}>
                 <div className="flex items-center justify-between mb-1">
                   <Badge variant="warning">Sandbox</Badge>
-                  {cfg.ipag_environment === 'sandbox' && <Badge variant="brand">ATIVO</Badge>}
+                  {(cfg.ipag_environment || cfg.ipag?.ipag_environment) === 'sandbox' && <Badge variant="brand">ATIVO</Badge>}
                 </div>
                 <div className="font-bold text-sm">Sandbox (https://sandbox.ipag.com.br)</div>
                 <p className="text-xs text-txt-secondary mt-1">Ambiente de homologação e testes de API v2.</p>
               </button>
 
               <button onClick={() => setIpagEnv('production')} disabled={saving}
-                className={`text-left p-4 rounded-xl border-2 transition ${cfg.ipag_environment === 'production' ? 'border-red-500 bg-red-50/40' : 'border-border bg-white hover:border-slate-300'}`}>
+                className={`text-left p-4 rounded-xl border-2 transition ${(cfg.ipag_environment || cfg.ipag?.ipag_environment) === 'production' ? 'border-red-500 bg-red-50/40' : 'border-border bg-white hover:border-slate-300'}`}>
                 <div className="flex items-center justify-between mb-1">
                   <Badge variant="error">Produção</Badge>
-                  {cfg.ipag_environment === 'production' && <Badge variant="error">ATIVO</Badge>}
+                  {(cfg.ipag_environment || cfg.ipag?.ipag_environment) === 'production' && <Badge variant="error">ATIVO</Badge>}
                 </div>
                 <div className="font-bold text-sm">Produção (https://api.ipag.com.br)</div>
                 <p className="text-xs text-txt-secondary mt-1">Cobranças e processamento em produção real iPag.</p>
@@ -321,23 +351,77 @@ export default function AdminPayments() {
 
           {/* CREDENCIAIS IPAG */}
           <div className="bg-white rounded-xl border border-border p-6 space-y-4">
-            <h3 className="font-heading font-bold text-indigo-700 flex items-center gap-2 border-b border-border pb-3">
-              <Zap className="w-5 h-5 text-indigo-600" /> Credenciais iPag Gateway
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+              <h3 className="font-heading font-bold text-indigo-700 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-indigo-600" /> Credenciais iPag Gateway
+              </h3>
+              <div className="flex items-center gap-2 text-xs">
+                {(cfg.ipag_sandbox_configured || cfg.ipag?.sandbox_configured) && (
+                  <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                    ✓ Sandbox salva
+                  </span>
+                )}
+                {(cfg.ipag_prod_configured || cfg.ipag?.production_configured) && (
+                  <span className="text-emerald-600 font-semibold flex items-center gap-1 ml-2">
+                    ✓ Produção salva
+                  </span>
+                )}
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3 p-3 bg-indigo-50/30 rounded-lg border border-indigo-100">
-                <h4 className="text-xs font-bold text-indigo-900 uppercase">Sandbox (Testes)</h4>
-                <Field label="API ID (Sandbox)" value={form.ipag_sandbox_api_id} onChange={(v) => setForm(f => ({ ...f, ipag_sandbox_api_id: v }))} testId="ipag-sandbox-id" placeholder="Ex: sandbox_user" />
-                <Field label="API Key / Token (Sandbox)" value={form.ipag_sandbox_api_key} onChange={(v) => setForm(f => ({ ...f, ipag_sandbox_api_key: v }))}
-                  type={showSecrets ? 'text' : 'password'} placeholder={cfg.ipag_sandbox_api_key_masked || 'Sua chave de sandbox'} testId="ipag-sandbox-key" />
+              <div className="space-y-3 p-4 bg-indigo-50/30 rounded-xl border border-indigo-100">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-indigo-900 uppercase">Sandbox (Testes)</h4>
+                  {(cfg.ipag_sandbox_configured || cfg.ipag?.sandbox_configured) && (
+                    <Badge variant="success">Configurado</Badge>
+                  )}
+                </div>
+                <Field
+                  label="API ID (Sandbox)"
+                  name="ipag_sandbox_api_id"
+                  value={form.ipag_sandbox_api_id}
+                  onChange={(v) => setForm(f => ({ ...f, ipag_sandbox_api_id: v }))}
+                  testId="ipag-sandbox-id"
+                  placeholder="Ex: sandbox_user ou email iPag"
+                />
+                <Field
+                  label="API Key / Token (Sandbox)"
+                  name="ipag_sandbox_api_key"
+                  value={form.ipag_sandbox_api_key}
+                  onChange={(v) => setForm(f => ({ ...f, ipag_sandbox_api_key: v }))}
+                  type={showSecrets ? 'text' : 'password'}
+                  placeholder={cfg.ipag_sandbox_api_key_masked || cfg.ipag?.sandbox_api_key_masked || 'Sua chave de sandbox'}
+                  testId="ipag-sandbox-key"
+                  hint={cfg.ipag_sandbox_api_key_masked || cfg.ipag?.sandbox_api_key_masked ? `Salva: ${cfg.ipag_sandbox_api_key_masked || cfg.ipag?.sandbox_api_key_masked}` : null}
+                />
               </div>
 
-              <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <h4 className="text-xs font-bold text-slate-900 uppercase">Produção</h4>
-                <Field label="API ID (Produção)" value={form.ipag_prod_api_id} onChange={(v) => setForm(f => ({ ...f, ipag_prod_api_id: v }))} testId="ipag-prod-id" placeholder="Ex: prod_user" />
-                <Field label="API Key / Token (Produção)" value={form.ipag_prod_api_key} onChange={(v) => setForm(f => ({ ...f, ipag_prod_api_key: v }))}
-                  type={showSecrets ? 'text' : 'password'} placeholder={cfg.ipag_prod_api_key_masked || 'Sua chave de produção'} testId="ipag-prod-key" />
+              <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase">Produção</h4>
+                  {(cfg.ipag_prod_configured || cfg.ipag?.production_configured) && (
+                    <Badge variant="success">Configurado</Badge>
+                  )}
+                </div>
+                <Field
+                  label="API ID (Produção)"
+                  name="ipag_prod_api_id"
+                  value={form.ipag_prod_api_id}
+                  onChange={(v) => setForm(f => ({ ...f, ipag_prod_api_id: v }))}
+                  testId="ipag-prod-id"
+                  placeholder="Ex: prod_user ou email iPag"
+                />
+                <Field
+                  label="API Key / Token (Produção)"
+                  name="ipag_prod_api_key"
+                  value={form.ipag_prod_api_key}
+                  onChange={(v) => setForm(f => ({ ...f, ipag_prod_api_key: v }))}
+                  type={showSecrets ? 'text' : 'password'}
+                  placeholder={cfg.ipag_prod_api_key_masked || cfg.ipag?.prod_api_key_masked || 'Sua chave de produção'}
+                  testId="ipag-prod-key"
+                  hint={cfg.ipag_prod_api_key_masked || cfg.ipag?.prod_api_key_masked ? `Salva: ${cfg.ipag_prod_api_key_masked || cfg.ipag?.prod_api_key_masked}` : null}
+                />
               </div>
             </div>
           </div>
@@ -424,13 +508,24 @@ export default function AdminPayments() {
   );
 }
 
-function Field({ label, value, onChange, type = 'text', placeholder, testId }) {
+function Field({ label, value, onChange, type = 'text', placeholder, testId, name, hint }) {
   return (
     <div>
-      <label className="text-xs font-semibold block mb-1 text-slate-700">{label}</label>
-      <input type={type} value={value || ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-xs font-semibold block text-slate-700">{label}</label>
+        {hint && <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">{hint}</span>}
+      </div>
+      <input
+        type={type}
+        name={name}
+        id={name}
+        value={value || ''}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
         className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono focus:outline-none focus:border-brand-main bg-white"
-        data-testid={testId} autoComplete="off" />
+        data-testid={testId}
+        autoComplete="new-password"
+      />
     </div>
   );
 }
