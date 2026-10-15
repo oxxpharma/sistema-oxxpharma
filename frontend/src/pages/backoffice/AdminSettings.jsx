@@ -2,13 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Save, Settings as SettingsIcon, Loader2, Percent, Award, Wallet, Building2, MessageCircle } from 'lucide-react';
+import {
+  Save,
+  Settings as SettingsIcon,
+  Loader2,
+  Percent,
+  Award,
+  Wallet,
+  Building2,
+  MessageCircle,
+  FileSignature,
+  ShieldCheck,
+  Copy
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AdminSettings() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testingD4Sign, setTestingD4Sign] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -45,11 +58,35 @@ export default function AdminSettings() {
         whatsapp_number: (settings.whatsapp_number || '').replace(/\D/g, ''),
         whatsapp_message_template: settings.whatsapp_message_template || '',
         payroll_terms_text: settings.payroll_terms_text || '',
+        // D4Sign Integração de Contratos
+        d4sign_token_api: settings.d4sign_token_api || '',
+        d4sign_crypt_key: settings.d4sign_crypt_key || '',
+        d4sign_safe_uuid: settings.d4sign_safe_uuid || '',
+        d4sign_folder_uuid: settings.d4sign_folder_uuid || '',
+        d4sign_environment: settings.d4sign_environment || 'production',
+        d4sign_oxx_signer_name: settings.d4sign_oxx_signer_name || 'Oxx Pharma Magistral Ltda',
+        d4sign_oxx_signer_email: settings.d4sign_oxx_signer_email || 'convenio@oxxpharma.com',
       };
       const updated = await api.put('/api/admin/settings', payload);
       setSettings(updated);
-      toast.success('Configurações salvas');
+      toast.success('Configurações salvas com sucesso');
     } catch (err) { toast.error(err.message); } finally { setSaving(false); }
+  };
+
+  const handleTestD4Sign = async () => {
+    setTestingD4Sign(true);
+    try {
+      const res = await api.get('/api/admin/d4sign/test-connection');
+      if (res?.ok) {
+        toast.success(res.message || 'Conexão com D4Sign bem sucedida!');
+      } else {
+        toast.error(res?.message || 'Falha ao conectar com D4Sign.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Erro ao testar conexão com D4Sign');
+    } finally {
+      setTestingD4Sign(false);
+    }
   };
 
   const updateGen = (key, idx, val) => {
@@ -260,6 +297,123 @@ export default function AdminSettings() {
           >
             Restaurar modelo padrão
           </button>
+        </div>
+      </div>
+
+      {/* Integração D4Sign - Contratos de Convênio */}
+      <div className="bg-white rounded-xl border border-border p-6 mt-6" data-testid="d4sign-settings">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="font-heading font-black text-lg flex items-center gap-2">
+              <FileSignature className="w-5 h-5 text-brand-main" /> Integração D4Sign (Assinatura de Contratos)
+            </h2>
+            <p className="text-xs text-txt-secondary mt-0.5">
+              Configurações para envio automático e sincronização de contratos de empresas conveniadas via API do D4Sign.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleTestD4Sign}
+            disabled={testingD4Sign}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-slate-50 text-txt-primary hover:bg-slate-100 transition shadow-sm disabled:opacity-60 shrink-0"
+          >
+            {testingD4Sign ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5 text-brand-main" />}
+            {testingD4Sign ? 'Testando...' : 'Testar Conexão D4Sign'}
+          </button>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <Input
+            label="Token API D4Sign"
+            type="password"
+            value={settings.d4sign_token_api || ''}
+            onChange={e => setSettings({ ...settings, d4sign_token_api: e.target.value })}
+            placeholder="live_token_... ou demo_token_..."
+            hint="Chave obtida no painel D4Sign > Integração / API"
+          />
+
+          <Input
+            label="Crypt Key D4Sign"
+            type="password"
+            value={settings.d4sign_crypt_key || ''}
+            onChange={e => setSettings({ ...settings, d4sign_crypt_key: e.target.value })}
+            placeholder="live_crypt_... ou demo_crypt_..."
+            hint="Chave de criptografia fornecida pelo D4Sign"
+          />
+
+          <Input
+            label="Safe UUID (Cofre D4Sign)"
+            value={settings.d4sign_safe_uuid || ''}
+            onChange={e => setSettings({ ...settings, d4sign_safe_uuid: e.target.value })}
+            placeholder="Ex: 550e8400-e29b-41d4-a716-446655440000"
+            hint="UUID do cofre onde os documentos de convênio serão salvos"
+          />
+
+          <Input
+            label="Folder UUID (Pasta opcional)"
+            value={settings.d4sign_folder_uuid || ''}
+            onChange={e => setSettings({ ...settings, d4sign_folder_uuid: e.target.value })}
+            placeholder="Opcional: UUID da subpasta no cofre"
+            hint="Deixe em branco para armazenar na raiz do cofre"
+          />
+
+          <div>
+            <label className="block text-xs font-semibold text-txt-primary mb-1">
+              Ambiente D4Sign
+            </label>
+            <select
+              value={settings.d4sign_environment || 'production'}
+              onChange={e => setSettings({ ...settings, d4sign_environment: e.target.value })}
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:ring-2 focus:ring-brand-main"
+            >
+              <option value="production">Produção (secure.d4sign.com.br)</option>
+              <option value="sandbox">Sandbox / Homologação (sandbox.d4sign.com.br)</option>
+            </select>
+            <p className="text-[11px] text-txt-secondary mt-1">
+              Em produção, contratos assinados geram validade jurídica real.
+            </p>
+          </div>
+
+          <Input
+            label="Nome do Signatário da OxxPharma"
+            value={settings.d4sign_oxx_signer_name || ''}
+            onChange={e => setSettings({ ...settings, d4sign_oxx_signer_name: e.target.value })}
+            placeholder="Oxx Pharma Magistral Ltda"
+            hint="Nome que constará na assinatura da OxxPharma"
+          />
+
+          <Input
+            label="Email do Signatário da OxxPharma"
+            value={settings.d4sign_oxx_signer_email || ''}
+            onChange={e => setSettings({ ...settings, d4sign_oxx_signer_email: e.target.value })}
+            placeholder="convenio@oxxpharma.com"
+            hint="Email que recebe as notificações e via do contrato assinado"
+          />
+
+          <div className="p-3 bg-slate-50 border border-border rounded-lg text-xs">
+            <span className="font-semibold text-txt-primary block mb-1">URL de Retorno / Webhook D4Sign</span>
+            <div className="flex items-center gap-2">
+              <code className="bg-white border px-2 py-1 rounded text-[11px] text-slate-800 break-all select-all flex-1">
+                {typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/d4sign` : '/api/webhooks/d4sign'}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/d4sign`);
+                    toast.success('URL do webhook copiada!');
+                  }
+                }}
+                className="p-1.5 bg-white border rounded hover:bg-slate-50 text-slate-700"
+                title="Copiar URL do Webhook"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-[11px] text-txt-secondary mt-1">
+              Cadastre esta URL no D4Sign para sincronização instantânea quando o cliente assinar.
+            </p>
+          </div>
         </div>
       </div>
     </div>

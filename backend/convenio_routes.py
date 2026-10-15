@@ -499,6 +499,11 @@ async def create_company(request: Request, data: CompanyCreate, user: dict = Dep
             raise HTTPException(status_code=409, detail="Ja existe empresa com este CNPJ")
     doc = {"company_id": _gen_id("cmp_"), **payload, "created_at": _now_iso()}
     await db.companies.insert_one(doc)
+    # Gera minuta e envia para D4Sign (se configurado)
+    try:
+        await process_company_contract_d4sign(db, doc["company_id"])
+    except Exception as e:
+        logger.error(f"[D4Sign] Erro ao processar contrato inicial da empresa {doc['company_id']}: {e}")
     return await db.companies.find_one({"company_id": doc["company_id"]}, {"_id": 0})
 
 
@@ -638,12 +643,178 @@ async def create_company_representative(
     }
 
 
+# ==================== D4SIGN & CONTRATOS DE CONVÊNIO ====================
+
+def _store_contract_file(company_id: str, data: bytes, suffix: str = ".pdf") -> Tuple[str, str]:
+    """Salva o arquivo PDF do contrato no storage Emergent com fallback para disco local.
+    Retorna (url_relativa, storage_path).
+    """
+    import storage_service
+    path = f"{storage_service.APP_NAME}/contracts/{company_id}{suffix}"
+    try:
+        res = storage_service.put_object(path, data, "application/pdf")
+        return f"/api/company-contracts/{company_id}{suffix}", res.get("path", path)
+    except Exception as e:
+        logger.warning(f"Emergent storage indisponivel ({e}); salvando no disco local...")
+        local_dir = os.path.join(os.path.dirname(__file__), "uploads", "contracts")
+        os.makedirs(local_dir, exist_ok=True)
+        local_file = os.path.join(local_dir, f"{company_id}{suffix}")
+        with open(local_file, "wb") as f:
+            f.write(data)
+        return f"/api/company-contracts/{company_id}{suffix}", local_file
+
+
+async def process_company_contract_d4sign(db, company_id: str, force_regenerate: bool = False) -> Dict[str, Any]:
+    """Gera o contrato PDF da empresa e, se configurado, envia automaticamente para assinatura no D4Sign."""
+    import d4sign_service
+    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0})
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    settings = await db.settings.find_one({"_id": "global"}) or {}
+
+    # 1. Gera PDF formal do contrato com os dados da empresa
+    pdf_bytes = d4sign_service.build_contract_pdf(company, settings)
+    contract_url, storage_path = _store_contract_file(company_id, pdf_bytes, suffix=".pdf")
+
+    update_doc = {
+        "contract_url": contract_url,
+        "contract_storage_path": storage_path,
+        "contract_size_bytes": len(pdf_bytes),
+        "contract_generated_at": _now_iso(),
+    }
+
+    # 2. Verifica se o D4Sign está configurado e habilitado
+    d4_client = d4sign_service.get_d4sign_client_from_settings(settings)
+    d4_enabled = bool(settings.get("d4sign_enabled"))
+    safe_uuid = settings.get("d4sign_safe_uuid")
+    folder_uuid = settings.get("d4sign_folder_uuid")
+
+    if d4_enabled and d4_client.is_configured and safe_uuid:
+        try:
+            safe_comp_name = "".join(c for c in (company.get("name") or "Empresa") if c.isalnum() or c in (" ", "_", "-")).strip()
+            file_name = f"Contrato_Convenio_{safe_comp_name[:30]}_{company_id[-6:]}.pdf"
+
+            # Upload para o Cofre no D4Sign
+            up_res = d4_client.upload_document(pdf_bytes, file_name, safe_uuid=safe_uuid, folder_uuid=folder_uuid)
+            doc_uuid = up_res.get("document_uuid")
+            if not doc_uuid:
+                raise RuntimeError(f"D4Sign não retornou o UUID do documento: {up_res}")
+
+            # Identifica o signatário (representante da empresa)
+            rep_name = company.get("rep_name") or company.get("contact_name") or "Representante Legal"
+            rep_email = (company.get("rep_email") or company.get("email") or "").strip().lower()
+            rep_cpf = _digits(company.get("rep_cpf"))
+
+            signers = [{
+                "email": rep_email,
+                "act": "1",  # 1 = Assinar
+                "foreign": "0",
+                "auth_mode": "email",
+                "name": rep_name,
+            }]
+            if rep_cpf:
+                signers[0]["cpf"] = rep_cpf
+
+            # Cadastra signatários no D4Sign
+            d4_client.add_signers(doc_uuid, signers)
+
+            # Dispara para assinatura
+            msg = f"Olá, segue o Contrato de Convênio Comercial da {company.get('name')} com a OxxPharma para assinatura digital."
+            d4_client.send_to_signers(doc_uuid, message=msg)
+
+            # Link de assinatura direta
+            sign_url = d4_client.get_signing_link(doc_uuid, rep_email)
+
+            update_doc.update({
+                "d4sign_document_uuid": doc_uuid,
+                "d4sign_status": "pending",
+                "d4sign_status_name": "Aguardando Assinaturas",
+                "d4sign_sign_url": sign_url,
+                "d4sign_sent_at": _now_iso(),
+            })
+            logger.info(f"[D4Sign] Contrato da empresa {company_id} enviado com sucesso! UUID: {doc_uuid}")
+        except Exception as e:
+            logger.error(f"[D4Sign] Falha ao enviar contrato para D4Sign: {e}")
+            update_doc.update({
+                "d4sign_status": "error",
+                "d4sign_error": str(e),
+                "d4sign_error_at": _now_iso(),
+            })
+    else:
+        update_doc.update({
+            "d4sign_status": "not_configured" if not d4_client.is_configured else "disabled",
+            "d4sign_status_name": "D4Sign não configurado no painel admin",
+        })
+
+    await db.companies.update_one({"company_id": company_id}, {"$set": update_doc})
+    return await db.companies.find_one({"company_id": company_id}, {"_id": 0})
+
+
+async def sync_company_contract_d4sign(db, company_id: str) -> Dict[str, Any]:
+    """Consulta o D4Sign para verificar se o documento foi assinado e atualiza os dados locais."""
+    import d4sign_service
+    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0})
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    doc_uuid = company.get("d4sign_document_uuid")
+    if not doc_uuid:
+        return {
+            "status": company.get("d4sign_status", "none"),
+            "message": "Nenhum documento do D4Sign associado a esta empresa."
+        }
+
+    settings = await db.settings.find_one({"_id": "global"}) or {}
+    d4_client = d4sign_service.get_d4sign_client_from_settings(settings)
+    if not d4_client.is_configured:
+        return {
+            "status": company.get("d4sign_status"),
+            "message": "Credenciais do D4Sign não configuradas."
+        }
+
+    doc_info = d4_client.get_document(doc_uuid)
+    is_signed = doc_info.get("is_signed", False)
+    status_name = doc_info.get("status_name") or ("Finalizado" if is_signed else "Aguardando Assinaturas")
+
+    upd = {
+        "d4sign_status": "signed" if is_signed else "pending",
+        "d4sign_status_name": status_name,
+        "d4sign_last_sync_at": _now_iso(),
+    }
+
+    if is_signed and not company.get("contract_signed_url"):
+        # Faz o download do PDF assinado oficial do D4Sign
+        try:
+            signed_bytes = d4_client.download_signed_pdf(doc_uuid)
+            if signed_bytes:
+                signed_url, signed_storage_path = _store_contract_file(company_id, signed_bytes, suffix="_signed.pdf")
+                upd["contract_signed_url"] = signed_url
+                upd["contract_signed_storage_path"] = signed_storage_path
+                upd["d4sign_signed_at"] = _now_iso()
+                logger.info(f"[D4Sign] Contrato assinado da empresa {company_id} baixado e salvo com sucesso!")
+        except Exception as e:
+            logger.error(f"[D4Sign] Falha ao baixar PDF assinado do D4Sign: {e}")
+
+    await db.companies.update_one({"company_id": company_id}, {"$set": upd})
+    fresh = await db.companies.find_one({"company_id": company_id}, {"_id": 0})
+    return {
+        "company_id": company_id,
+        "d4sign_status": fresh.get("d4sign_status"),
+        "d4sign_status_name": fresh.get("d4sign_status_name"),
+        "is_signed": is_signed,
+        "contract_url": fresh.get("contract_url"),
+        "contract_signed_url": fresh.get("contract_signed_url"),
+        "d4sign_sign_url": fresh.get("d4sign_sign_url"),
+        "d4sign_signed_at": fresh.get("d4sign_signed_at"),
+    }
+
+
 @router.post("/admin/companies/{company_id}/contract")
 async def upload_company_contract(request: Request, company_id: str, file: UploadFile = File(...),
                                   user: dict = Depends(_admin_user_lazy)):
-    """Upload de contrato PDF via Emergent Object Storage.
+    """Upload manual de contrato PDF via Emergent Object Storage ou disco local.
     Aceita apenas application/pdf, max 10MB."""
-    import storage_service
     db = request.app.db
     await _get_company_or_404(db, company_id)
     fname = (file.filename or "").lower()
@@ -653,62 +824,90 @@ async def upload_company_contract(request: Request, company_id: str, file: Uploa
     data = await file.read()
     if not data or len(data) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Arquivo vazio ou maior que 10 MB")
-    path = f"{storage_service.APP_NAME}/contracts/{company_id}.pdf"
-    try:
-        result = storage_service.put_object(path, data, "application/pdf")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Falha no storage: {e}")
-    url = f"/api/company-contracts/{company_id}.pdf"
+    
+    url, storage_path = _store_contract_file(company_id, data, suffix=".pdf")
     await db.companies.update_one(
         {"company_id": company_id},
         {"$set": {
             "contract_url": url,
-            "contract_storage_path": result["path"],
-            "contract_size_bytes": result.get("size", len(data)),
+            "contract_storage_path": storage_path,
+            "contract_size_bytes": len(data),
             "contract_uploaded_at": _now_iso(),
         }},
     )
     return {"contract_url": url, "size_bytes": len(data)}
 
 
-@router.get("/company-contracts/{company_id}.pdf")
-async def download_company_contract(request: Request, company_id: str,
+@router.get("/company-contracts/{filename}")
+async def download_company_contract(request: Request, filename: str,
                                      auth: Optional[str] = None,
                                      authorization: Optional[str] = None):
-    """Baixa o PDF via storage. Aceita auth via header OU query ?auth=<token> (para <a href>)."""
+    """Baixa o PDF do contrato (minuta ou assinado). Aceita auth via header OU query ?auth=<token>."""
     import storage_service
     db = request.app.db
-    # resolucao manual do usuario (aceita ?auth= como fallback)
+
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Formato inválido")
+
+    is_signed = "_signed" in filename
+    company_id = filename.replace("_signed.pdf", "").replace(".pdf", "")
+
+    # Resolução manual do usuário (aceita ?auth= como fallback para links diretos em <a href>)
     if auth and "Authorization" not in request.headers:
-        # simula o header pra reutilizar get_current_user
-        get_user = _deps.get("get_current_user")
-        if not get_user:
-            raise HTTPException(status_code=500, detail="deps")
-        # trick: monkey-patch headers via scope? Nao — chamamos direto:
         import jwt as _jwt
         secret = os.environ.get("JWT_SECRET")
         try:
             payload = _jwt.decode(auth, secret, algorithms=["HS256"])
             uid = payload.get("sub")
         except Exception:
-            raise HTTPException(status_code=401, detail="Token invalido")
+            raise HTTPException(status_code=401, detail="Token inválido")
         user = await db.users.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
         if not user:
-            raise HTTPException(status_code=401, detail="Usuario nao encontrado")
+            raise HTTPException(status_code=401, detail="Usuário não encontrado")
     else:
         user = await _current_user_lazy(request)
+
     r = user.get("role")
     if r not in ("admin", "super_admin"):
         if r != "company_admin" or user.get("company_admin_of") != company_id:
             raise HTTPException(status_code=403, detail="Acesso negado")
+
     company = await _get_company_or_404(db, company_id)
-    path = company.get("contract_storage_path") or f"{storage_service.APP_NAME}/contracts/{company_id}.pdf"
-    try:
-        content, ct = storage_service.get_object(path)
-    except Exception:
-        raise HTTPException(status_code=404, detail="Contrato nao encontrado")
-    return Response(content=content, media_type="application/pdf",
-                    headers={"Content-Disposition": f"inline; filename={company_id}.pdf"})
+    content = None
+
+    if is_signed:
+        path = company.get("contract_signed_storage_path") or f"{storage_service.APP_NAME}/contracts/{company_id}_signed.pdf"
+        try:
+            content, _ = storage_service.get_object(path)
+        except Exception:
+            local_file = os.path.join(os.path.dirname(__file__), "uploads", "contracts", f"{company_id}_signed.pdf")
+            if os.path.exists(local_file):
+                with open(local_file, "rb") as f:
+                    content = f.read()
+        if not content:
+            raise HTTPException(status_code=404, detail="Contrato assinado ainda não disponível para download.")
+    else:
+        path = company.get("contract_storage_path") or f"{storage_service.APP_NAME}/contracts/{company_id}.pdf"
+        try:
+            content, _ = storage_service.get_object(path)
+        except Exception:
+            local_file = os.path.join(os.path.dirname(__file__), "uploads", "contracts", f"{company_id}.pdf")
+            if os.path.exists(local_file):
+                with open(local_file, "rb") as f:
+                    content = f.read()
+        if not content:
+            # Gera dinamicamente on-the-fly!
+            import d4sign_service
+            settings = await db.settings.find_one({"_id": "global"}) or {}
+            content = d4sign_service.build_contract_pdf(company, settings)
+            _store_contract_file(company_id, content, suffix=".pdf")
+
+    disp_name = f"Contrato_Convenio_{company_id}{'_Assinado' if is_signed else ''}.pdf"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={disp_name}"}
+    )
 
 
 # ==================== ADMIN + COMPANY: FUNCIONARIOS ====================
@@ -1436,11 +1635,144 @@ async def import_employees_xlsx(request: Request, file: UploadFile = File(...),
 
 @router.get("/company/contract")
 async def get_company_contract(request: Request, user: dict = Depends(_company_admin_lazy)):
+    """Retorna dados completos do contrato da empresa, incluindo status no D4Sign, link de assinatura e PDF assinado."""
     db = request.app.db
     c = await _get_user_company(db, user)
-    if not c.get("contract_url"):
-        raise HTTPException(status_code=404, detail="Contrato nao disponivel")
-    return {"contract_url": c["contract_url"], "company_name": c.get("name")}
+    cid = c["company_id"]
+
+    # Se ainda não tiver contract_url nem d4sign_status, gera o contrato automaticamente
+    if not c.get("contract_url") and not c.get("d4sign_status"):
+        try:
+            await process_company_contract_d4sign(db, cid)
+            c = await db.companies.find_one({"company_id": cid}, {"_id": 0}) or c
+        except Exception as e:
+            logger.error(f"[D4Sign] Falha ao auto-gerar contrato para empresa {cid}: {e}")
+
+    # Fallback se d4sign_sign_url ainda não foi gerado mas temos doc_uuid
+    sign_url = c.get("d4sign_sign_url")
+    if not sign_url and c.get("d4sign_doc_uuid"):
+        try:
+            settings = await db.settings.find_one({"_id": "global"}) or {}
+            import d4sign_service
+            d4_client = d4sign_service.get_d4sign_client_from_settings(settings)
+            rep_email = c.get("rep_email") or c.get("email") or user.get("email")
+            if d4_client and rep_email:
+                sign_url = d4_client.get_signing_link(c["d4sign_doc_uuid"], rep_email)
+                if sign_url:
+                    await db.companies.update_one({"company_id": cid}, {"$set": {"d4sign_sign_url": sign_url}})
+        except Exception as e:
+            logger.warning(f"[D4Sign] Não foi possível obter signing link para {cid}: {e}")
+
+    is_signed = c.get("d4sign_status") == "signed"
+    status_name = c.get("d4sign_status_name")
+    if not status_name:
+        status_name = "Contrato assinado com sucesso" if is_signed else "Contrato disponível para assinatura"
+
+    return {
+        "company_id": cid,
+        "company_name": c.get("name"),
+        "cnpj": c.get("cnpj"),
+        "rep_name": c.get("rep_name") or user.get("name"),
+        "rep_email": c.get("rep_email") or user.get("email"),
+        "contract_url": c.get("contract_url") or f"/api/company-contracts/{cid}.pdf",
+        "contract_signed_url": c.get("contract_signed_url"),
+        "d4sign_status": c.get("d4sign_status", "pending"),
+        "d4sign_status_name": status_name,
+        "d4sign_doc_uuid": c.get("d4sign_doc_uuid"),
+        "d4sign_sign_url": sign_url,
+        "d4sign_sent_at": c.get("d4sign_sent_at"),
+        "d4sign_signed_at": c.get("d4sign_signed_at"),
+        "d4sign_last_sync_at": c.get("d4sign_last_sync_at"),
+        "is_signed": is_signed,
+    }
+
+
+@router.post("/company/contract/sync-d4sign")
+async def company_contract_sync(request: Request, user: dict = Depends(_company_admin_lazy)):
+    """Verifica e sincroniza o status do contrato no D4Sign para a empresa do usuário."""
+    db = request.app.db
+    c = await _get_user_company(db, user)
+    cid = c["company_id"]
+    res = await sync_company_contract_d4sign(db, cid)
+    return res
+
+
+@router.post("/company/contract/generate")
+async def company_contract_generate(request: Request, user: dict = Depends(_company_admin_lazy)):
+    """Re-gera a minuta e re-dispara envio para D4Sign caso pendente."""
+    db = request.app.db
+    c = await _get_user_company(db, user)
+    cid = c["company_id"]
+    res = await process_company_contract_d4sign(db, cid, force_regenerate=True)
+    return res
+
+
+@router.post("/admin/companies/{company_id}/d4sign/send")
+async def admin_company_d4sign_send(request: Request, company_id: str, user: dict = Depends(_admin_user_lazy)):
+    """Admin: força a geração do PDF e reenvio ao D4Sign para uma empresa."""
+    db = request.app.db
+    await _get_company_or_404(db, company_id)
+    return await process_company_contract_d4sign(db, company_id, force_regenerate=True)
+
+
+@router.post("/admin/companies/{company_id}/d4sign/sync")
+async def admin_company_d4sign_sync(request: Request, company_id: str, user: dict = Depends(_admin_user_lazy)):
+    """Admin: sincroniza o status do contrato no D4Sign para uma empresa."""
+    db = request.app.db
+    await _get_company_or_404(db, company_id)
+    return await sync_company_contract_d4sign(db, company_id)
+
+
+@router.get("/admin/d4sign/test-connection")
+async def admin_d4sign_test_connection(request: Request, user: dict = Depends(_admin_user_lazy)):
+    """Admin: testa a conexão com o D4Sign com os dados salvos em settings."""
+    db = request.app.db
+    settings = await db.settings.find_one({"_id": "global"}) or {}
+    import d4sign_service
+    client = d4sign_service.get_d4sign_client_from_settings(settings)
+    if not client:
+        return {"ok": False, "message": "D4Sign não está configurado. Preencha Token API e Crypt Key nas configurações."}
+    return client.test_connection()
+
+
+@router.get("/admin/d4sign/safes")
+async def admin_d4sign_safes(request: Request, user: dict = Depends(_admin_user_lazy)):
+    """Admin: lista os cofres (safes) cadastrados na conta D4Sign."""
+    db = request.app.db
+    settings = await db.settings.find_one({"_id": "global"}) or {}
+    import d4sign_service
+    client = d4sign_service.get_d4sign_client_from_settings(settings)
+    if not client:
+        raise HTTPException(status_code=400, detail="D4Sign não configurado.")
+    safes = client.list_safes()
+    return {"safes": safes}
+
+
+@router.post("/webhooks/d4sign")
+async def d4sign_webhook(request: Request):
+    """Webhook do D4Sign para notificações automáticas de assinatura."""
+    db = request.app.db
+    data = {}
+    try:
+        data = await request.json()
+    except Exception:
+        try:
+            form = await request.form()
+            data = dict(form)
+        except Exception:
+            pass
+
+    doc_uuid = data.get("uuid") or data.get("uuid_doc") or request.query_params.get("uuid")
+    type_post = data.get("type_post")
+    logger.info(f"[D4Sign Webhook] Recebido doc_uuid={doc_uuid}, type_post={type_post}")
+
+    if doc_uuid:
+        company = await db.companies.find_one({"d4sign_doc_uuid": str(doc_uuid).strip()})
+        if company:
+            res = await sync_company_contract_d4sign(db, company["company_id"])
+            return {"status": "ok", "company_id": company["company_id"], "result": res}
+
+    return {"status": "ignored", "doc_uuid": doc_uuid}
 
 
 @router.get("/company/reports/open-charges")
@@ -2025,6 +2357,12 @@ async def propagandista_create_company(request: Request, data: PropagandistaComp
         {"user_id": rep_user_id},
         {"$set": {"company_admin_of": company_id}}
     )
+
+    # Dispara geração do contrato e envio para D4Sign (se configurado)
+    try:
+        await process_company_contract_d4sign(db, company_id)
+    except Exception as e:
+        logger.error(f"[D4Sign] Erro ao processar contrato da empresa cadastrada pelo propagandista {company_id}: {e}")
 
     res = await db.companies.find_one({"company_id": company_id}, {"_id": 0})
     res["representative_credentials"] = {"email": comp_email, "password": plain_password}

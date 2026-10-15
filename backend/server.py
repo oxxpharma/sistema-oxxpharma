@@ -141,6 +141,15 @@ DEFAULT_SETTINGS = {
         "Olá! Tenho interesse no produto *{product_name}* — R$ {product_price}.\n"
         "Link: {product_url}"
     ),
+    # D4Sign Integração de Contratos de Convênio
+    "d4sign_enabled": False,
+    "d4sign_token_api": "",
+    "d4sign_crypt_key": "",
+    "d4sign_safe_uuid": "",
+    "d4sign_folder_uuid": "",
+    "d4sign_environment": "production",
+    "d4sign_oxx_signer_name": "OxxPharma Magistral",
+    "d4sign_oxx_signer_email": "convenio@oxxpharma.com",
 }
 
 async def get_settings(db):
@@ -5911,6 +5920,10 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
         "igvd_voucher_enabled", "igvd_voucher_secret",
         "igvd_kit_items",  # Iter 48b: [{product_id, quantity}] — Kit de Adesao gerado no cadastro
         "payroll_terms_text",
+        # D4Sign Integração
+        "d4sign_enabled", "d4sign_token_api", "d4sign_crypt_key",
+        "d4sign_safe_uuid", "d4sign_folder_uuid", "d4sign_environment",
+        "d4sign_oxx_signer_name", "d4sign_oxx_signer_email",
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
