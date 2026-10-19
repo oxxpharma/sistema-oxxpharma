@@ -3820,19 +3820,27 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
 
     Retorna lista de dicts prontos para inserir em db.commissions (NAO insere).
     """
-    subtotal = float(order.get("subtotal") or 0)
+    subtotal = float(order.get("subtotal") or order.get("total") or 0)
     order_id = order["order_id"]
     customer_id = customer["user_id"]
     customer_name = customer.get("name")
     affiliate_rate = float(settings.get("affiliate_commission_rate") or 0)
     # Iter 43: tenant da comissao herda do pedido (fallback default)
     order_tenant = order.get("tenant") or tenant_service.DEFAULT_TENANT
+    order_created_at = order.get("created_at") or now_iso()
 
     out = []
 
     def _status_for(beneficiary: dict) -> tuple:
-        """Retorna (status, program_active) baseado na inscricao do beneficiario."""
-        active = bool(beneficiary.get("referral_program_active"))
+        """Retorna (status, program_active) baseado na inscricao do beneficiario.
+        Membros de rede MMN (network_1 ou network_2) estao sempre ativos para receber comissoes de rede.
+        """
+        is_net = (
+            beneficiary.get("network_type") in (NETWORK_1, NETWORK_2)
+            or "network_1" in (beneficiary.get("networks") or [])
+            or "network_2" in (beneficiary.get("networks") or [])
+        )
+        active = bool(beneficiary.get("referral_program_active")) or is_net
         return ("pending" if active else "pending_enrollment", active)
 
     # 1) Afiliado
@@ -3857,7 +3865,7 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                 "status": status,
                 "program_active_at_creation": program_active,
                 "tenant": order_tenant,
-                "created_at": now_iso(),
+                "created_at": order_created_at,
             }
             if mark_retroactive:
                 doc["retroactive"] = True
@@ -3865,11 +3873,11 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
             out.append(doc)
 
     # 2) MMN ate 6 geracoes (Iter 40: sem filtro de inscricao; cadeia em estrutura linear)
-    # Importante: cliente regular no meio da cadeia GASTA geracao (so nao recebe comissao).
-    # Isso preserva a topologia da rede MMN exatamente como cadastrada.
+    # Importante: para MMN, a hierarquia primaria e' `network_sponsor_id` (lider de equipe).
+    # Se o usuario nao possui `network_sponsor_id`, recorre a `sponsor_id`.
     network1_pcts = settings.get("network1_generations", []) or []
     network2_pcts = settings.get("network2_generations", []) or []
-    current_id = customer.get("sponsor_id") or customer.get("network_sponsor_id")
+    current_id = customer.get("network_sponsor_id") or customer.get("sponsor_id")
     visited = {customer_id}
     generation = 1
     while generation <= 6 and current_id and current_id not in visited:
@@ -3913,7 +3921,7 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                         "status": status,
                         "program_active_at_creation": program_active,
                         "tenant": order_tenant,
-                        "created_at": now_iso(),
+                        "created_at": order_created_at,
                     }
                     if mult_applied:
                         doc["multiplier_applied"] = mult_val
@@ -3922,9 +3930,8 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
                         doc["retroactive"] = True
                         doc["recalc_batch_id"] = batch_id
                     out.append(doc)
-        # Avanca para o proximo ancestral E para a proxima geracao,
-        # mesmo quando o atual nao for MMN (nao quebra a cadeia)
-        current_id = ancestor.get("sponsor_id") or ancestor.get("network_sponsor_id")
+        # Avanca para o proximo ancestral MMN (network_sponsor_id tem prioridade sobre sponsor_id)
+        current_id = ancestor.get("network_sponsor_id") or ancestor.get("sponsor_id")
         generation += 1
 
     return out
@@ -3933,17 +3940,15 @@ async def compute_order_commissions(db, order, customer, settings, *, mark_retro
 async def _create_commissions_for_paid_order(db, order_id: str, *, fire_emails: bool = True) -> list:
     """Iter 42d: gera as comissoes para um pedido recem-pago.
 
-    - Idempotente: se ja existe qualquer comissao para o order_id, NAO recria
-      (recalculo retroativo eh feito por /admin/recalc-commissions).
+    - Idempotente: se ja existe comissao para a chave (user_id, type, generation), nao duplica;
+      mas se faltar alguma comissao (ex: MMN ou afiliado), insere apenas as faltantes.
     - Status inicial: 'pending' (afiliado/MMN inscrito) ou 'pending_enrollment'
       (beneficiario ainda nao inscrito no Clube). NUNCA cria como 'paid' direto -
       admin precisa aprovar manualmente.
     - Fire emails: dispara 'commission_earned' para cada afiliado direto criado.
 
-    Retorna a lista das comissoes criadas (vazia se ja havia).
+    Retorna a lista das comissoes criadas (vazia se ja havia todas).
     """
-    if await db.commissions.count_documents({"order_id": order_id}) > 0:
-        return []
     order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not order:
         return []
@@ -3954,8 +3959,20 @@ async def _create_commissions_for_paid_order(db, order_id: str, *, fire_emails: 
     comms = await compute_order_commissions(db, order, customer, settings, mark_retroactive=False)
     if not comms:
         return []
+
+    # Verifica quais ja estao persistidas para nao duplicar
+    existing_keys = set()
+    async for ex in db.commissions.find(
+        {"order_id": order_id},
+        {"_id": 0, "user_id": 1, "type": 1, "generation": 1}
+    ):
+        existing_keys.add((ex.get("user_id"), ex.get("type"), ex.get("generation")))
+
+    to_insert = [c for c in comms if (c["user_id"], c.get("type"), c.get("generation")) not in existing_keys]
+    if not to_insert:
+        return []
     try:
-        await db.commissions.insert_many(comms, ordered=False)
+        await db.commissions.insert_many(to_insert, ordered=False)
     except Exception as e:
         logger.warning(f"_create_commissions_for_paid_order insert error (order={order_id}): {e}")
 
@@ -5991,6 +6008,13 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
     if end:
         date_range["$lte"] = end + "T23:59:59"
 
+    # Se usuario esta no programa ou em rede MMN, promove qualquer comissao pendente de inscricao
+    if user.get("referral_program_active") or network_type in (NETWORK_1, NETWORK_2):
+        await db.commissions.update_many(
+            {"user_id": user["user_id"], "status": "pending_enrollment"},
+            {"$set": {"status": "pending", "promoted_on_enrollment_at": now_iso()}},
+        )
+
     generations = []
     if network_type in (NETWORK_1, NETWORK_2):
         current_ids = [user["user_id"]]
@@ -6005,19 +6029,70 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                 ], "user_id": {"$nin": list(seen)}},
                 {"_id": 0, "password_hash": 0}
             ).to_list(2000)
-            # Stats de comissao da geracao (com filtro de periodo)
             level_user_ids = [u["user_id"] for u in level_users]
-            comm_match: Dict = {"user_id": user["user_id"], "generation": gen, "network_type": network_type}
+
+            # Auto-healing: garante que pedidos pagos destes membros tenham comissoes geradas para este lider
+            if level_user_ids:
+                paid_orders_cursor = db.orders.find(
+                    {"user_id": {"$in": level_user_ids}, "payment_status": "paid"},
+                    {"_id": 0}
+                ).limit(200)
+                async for po in paid_orders_cursor:
+                    poid = po.get("order_id")
+                    if not poid:
+                        continue
+                    has_comm = await db.commissions.find_one(
+                        {"user_id": user["user_id"], "order_id": poid}
+                    )
+                    if not has_comm:
+                        cust = await db.users.find_one({"user_id": po.get("user_id")}, {"_id": 0})
+                        if cust:
+                            computed = await compute_order_commissions(db, po, cust, settings, mark_retroactive=True)
+                            for c in computed:
+                                if c["user_id"] == user["user_id"]:
+                                    ex = await db.commissions.find_one({
+                                        "order_id": c["order_id"],
+                                        "user_id": c["user_id"],
+                                        "type": c.get("type"),
+                                        "generation": c.get("generation"),
+                                    })
+                                    if not ex:
+                                        try:
+                                            await db.commissions.insert_one(c)
+                                        except Exception as _e:
+                                            logger.warning(f"my_network auto-heal insert error: {_e}")
+
+            # Stats de comissao da geracao (com filtro de periodo)
+            comm_match: Dict = {
+                "user_id": user["user_id"],
+                "$or": [
+                    {"generation": gen, "network_type": network_type},
+                    {"customer_id": {"$in": level_user_ids}} if gen == 1 else {"generation": gen},
+                ],
+                "status": {"$in": ["paid", "pending", "paid_out", "pending_enrollment"]},
+            }
             if date_range:
                 comm_match["created_at"] = date_range
             comm_agg = await db.commissions.aggregate([
                 {"$match": comm_match},
                 {"$group": {"_id": "$status", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
             ]).to_list(10)
-            stats = {"pending": 0, "paid": 0, "count": 0}
+            stats = {"pending": 0, "paid": 0, "paid_out": 0, "pending_enrollment": 0, "count": 0}
             for s in comm_agg:
                 stats[s["_id"] or "pending"] = round(s["total"], 2)
                 stats["count"] += s["count"]
+
+            # Comissoes por membro (para exibir nominalmente com transparencia)
+            per_member_commissions: Dict[str, float] = {}
+            if level_user_ids:
+                mcomm_agg = await db.commissions.aggregate([
+                    {"$match": comm_match},
+                    {"$group": {"_id": "$customer_id", "total": {"$sum": "$amount"}}}
+                ]).to_list(len(level_user_ids) + 10)
+                for mc in mcomm_agg:
+                    if mc.get("_id"):
+                        per_member_commissions[mc["_id"]] = round(mc.get("total") or 0.0, 2)
+
             # Iter 49: valor total das compras (soma orders pagos) desta geracao no periodo
             # Iter 50: agrega POR MEMBRO para permitir ordenacao e Top-3.
             purchases_total = 0.0
@@ -6036,6 +6111,7 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                     purchases_total += r.get("total") or 0
                     purchases_count += r.get("count") or 0
                 purchases_total = round(purchases_total, 2)
+
             # Lista resumida dos membros para exibir nominalmente (ordenada por compras DESC)
             members_list = [
                 {
@@ -6048,6 +6124,7 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                     "referral_program_active": bool(m.get("referral_program_active")),
                     "purchases_total": per_member_purchases.get(m.get("user_id"), {}).get("total", 0.0),
                     "purchases_count": per_member_purchases.get(m.get("user_id"), {}).get("count", 0),
+                    "commission_total": per_member_commissions.get(m.get("user_id"), 0.0),
                     "generation": gen,
                 }
                 for m in level_users
@@ -6055,8 +6132,11 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
             # Iter 50: ordena membros por purchases_total DESC (maiores compradores no topo).
             # Empates: quem tem count maior primeiro; depois nome A-Z.
             members_list.sort(key=lambda m: (-(m["purchases_total"] or 0), -(m["purchases_count"] or 0), (m.get("name") or "").lower()))
-            # Iter 49: valor recebido = paid + pending (conforme requisicao do cliente)
-            received_total = round(stats.get("paid", 0) + stats.get("pending", 0), 2)
+            # Iter 49: valor recebido = soma de todas as comissoes geradas (paid + pending + paid_out + pending_enrollment)
+            received_total = round(
+                stats.get("paid", 0) + stats.get("pending", 0) + stats.get("paid_out", 0) + stats.get("pending_enrollment", 0),
+                2
+            )
             generations.append({
                 "generation": gen,
                 "rate_pct": gens_pct[gen - 1] if gen - 1 < len(gens_pct) else 0,
@@ -6064,6 +6144,7 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                 "members": members_list,
                 "pending": stats.get("pending", 0),
                 "paid": stats.get("paid", 0),
+                "paid_out": stats.get("paid_out", 0),
                 "received_total": received_total,
                 "purchases_total": purchases_total,
                 "purchases_count": purchases_count,
@@ -6076,7 +6157,7 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
                 for g in range(gen + 1, 7):
                     generations.append({
                         "generation": g, "rate_pct": gens_pct[g - 1] if g - 1 < len(gens_pct) else 0,
-                        "members_count": 0, "members": [], "pending": 0, "paid": 0,
+                        "members_count": 0, "members": [], "pending": 0, "paid": 0, "paid_out": 0,
                         "received_total": 0, "purchases_total": 0, "purchases_count": 0,
                         "total_commissions": 0,
                     })
@@ -6090,7 +6171,7 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
         {"$match": totals_match},
         {"$group": {"_id": "$status", "total": {"$sum": "$amount"}}}
     ]).to_list(10)
-    totals = {"pending": 0, "paid": 0, "cancelled": 0}
+    totals = {"pending": 0, "paid": 0, "paid_out": 0, "cancelled": 0}
     for s in totals_agg:
         totals[s["_id"] or "pending"] = round(s["total"], 2)
 
@@ -6107,16 +6188,16 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
         }},
     ]).to_list(50)
     by_source = {
-        "affiliate": {"pending": 0, "paid": 0, "count": 0},
-        "network_1": {"pending": 0, "paid": 0, "count": 0},
-        "network_2": {"pending": 0, "paid": 0, "count": 0},
+        "affiliate": {"pending": 0, "paid": 0, "paid_out": 0, "count": 0},
+        "network_1": {"pending": 0, "paid": 0, "paid_out": 0, "count": 0},
+        "network_2": {"pending": 0, "paid": 0, "paid_out": 0, "count": 0},
     }
     for s in by_source_agg:
         key = "affiliate" if s["_id"].get("type") == "affiliate" else (s["_id"].get("network_type") or "network_1")
         if key not in by_source:
-            by_source[key] = {"pending": 0, "paid": 0, "count": 0}
+            by_source[key] = {"pending": 0, "paid": 0, "paid_out": 0, "count": 0}
         st = s["_id"].get("status") or "pending"
-        if st in ("pending", "paid"):
+        if st in ("pending", "paid", "paid_out"):
             by_source[key][st] = round(by_source[key].get(st, 0) + (s["total"] or 0), 2)
         by_source[key]["count"] += s["count"]
 

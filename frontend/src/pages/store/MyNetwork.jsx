@@ -324,11 +324,16 @@ export default function MyNetwork() {
                               <div className="text-right hidden sm:block">
                                 <div className="text-[10px] uppercase font-bold text-txt-secondary/70">Compras no período</div>
                                 <div
-                                  className={`text-sm font-heading font-black ${purchases > 0 ? 'text-emerald-600' : 'text-txt-secondary/60'}`}
+                                  className={`text-sm font-heading font-black ${purchases > 0 ? 'text-slate-900' : 'text-txt-secondary/60'}`}
                                   data-testid={`gen-${g.generation}-member-${m.user_id}-purchases`}
                                 >
                                   {formatCurrency(purchases)}
                                 </div>
+                                {m.commission_total > 0 && (
+                                  <div className="text-[11px] font-bold text-emerald-600">
+                                    Comissão: {formatCurrency(m.commission_total)}
+                                  </div>
+                                )}
                               </div>
                               <div className="flex flex-col items-end gap-1">
                                 {netLabel && <Badge variant="brand">{netLabel}</Badge>}
