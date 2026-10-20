@@ -2248,7 +2248,51 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
     is_admin = user.get("role") in ("admin", "super_admin") or user.get("access_level", 99) <= 1
     if not is_admin and o.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
+
+    # Se estiver pendente e for iPag, verifica status em tempo real com o gateway
+    if o.get("payment_status") == "pending" and o.get("payment_provider") == "ipag":
+        try:
+            res = await ipag_service.consult_ipag_order_payment(db, o)
+            if res.get("is_paid"):
+                await mark_order_paid(db, order_id, payment_id=res.get("payment_id"), source="ipag_auto_check")
+                o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+            elif res.get("is_rejected"):
+                await db.orders.update_one({"order_id": order_id}, {"$set": {"payment_status": "rejected"}})
+                o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+        except Exception as e:
+            logger.warning(f"Erro auto-check iPag get_order ({order_id}): {e}")
+
     return o
+
+
+@app.post("/api/orders/{order_id}/sync-payment")
+async def sync_order_payment(request: Request, order_id: str, user: dict = Depends(get_current_user)):
+    """Sincroniza o status de pagamento do pedido com o gateway (iPag / MercadoPago)."""
+    db = request.app.db
+    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido nao encontrado")
+    is_admin = user.get("role") in ("admin", "super_admin") or user.get("access_level", 99) <= 1
+    if not is_admin and o.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    if o.get("payment_status") == "paid":
+        return {"status": "paid", "already_paid": True, "order": o}
+
+    provider = o.get("payment_provider")
+    if provider == "ipag":
+        res = await ipag_service.consult_ipag_order_payment(db, o)
+        if res.get("is_paid"):
+            await mark_order_paid(db, order_id, payment_id=res.get("payment_id"), source="ipag_sync_btn")
+            fresh = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+            return {"status": "paid", "updated": True, "order": fresh}
+        elif res.get("is_rejected"):
+            await db.orders.update_one({"order_id": order_id}, {"$set": {"payment_status": "rejected"}})
+            fresh = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+            return {"status": "rejected", "updated": True, "order": fresh}
+        return {"status": "pending", "updated": False, "order": o}
+
+    return {"status": o.get("payment_status", "pending"), "order": o}
 
 
 @app.get("/api/orders/{order_id}/tracking")
@@ -5835,52 +5879,108 @@ async def mp_webhook(request: Request):
     return {"received": True}
 
 
-@app.post("/api/payments/webhook/ipag")
+@app.api_route("/api/payments/webhook/ipag", methods=["GET", "POST"])
 async def ipag_webhook(request: Request):
     """Webhook / Callback iPag: processa notificacao de alteracao de status de pagamento."""
     db = request.app.db
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = {}
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        try:
+            form = await request.form()
+            body = dict(form)
+        except Exception:
+            body = {}
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            try:
+                form = await request.form()
+                body = dict(form)
+            except Exception:
+                body = {}
 
     query_params = dict(request.query_params)
     payload = {**query_params, **body}
 
+    header_event = request.headers.get("x-ipag-event") or request.headers.get("x-event") or ""
+
     data_obj = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     attr_obj = payload.get("attributes") if isinstance(payload.get("attributes"), dict) else {}
+    trans_obj = payload.get("transaction") if isinstance(payload.get("transaction"), dict) else {}
+    trans_attr = trans_obj.get("attributes") if isinstance(trans_obj.get("attributes"), dict) else {}
 
     order_id = (
-        payload.get("external_code")
-        or payload.get("order_id")
+        payload.get("order_id")
+        or payload.get("external_code")
         or payload.get("reference")
         or payload.get("custom_id")
-        or data_obj.get("external_code")
         or data_obj.get("order_id")
-        or attr_obj.get("external_code")
+        or data_obj.get("external_code")
         or attr_obj.get("order_id")
+        or attr_obj.get("external_code")
+        or trans_obj.get("order_id")
+        or trans_obj.get("external_code")
+        or trans_attr.get("order_id")
+        or trans_attr.get("external_code")
+        or query_params.get("order_id")
     )
+
     trans_id = (
         payload.get("id")
         or payload.get("transaction_id")
         or payload.get("uuid")
+        or trans_obj.get("id")
+        or trans_attr.get("id")
+        or trans_attr.get("uuid")
         or data_obj.get("id")
         or attr_obj.get("uuid")
+        or attr_obj.get("id")
     )
+
     event_type = str(
-        payload.get("event")
+        header_event
+        or payload.get("event")
         or payload.get("event_name")
         or payload.get("type")
         or payload.get("action")
+        or trans_obj.get("event")
         or ""
-    )
-    status = str(
-        payload.get("status")
-        or payload.get("status_code")
-        or data_obj.get("status")
+    ).strip()
+
+    status_raw = (
+        trans_attr.get("status")
+        or trans_obj.get("status")
         or attr_obj.get("status")
-        or ""
-    ).lower()
+        or data_obj.get("status")
+        or payload.get("status")
+        or payload.get("status_code")
+    )
+
+    gateway_obj = (
+        trans_attr.get("gateway")
+        or trans_obj.get("gateway")
+        or attr_obj.get("gateway")
+        or payload.get("gateway")
+    )
+
+    # Se não temos order_id no payload, busca pedido pelo payment_id ou transaction_id
+    if not order_id and trans_id:
+        existing_order = await db.orders.find_one({
+            "$or": [
+                {"payment_id": str(trans_id)},
+                {"ipag_payment_id": str(trans_id)},
+                {"transaction_id": str(trans_id)},
+            ]
+        })
+        if existing_order:
+            order_id = existing_order.get("order_id")
 
     log_entry = {
         "log_id": gen_id("ipaghook_"),
@@ -5889,32 +5989,44 @@ async def ipag_webhook(request: Request):
         "data_id": trans_id,
         "order_id": order_id,
         "event_type": event_type,
-        "status": status,
+        "status_raw": status_raw,
         "raw_body": body,
         "query": query_params,
+        "headers": {k: v for k, v in request.headers.items() if k.lower().startswith("x-")},
     }
 
-    # Eventos ou status que confirmam pagamento efetuado
-    paid_events = {
-        "paymentlinkpaymentsucceeded",
-        "transactioncaptured",
-        "chargepaymentsucceeded",
-        "transactionapproved",
-    }
-    is_paid = (
-        event_type.lower() in paid_events
-        or status in ["2", "paid", "approved", "captured", "capturado", "succeeded"]
-    )
+    # Avaliação rigorosa e resiliente do status pago
+    is_paid = ipag_service.is_ipag_status_paid(status_raw, event_name=event_type, gateway_obj=gateway_obj)
+
+    # Se ainda não detectou como pago e temos order_id ou trans_id, consulta o iPag ativamente
+    if not is_paid and order_id:
+        target_order = await db.orders.find_one({"order_id": str(order_id)})
+        if target_order and target_order.get("payment_status") == "pending":
+            consult_res = await ipag_service.consult_ipag_order_payment(db, {
+                "order_id": str(order_id),
+                "payment_id": str(trans_id or target_order.get("payment_id") or "")
+            })
+            if consult_res.get("is_paid"):
+                is_paid = True
+                if not trans_id and consult_res.get("payment_id"):
+                    trans_id = consult_res.get("payment_id")
 
     if order_id and is_paid:
         await mark_order_paid(db, str(order_id), payment_id=str(trans_id) if trans_id else None, source="ipag")
         log_entry["action"] = "marked_paid"
-    elif order_id and (status in ["3", "denied", "canceled", "cancelled"] or "failed" in event_type.lower()):
-        await db.orders.update_one({"order_id": str(order_id)}, {"$set": {"payment_status": "rejected"}})
-        log_entry["action"] = "marked_rejected"
+    elif order_id:
+        # Verifica se foi cancelado/rejeitado
+        status_text = str(status_raw).lower()
+        if (
+            any(rej in status_text for rej in ["denied", "canceled", "cancelled", "recusad", "falh"])
+            or "failed" in event_type.lower()
+            or "declined" in event_type.lower()
+        ):
+            await db.orders.update_one({"order_id": str(order_id)}, {"$set": {"payment_status": "rejected"}})
+            log_entry["action"] = "marked_rejected"
 
     await db.payment_webhook_logs.insert_one(log_entry)
-    return {"status": "ok", "order_id": order_id, "payment_status": status, "event": event_type}
+    return {"status": "ok", "order_id": order_id, "is_paid": is_paid, "event": event_type}
 
 # ==================== SETTINGS (ADMIN) ====================
 

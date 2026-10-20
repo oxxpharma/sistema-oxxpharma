@@ -28,6 +28,7 @@ export default function OrderDetails() {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [payCfg, setPayCfg] = useState({ environment: 'test', configured: false });
   const [showAcceptance, setShowAcceptance] = useState(false);
 
@@ -47,6 +48,48 @@ export default function OrderDetails() {
   };
 
   useEffect(() => { load(); }, [id]);
+
+  // Polling automático enquanto o pagamento estiver pendente
+  useEffect(() => {
+    if (!order || order.payment_status !== 'pending') return;
+    let attempts = 0;
+    const maxAttempts = 60; // ~5 minutos (5s intervalo)
+    const interval = setInterval(async () => {
+      attempts += 1;
+      if (attempts > maxAttempts) {
+        clearInterval(interval);
+        return;
+      }
+      try {
+        const o = await api.get(`/api/orders/${id}`);
+        if (o && o.payment_status !== 'pending') {
+          setOrder(o);
+          toast.success('Pagamento confirmado com sucesso!');
+          clearInterval(interval);
+        }
+      } catch (e) {
+        // silencioso
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [id, order?.payment_status]);
+
+  const syncPayment = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.post(`/api/orders/${id}/sync-payment`);
+      if (res && res.paid) {
+        toast.success('Pagamento confirmado com sucesso!');
+        await load();
+      } else {
+        toast.info('Pagamento ainda não foi identificado pelo gateway. Aguarde alguns instantes e tente novamente.');
+      }
+    } catch (err) {
+      toast.error('Erro ao verificar pagamento');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const confirmMockPayment = async () => {
     setPaying(true);
@@ -98,7 +141,7 @@ export default function OrderDetails() {
                 <p className="text-sm text-amber-800 mb-3">
                   <strong>Pagamento pendente.</strong> Clique no botão abaixo para concluir o pagamento via {order.payment_provider === 'ipag' ? 'iPag Gateway' : 'MercadoPago'}.
                 </p>
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2 flex-wrap items-center">
                   <a href={order.payment_url} target="_blank" rel="noreferrer">
                     <Button size="sm" data-testid="pay-btn">
                       Pagar com {order.payment_provider === 'ipag' ? 'iPag' : 'MercadoPago'}
@@ -111,6 +154,17 @@ export default function OrderDetails() {
                       </Button>
                     </a>
                   )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={syncPayment}
+                    loading={syncing}
+                    className="border-amber-300 text-amber-900 hover:bg-amber-100"
+                    title="Verificar se o pagamento já foi recebido"
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
+                    Verificar se já paguei
+                  </Button>
                 </div>
               </>
             ) : order.pix_qrcode ? (
@@ -118,9 +172,33 @@ export default function OrderDetails() {
                 <p className="text-sm text-amber-800 font-bold">Escaneie o QR Code PIX para pagar:</p>
                 {order.pix_qrcode_url && <img src={order.pix_qrcode_url} alt="QR Code Pix" className="w-48 h-48 mx-auto border rounded-lg bg-white p-2" />}
                 <div className="bg-white p-2 border rounded font-mono text-xs break-all select-all">{order.pix_qrcode}</div>
+                <div className="pt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={syncPayment}
+                    loading={syncing}
+                    className="border-amber-300 text-amber-900 hover:bg-amber-100"
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
+                    Já paguei, verificar agora
+                  </Button>
+                </div>
               </div>
             ) : (
-              <p className="text-sm text-amber-800">Aguardando confirmação do pagamento...</p>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <p className="text-sm text-amber-800">Aguardando confirmação do pagamento...</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={syncPayment}
+                  loading={syncing}
+                  className="border-amber-300 text-amber-900 hover:bg-amber-100"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
+                  Verificar pagamento
+                </Button>
+              </div>
             )}
             {(payCfg.provider === 'mock' || payCfg.environment === 'test' || payCfg.ipag_environment === 'sandbox' || order.payment_provider === 'mock') && (
               <div className="mt-3 pt-3 border-t border-amber-200">

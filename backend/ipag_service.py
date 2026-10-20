@@ -160,14 +160,14 @@ async def create_ipag_payment(
         raise RuntimeError(f"Credenciais do iPag não configuradas para o ambiente {env.upper()}")
 
     base_url = _get_base_url(env)
-    callback_url = f"{backend_url}/api/payments/webhook/ipag"
-    redirect_url = f"{frontend_url}/pedido/{order.get('order_id')}"
+    order_id = str(order.get("order_id") or "")
+    callback_url = f"{backend_url}/api/payments/webhook/ipag?order_id={order_id}"
+    redirect_url = f"{frontend_url}/pedido/{order_id}?from=ipag"
 
     amount = float(order.get("total") or order.get("amount") or 0)
     if amount <= 0:
         raise ValueError("Valor do pedido deve ser maior que zero")
 
-    order_id = str(order.get("order_id") or "")
     cpf_cnpj = _clean_digits(user.get("cpf") or user.get("cpf_digits") or order.get("customer_cpf"))
     phone = _clean_digits(user.get("phone") or user.get("phone_digits") or order.get("customer_phone"))
 
@@ -218,7 +218,9 @@ async def create_ipag_payment(
 
     link_body = {
         "amount": round(amount, 2),
+        "order_id": order_id[:50],
         "external_code": order_id[:50],
+        "reference": order_id[:50],
         "description": f"Pedido #{order_id[-8:].upper()} - OxxPharma",
         "expires_at": expires_at,
         "callback_url": callback_url,
@@ -273,6 +275,63 @@ async def create_ipag_payment(
         }
 
 
+def is_ipag_status_paid(status_obj_or_val, event_name: str = "", gateway_obj: Optional[Dict] = None) -> bool:
+    """Verifica de forma exaustiva se os dados do iPag indicam pagamento efetuado/capturado."""
+    # 1. Evento explícito
+    ev = str(event_name or "").strip().lower()
+    paid_events = {
+        "paymentlinkpaymentsucceeded",
+        "transactioncaptured",
+        "chargepaymentsucceeded",
+        "transactionapproved",
+        "paymentsucceeded",
+        "captured",
+        "approved",
+    }
+    if ev in paid_events or "succeeded" in ev or "captured" in ev or "approved" in ev:
+        return True
+
+    # 2. Gateway code P0 = sucesso
+    if isinstance(gateway_obj, dict):
+        gcode = str(gateway_obj.get("code") or "").strip().upper()
+        gmsg = str(gateway_obj.get("message") or "").strip().lower()
+        if gcode in ("P0", "0", "00") or "sucesso" in gmsg or "concluída" in gmsg or "concluida" in gmsg:
+            if not any(neg in gmsg for neg in ["cancel", "recus", "falh", "negad"]):
+                return True
+
+    # 3. Analisa status_obj_or_val (pode ser dict, int ou str)
+    code_str = ""
+    msg_str = ""
+    if isinstance(status_obj_or_val, dict):
+        code_str = str(status_obj_or_val.get("code") or status_obj_or_val.get("status_code") or "").strip().lower()
+        msg_str = str(status_obj_or_val.get("message") or status_obj_or_val.get("name") or status_obj_or_val.get("description") or "").strip().lower()
+    elif isinstance(status_obj_or_val, (int, float)):
+        code_str = str(int(status_obj_or_val))
+    elif isinstance(status_obj_or_val, str):
+        v = status_obj_or_val.strip().lower()
+        if v.isdigit():
+            code_str = v
+        else:
+            msg_str = v
+
+    paid_messages = {"approved", "captured", "capturado", "aprovado", "succeeded", "paid", "pago", "concluido", "concluído"}
+    if msg_str in paid_messages or any(pm in msg_str for pm in paid_messages):
+        return True
+
+    # 8 = CAPTURED na v2 da iPag
+    if code_str in ("8", "5"):
+        return True
+
+    # 2 = APPROVED no contexto de webhook de pagamento
+    if code_str == "2":
+        if msg_str in ("approved", "aprovado", "paid", "pago", "captured", "capturado"):
+            return True
+        if not msg_str or msg_str not in ("waiting payment", "aguardando pagamento", "pending", "criado", "created"):
+            return True
+
+    return False
+
+
 async def consult_ipag_transaction(db, transaction_id: str) -> Optional[Dict[str, Any]]:
     """Consulta o status atual de uma transação no iPag."""
     env = await get_ipag_environment(db)
@@ -291,14 +350,105 @@ async def consult_ipag_transaction(db, transaction_id: str) -> Optional[Dict[str
         "Accept": "application/json",
     }
 
-    url = f"{base_url}/service/consult?id={transaction_id}"
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            res = await client.get(url, headers=headers)
-            if res.status_code == 200:
-                return res.json()
-            logger.warning(f"Consult iPag HTTP {res.status_code}: {res.text}")
-            return None
-    except Exception as e:
-        logger.exception(f"Erro ao consultar transação iPag {transaction_id}: {e}")
-        return None
+    # Tenta consultar como payment_links ou transaction
+    urls = [
+        f"{base_url}/service/v2/payment_links/{transaction_id}",
+        f"{base_url}/service/v2/transactions/{transaction_id}",
+        f"{base_url}/service/consult?id={transaction_id}",
+    ]
+    for url in urls:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(url, headers=headers)
+                if res.status_code == 200:
+                    return res.json()
+        except Exception as e:
+            logger.warning(f"Erro ao consultar iPag em {url}: {e}")
+    return None
+
+
+async def consult_ipag_order_payment(db, order: Dict[str, Any]) -> Dict[str, Any]:
+    """Consulta iPag para verificar se o pedido foi pago.
+    Testa endpoints de payment_links e transactions por ID e order_id.
+    Retorna dict com: {"is_paid": bool, "is_rejected": bool, "payment_id": str, "status": str}
+    """
+    env = await get_ipag_environment(db)
+    api_id, api_key = await _get_ipag_credentials(db, env)
+    if not api_id or not api_key:
+        return {"is_paid": False, "reason": "not_configured"}
+
+    base_url = _get_base_url(env)
+    credentials = f"{api_id}:{api_key}"
+    encoded = base64.b64encode(credentials.encode("ascii")).decode("ascii")
+    headers = {
+        "Authorization": f"Basic {encoded}",
+        "x-api-version": "2",
+        "Accept": "application/json",
+    }
+
+    order_id = str(order.get("order_id") or "")
+    payment_id = str(order.get("payment_id") or "")
+
+    urls_to_try = []
+    if payment_id:
+        urls_to_try.append(f"{base_url}/service/v2/payment_links/{payment_id}")
+        urls_to_try.append(f"{base_url}/service/v2/transactions/{payment_id}")
+        urls_to_try.append(f"{base_url}/service/consult?id={payment_id}")
+    if order_id:
+        urls_to_try.append(f"{base_url}/service/v2/transactions?order_id={order_id}")
+        urls_to_try.append(f"{base_url}/service/v2/transactions?external_code={order_id}")
+        urls_to_try.append(f"{base_url}/service/v2/payment_links?external_code={order_id}")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for url in urls_to_try:
+            try:
+                res = await client.get(url, headers=headers)
+                if res.status_code != 200:
+                    continue
+                data = res.json()
+                if not data:
+                    continue
+
+                items = data if isinstance(data, list) else [data]
+                if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                    items = data["data"]
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    tx_obj = item.get("transaction") if isinstance(item.get("transaction"), dict) else item
+                    attrs = tx_obj.get("attributes") if isinstance(tx_obj.get("attributes"), dict) else tx_obj
+                    st = attrs.get("status") or tx_obj.get("status")
+                    gw = attrs.get("gateway") or tx_obj.get("gateway")
+                    ev = item.get("event") or attrs.get("event") or ""
+                    tid = str(tx_obj.get("id") or item.get("id") or "")
+
+                    if is_ipag_status_paid(st, event_name=ev, gateway_obj=gw):
+                        return {
+                            "is_paid": True,
+                            "payment_id": tid or payment_id,
+                            "status": "paid",
+                            "raw": item,
+                        }
+
+                    # Rejeição / cancelamento
+                    code_str = ""
+                    msg_str = ""
+                    if isinstance(st, dict):
+                        code_str = str(st.get("code") or "").strip().lower()
+                        msg_str = str(st.get("message") or "").strip().lower()
+                    elif isinstance(st, str):
+                        msg_str = st.strip().lower()
+                    if code_str in ("3", "7") or any(r in msg_str for r in ["canceled", "cancelled", "declined", "recusado", "cancelado"]):
+                        return {
+                            "is_paid": False,
+                            "is_rejected": True,
+                            "payment_id": tid or payment_id,
+                            "status": "rejected",
+                            "raw": item,
+                        }
+            except Exception as e:
+                logger.warning(f"Erro ao consultar iPag em {url}: {e}")
+                continue
+
+    return {"is_paid": False, "status": "pending"}
