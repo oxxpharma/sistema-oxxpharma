@@ -7,7 +7,18 @@ import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibili
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { CheckCircle2, Package, MapPin, Loader2, Award, Truck, RefreshCw, ExternalLink, ShieldCheck } from 'lucide-react';
+import {
+  CheckCircle2,
+  Package,
+  MapPin,
+  Loader2,
+  Award,
+  Truck,
+  RefreshCw,
+  ExternalLink,
+  ShieldCheck,
+  CreditCard,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
 
@@ -29,6 +40,7 @@ export default function OrderDetails() {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [redirectingToPay, setRedirectingToPay] = useState(false);
   const [payCfg, setPayCfg] = useState({ environment: 'test', configured: false });
   const [showAcceptance, setShowAcceptance] = useState(false);
 
@@ -47,11 +59,13 @@ export default function OrderDetails() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
-
-  // Polling automático enquanto o pagamento estiver pendente
   useEffect(() => {
-    if (!order || order.payment_status !== 'pending') return;
+    load();
+  }, [id]);
+
+  // Polling automático enquanto o pagamento não estiver confirmado
+  useEffect(() => {
+    if (!order || order.payment_status === 'paid' || order.order_status === 'paid') return;
     let attempts = 0;
     const maxAttempts = 60; // ~5 minutos (5s intervalo)
     const interval = setInterval(async () => {
@@ -62,7 +76,7 @@ export default function OrderDetails() {
       }
       try {
         const o = await api.get(`/api/orders/${id}`);
-        if (o && o.payment_status !== 'pending') {
+        if (o && (o.payment_status === 'paid' || o.order_status === 'paid')) {
           setOrder(o);
           toast.success('Pagamento confirmado com sucesso!');
           clearInterval(interval);
@@ -72,7 +86,7 @@ export default function OrderDetails() {
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [id, order?.payment_status]);
+  }, [id, order?.payment_status, order?.order_status]);
 
   const syncPayment = async () => {
     setSyncing(true);
@@ -88,6 +102,37 @@ export default function OrderDetails() {
       toast.error('Erro ao verificar pagamento');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handlePayNow = async () => {
+    if (order?.payment_url) {
+      window.location.href = order.payment_url;
+      return;
+    }
+    setRedirectingToPay(true);
+    try {
+      const res = await api.post(`/api/payments/create/${order.order_id}`);
+      if (res && res.payment_url) {
+        setOrder((prev) => ({
+          ...prev,
+          payment_url: res.payment_url,
+          payment_provider: res.provider || prev?.payment_provider,
+          payment_id: res.payment_id || prev?.payment_id,
+          payment_status: 'pending',
+        }));
+        window.location.href = res.payment_url;
+      } else if (res && res.paid) {
+        toast.success('Pedido pago com sucesso!');
+        await load();
+      } else {
+        toast.info('Link de pagamento criado.');
+        await load();
+      }
+    } catch (err) {
+      toast.error(err.message || 'Erro ao carregar checkout de pagamento');
+    } finally {
+      setRedirectingToPay(false);
     }
   };
 
@@ -108,7 +153,10 @@ export default function OrderDetails() {
   if (!order) return <div className="p-10 text-center">Pedido não encontrado.</div>;
 
   const status = STATUS_LABELS[order.order_status] || STATUS_LABELS.pending;
-  const isPending = order.payment_status === 'pending';
+  const isPaid = order.payment_status === 'paid' || order.order_status === 'paid';
+  const isCancelled = order.order_status === 'cancelled';
+  const isUnpaid = !isPaid && !isCancelled;
+  const isRejected = order.payment_status === 'rejected';
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8" data-testid="order-details">
@@ -123,6 +171,7 @@ export default function OrderDetails() {
         <div className="mt-3 flex justify-center">
           <Badge variant={status.variant}>{status.label}</Badge>
         </div>
+
         {order.invoice_number && (
           <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center justify-between gap-3" data-testid="invoice-banner">
             <div className="text-left">
@@ -134,72 +183,92 @@ export default function OrderDetails() {
             </Link>
           </div>
         )}
-        {isPending && (
-          <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 text-left">
-            {order.payment_url ? (
-              <>
-                <p className="text-sm text-amber-800 mb-3">
-                  <strong>Pagamento pendente.</strong> Clique no botão abaixo para concluir o pagamento via {order.payment_provider === 'ipag' ? 'iPag Gateway' : 'MercadoPago'}.
-                </p>
-                <div className="flex gap-2 flex-wrap items-center">
-                  <a href={order.payment_url} target="_blank" rel="noreferrer">
-                    <Button size="sm" data-testid="pay-btn">
-                      Pagar com {order.payment_provider === 'ipag' ? 'iPag' : 'MercadoPago'}
-                    </Button>
-                  </a>
-                  {order.boleto_url && (
-                    <a href={order.boleto_url} target="_blank" rel="noreferrer">
-                      <Button size="sm" variant="outline" data-testid="pay-boleto-btn">
-                        Imprimir Boleto
-                      </Button>
-                    </a>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={syncPayment}
-                    loading={syncing}
-                    className="border-amber-300 text-amber-900 hover:bg-amber-100"
-                    title="Verificar se o pagamento já foi recebido"
-                  >
-                    <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
-                    Verificar se já paguei
-                  </Button>
-                </div>
-              </>
-            ) : order.pix_qrcode ? (
-              <div className="text-center space-y-2">
-                <p className="text-sm text-amber-800 font-bold">Escaneie o QR Code PIX para pagar:</p>
-                {order.pix_qrcode_url && <img src={order.pix_qrcode_url} alt="QR Code Pix" className="w-48 h-48 mx-auto border rounded-lg bg-white p-2" />}
-                <div className="bg-white p-2 border rounded font-mono text-xs break-all select-all">{order.pix_qrcode}</div>
-                <div className="pt-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={syncPayment}
-                    loading={syncing}
-                    className="border-amber-300 text-amber-900 hover:bg-amber-100"
-                  >
-                    <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
-                    Já paguei, verificar agora
-                  </Button>
-                </div>
+
+        {/* Card de Pagamento Pendente / Voltar ao Checkout */}
+        {isUnpaid && (
+          <div className="mt-6 bg-gradient-to-br from-amber-50 to-orange-50/60 border-2 border-amber-300 rounded-xl p-5 md:p-6 text-left shadow-sm space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-amber-500 text-white rounded-lg shrink-0 mt-0.5 shadow-sm">
+                <CreditCard className="w-5 h-5" />
               </div>
-            ) : (
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <p className="text-sm text-amber-800">Aguardando confirmação do pagamento...</p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={syncPayment}
-                  loading={syncing}
-                  className="border-amber-300 text-amber-900 hover:bg-amber-100"
+              <div className="flex-1">
+                <h2 className="text-base md:text-lg font-bold text-amber-950 flex items-center gap-2">
+                  {isRejected ? 'Pagamento Não Aprovado' : 'Pagamento Pendente'}
+                </h2>
+                <p className="text-sm text-amber-900 mt-1 leading-relaxed">
+                  {isRejected
+                    ? 'A tentativa anterior de pagamento não foi aprovada pela operadora. Você pode tentar novamente com outro cartão de crédito ou via Pix clicando no botão abaixo:'
+                    : 'Seu pedido foi registrado e está aguardando o pagamento. Caso tenha fechado a página de pagamento sem querer, clique no botão abaixo para concluir agora:'}
+                </p>
+              </div>
+            </div>
+
+            {/* Ações de Pagamento */}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <Button
+                size="lg"
+                onClick={handlePayNow}
+                loading={redirectingToPay}
+                className="bg-brand-main hover:bg-brand-main/90 text-white shadow-md font-bold text-sm md:text-base px-6 py-2.5 flex items-center gap-2"
+                data-testid="pay-now-btn"
+              >
+                <ExternalLink className="w-4 h-4" />
+                {isRejected
+                  ? 'Tentar Pagar Novamente'
+                  : order.payment_url
+                  ? `Ir para o Pagamento (${order.payment_provider === 'ipag' ? 'iPag' : 'MercadoPago'})`
+                  : 'Ir para o Pagamento'}
+              </Button>
+
+              {order.payment_url && (
+                <a
+                  href={order.payment_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-brand-main underline hover:text-brand-main/80 font-medium py-2 px-1"
                 >
-                  <RefreshCw className={`w-4 h-4 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
-                  Verificar pagamento
-                </Button>
+                  Abrir checkout em nova aba
+                </a>
+              )}
+
+              {order.boleto_url && (
+                <a href={order.boleto_url} target="_blank" rel="noreferrer">
+                  <Button size="lg" variant="outline" className="border-amber-400 text-amber-950 hover:bg-amber-100" data-testid="pay-boleto-btn">
+                    Imprimir Boleto
+                  </Button>
+                </a>
+              )}
+
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={syncPayment}
+                loading={syncing}
+                className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                title="Verificar se o pagamento já foi recebido pelo gateway"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                Verificar se já paguei
+              </Button>
+            </div>
+
+            {order.pix_qrcode && (
+              <div className="mt-4 pt-4 border-t border-amber-200/80 bg-white/80 rounded-lg p-4 text-center space-y-2">
+                <p className="text-sm text-amber-900 font-bold">Ou escaneie o QR Code PIX para pagar:</p>
+                {order.pix_qrcode_url && (
+                  <img
+                    src={order.pix_qrcode_url}
+                    alt="QR Code Pix"
+                    className="w-44 h-44 mx-auto border rounded-lg bg-white p-2 shadow-sm"
+                  />
+                )}
+                <div className="bg-white p-2.5 border rounded-lg font-mono text-xs break-all select-all text-gray-800 max-w-md mx-auto">
+                  {order.pix_qrcode}
+                </div>
+                <p className="text-xs text-gray-500">Copie o código acima e cole no app do seu banco</p>
               </div>
             )}
+
             {(payCfg.provider === 'mock' || payCfg.environment === 'test' || payCfg.ipag_environment === 'sandbox' || order.payment_provider === 'mock') && (
               <div className="mt-3 pt-3 border-t border-amber-200">
                 <p className="text-xs text-amber-700 mb-2"><strong>Sandbox / Mock:</strong> em modo de teste, você pode simular a confirmação do pagamento.</p>

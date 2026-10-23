@@ -2315,6 +2315,40 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
         except Exception as e:
             logger.warning(f"Erro auto-check iPag get_order ({order_id}): {e}")
 
+    # Se ainda nao tem payment_url e esta pendente/nao pago, gera automaticamente se o gateway ativo for iPag
+    if not o.get("payment_url") and o.get("payment_status") != "paid" and o.get("order_status") != "paid" and o.get("order_status") != "cancelled":
+        try:
+            provider = await payments_service.get_active_provider(db)
+            if provider == "ipag" and await ipag_service.is_ipag_configured(db):
+                frontend_url = get_app_url()
+                backend_url = os.environ.get("BACKEND_URL") or frontend_url
+                res_pay = await ipag_service.create_ipag_payment(
+                    db=db,
+                    order=o,
+                    user=user,
+                    payment_type="card",
+                    payment_method=str(o.get("payment_method") or "card"),
+                    frontend_url=frontend_url,
+                    backend_url=backend_url,
+                )
+                if res_pay.get("payment_url"):
+                    await db.orders.update_one(
+                        {"order_id": order_id},
+                        {"$set": {
+                            "payment_provider": "ipag",
+                            "payment_status": "pending",
+                            "payment_id": res_pay.get("payment_id"),
+                            "payment_url": res_pay.get("payment_url"),
+                            "pix_qrcode": res_pay.get("pix_qrcode"),
+                            "pix_qrcode_url": res_pay.get("pix_qrcode_url"),
+                            "boleto_url": res_pay.get("boleto_url"),
+                            "ipag_environment": res_pay.get("environment"),
+                        }}
+                    )
+                    o = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+        except Exception as e:
+            logger.warning(f"Nao foi possivel auto-gerar payment_url para pedido {order_id}: {e}")
+
     return o
 
 
@@ -5176,6 +5210,7 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
             {"order_id": order_id},
             {"$set": {
                 "payment_provider": "ipag",
+                "payment_status": "pending",
                 "payment_id": res["payment_id"],
                 "payment_url": res.get("payment_url"),
                 "pix_qrcode": res.get("pix_qrcode"),
