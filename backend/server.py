@@ -1087,6 +1087,29 @@ async def update_profile(request: Request, user: dict = Depends(get_current_user
             update["cpf_digits"] = cpf_digits
         else:
             update["cpf_digits"] = ""
+
+    # Alteração opcional de senha
+    current_password = body.get("current_password")
+    new_password = body.get("new_password") or body.get("password")
+
+    if new_password:
+        if len(new_password) < 6:
+            raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 6 caracteres")
+
+        u_doc = await db.users.find_one({"user_id": user["user_id"]})
+        stored_hash = u_doc.get("password_hash") if u_doc else None
+
+        # Se o usuário já possui senha salva, valida a senha atual informada
+        if stored_hash:
+            if not current_password:
+                raise HTTPException(status_code=400, detail="Informe a senha atual para alterar a senha")
+            if not verify_pw(current_password, stored_hash):
+                raise HTTPException(status_code=400, detail="Senha atual incorreta")
+
+        update["password_hash"] = hash_pw(new_password)
+        update["must_set_password"] = False
+        update["password_changed_at"] = now_iso()
+
     if update:
         await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
     u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
@@ -1097,6 +1120,36 @@ async def update_profile(request: Request, user: dict = Depends(get_current_user
         except Exception as e:
             logger.warning(f"warranty_bonus claim falhou: {e}")
     return u
+
+
+@app.post("/api/users/me/change-password")
+async def change_my_password(request: Request, user: dict = Depends(get_current_user)):
+    db = request.app.db
+    body = await request.json() or {}
+    current_password = body.get("current_password")
+    new_password = body.get("new_password") or body.get("password")
+
+    if not new_password or len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 6 caracteres")
+
+    u_doc = await db.users.find_one({"user_id": user["user_id"]})
+    stored_hash = u_doc.get("password_hash") if u_doc else None
+
+    if stored_hash:
+        if not current_password:
+            raise HTTPException(status_code=400, detail="Informe sua senha atual")
+        if not verify_pw(current_password, stored_hash):
+            raise HTTPException(status_code=400, detail="Senha atual incorreta")
+
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "password_hash": hash_pw(new_password),
+            "must_set_password": False,
+            "password_changed_at": now_iso()
+        }}
+    )
+    return {"ok": True, "message": "Senha alterada com sucesso"}
 
 @app.get("/api/users/me/addresses")
 async def list_addresses(user: dict = Depends(get_current_user)):
