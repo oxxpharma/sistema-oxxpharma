@@ -207,6 +207,30 @@ async def create_preference(db, order: Dict, user: Dict, items_full: List[Dict],
     request_options.custom_headers = {"x-idempotency-key": str(uuid.uuid4())}
     result = sdk.preference().create(body, request_options)
     resp = result.get("response", {})
+    status_code = result.get("status", 200 if resp.get("id") else 400)
+    is_success = bool(resp.get("id"))
+
+    try:
+        await ipag_service.record_payment_log(
+            db=db,
+            provider="mercadopago",
+            direction="outgoing",
+            action="create_preference",
+            order_id=order.get("order_id"),
+            data_id=resp.get("id"),
+            environment=env,
+            endpoint="https://api.mercadopago.com/checkout/preferences",
+            method="POST",
+            status_code=status_code,
+            success=is_success,
+            request_payload=body,
+            response_payload=resp or result,
+            headers_sent={"x-idempotency-key": request_options.custom_headers.get("x-idempotency-key")},
+            error_message=None if is_success else f"MP error ({status_code}): {result}",
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao salvar payment_log MP: {e}")
+
     if not resp.get("id"):
         raise RuntimeError(f"MP error: {result}")
     return {
@@ -249,6 +273,30 @@ async def create_billing_preference(db, billing: Dict, frontend_url: str, backen
     request_options.custom_headers = {"x-idempotency-key": str(uuid.uuid4())}
     result = sdk.preference().create(body, request_options)
     resp = result.get("response", {})
+    status_code = result.get("status", 200 if resp.get("id") else 400)
+    is_success = bool(resp.get("id"))
+
+    try:
+        await ipag_service.record_payment_log(
+            db=db,
+            provider="mercadopago",
+            direction="outgoing",
+            action="create_billing_preference",
+            order_id=f"billing:{billing.get('billing_id')}",
+            data_id=resp.get("id"),
+            environment=env,
+            endpoint="https://api.mercadopago.com/checkout/preferences",
+            method="POST",
+            status_code=status_code,
+            success=is_success,
+            request_payload=body,
+            response_payload=resp or result,
+            headers_sent={"x-idempotency-key": request_options.custom_headers.get("x-idempotency-key")},
+            error_message=None if is_success else f"MP error ({status_code}): {result}",
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao salvar payment_log MP billing: {e}")
+
     if not resp.get("id"):
         raise RuntimeError(f"MP error: {result}")
     return {

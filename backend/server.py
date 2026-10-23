@@ -5931,6 +5931,25 @@ async def mp_webhook(request: Request):
     if not valid:
         log_entry["error"] = "invalid_signature"
         await db.payment_webhook_logs.insert_one(log_entry)
+        try:
+            await ipag_service.record_payment_log(
+                db=db,
+                provider="mercadopago",
+                direction="incoming",
+                action="webhook_invalid_signature",
+                data_id=str(data_id) if data_id else None,
+                environment="production",
+                endpoint="/api/payments/webhook/mercadopago",
+                method="POST",
+                status_code=401,
+                success=False,
+                request_payload={"body": body, "query": dict(request.query_params)},
+                response_payload=log_entry,
+                headers_received={k: v for k, v in request.headers.items() if k.lower().startswith(("x-", "content-"))},
+                error_message="Invalid signature",
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     notif_type = body.get("type") or body.get("topic") or request.query_params.get("topic")
@@ -5964,6 +5983,28 @@ async def mp_webhook(request: Request):
                 log_entry["action"] = f"set_{status_mp}"
 
     await db.payment_webhook_logs.insert_one(log_entry)
+    try:
+        mp_order_ref = None
+        if "payment_details" in log_entry and isinstance(log_entry["payment_details"], dict):
+            mp_order_ref = log_entry["payment_details"].get("external_reference")
+        await ipag_service.record_payment_log(
+            db=db,
+            provider="mercadopago",
+            direction="incoming",
+            action=f"webhook_{notif_type or 'notification'}",
+            order_id=mp_order_ref,
+            data_id=str(data_id) if data_id else None,
+            environment="production",
+            endpoint="/api/payments/webhook/mercadopago",
+            method="POST",
+            status_code=200,
+            success=True,
+            request_payload={"body": body, "query": dict(request.query_params)},
+            response_payload=log_entry,
+            headers_received={k: v for k, v in request.headers.items() if k.lower().startswith(("x-", "content-"))},
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao salvar payment_log MP webhook: {e}")
     return {"received": True}
 
 
@@ -6114,6 +6155,32 @@ async def ipag_webhook(request: Request):
             log_entry["action"] = "marked_rejected"
 
     await db.payment_webhook_logs.insert_one(log_entry)
+    try:
+        ipag_env = await ipag_service.get_ipag_environment(db)
+        await ipag_service.record_payment_log(
+            db=db,
+            provider="ipag",
+            direction="incoming",
+            action=f"webhook_{event_type or 'notification'}",
+            order_id=str(order_id) if order_id else None,
+            data_id=str(trans_id) if trans_id else None,
+            environment=ipag_env,
+            endpoint="/api/payments/webhook/ipag",
+            method=request.method,
+            status_code=200,
+            success=is_paid or log_entry.get("action") == "marked_paid",
+            request_payload=payload,
+            response_payload={
+                "status": "ok",
+                "order_id": order_id,
+                "is_paid": is_paid,
+                "event": event_type,
+                "action": log_entry.get("action"),
+            },
+            headers_received={k: v for k, v in request.headers.items() if k.lower().startswith(("x-", "content-"))},
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao salvar payment_log iPag webhook: {e}")
     return {"status": "ok", "order_id": order_id, "is_paid": is_paid, "event": event_type}
 
 # ==================== SETTINGS (ADMIN) ====================
@@ -9937,12 +10004,100 @@ async def admin_set_payments_config(request: Request, user: dict = Depends(requi
     return cfg
 
 
+@app.get("/api/admin/payments/logs")
 @app.get("/api/admin/payments-webhook-logs")
-async def admin_payments_webhook_logs(request: Request, page: int = 1, limit: int = 50, user: dict = Depends(require_admin())):
+async def admin_payment_integration_logs(
+    request: Request,
+    page: int = 1,
+    limit: int = 30,
+    provider: Optional[str] = None,
+    direction: Optional[str] = None,
+    search: Optional[str] = None,
+    success: Optional[str] = None,
+    user: dict = Depends(require_admin()),
+):
+    """Retorna histórico completo de integrações de pagamento (requisições enviadas e webhooks recebidos)."""
     db = request.app.db
-    total = await db.payment_webhook_logs.count_documents({})
-    logs = await db.payment_webhook_logs.find({}, {"_id": 0}).sort("received_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"logs": logs, "total": total, "page": page}
+    query = {}
+    if provider and provider != "all":
+        query["provider"] = provider
+    if direction and direction != "all":
+        query["direction"] = direction
+    if success in ("true", "false"):
+        query["success"] = (success == "true")
+    if search and search.strip():
+        s = search.strip()
+        query["$or"] = [
+            {"order_id": {"$regex": s, "$options": "i"}},
+            {"data_id": {"$regex": s, "$options": "i"}},
+            {"action": {"$regex": s, "$options": "i"}},
+            {"endpoint": {"$regex": s, "$options": "i"}},
+            {"error_message": {"$regex": s, "$options": "i"}},
+        ]
+
+    # Contagem em payment_integration_logs
+    total = await db.payment_integration_logs.count_documents(query)
+    logs = []
+    if total > 0:
+        logs = await db.payment_integration_logs.find(query, {"_id": 0}).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
+    else:
+        # Fallback para legados de payment_webhook_logs
+        legacy_query = {}
+        if search and search.strip():
+            s = search.strip()
+            legacy_query["$or"] = [
+                {"order_id": {"$regex": s, "$options": "i"}},
+                {"data_id": {"$regex": s, "$options": "i"}},
+                {"log_id": {"$regex": s, "$options": "i"}},
+            ]
+        total = await db.payment_webhook_logs.count_documents(legacy_query)
+        legacy_logs = await db.payment_webhook_logs.find(legacy_query, {"_id": 0}).sort("received_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
+        for l in legacy_logs:
+            logs.append({
+                "log_id": l.get("log_id"),
+                "created_at": l.get("received_at") or l.get("created_at"),
+                "provider": l.get("provider") or ("mercadopago" if "mphook" in str(l.get("log_id")) else "ipag"),
+                "direction": "incoming",
+                "action": l.get("action") or l.get("event_type") or l.get("type") or "webhook",
+                "order_id": l.get("order_id") or (l.get("payment_details") or {}).get("external_reference"),
+                "data_id": l.get("data_id"),
+                "environment": "production",
+                "endpoint": "/api/payments/webhook",
+                "method": "POST",
+                "status_code": 200,
+                "success": bool(l.get("valid_signature", True) and not l.get("error")),
+                "request_payload": l.get("raw_body") or l.get("query"),
+                "response_payload": {k: v for k, v in l.items() if k not in ("raw_body", "query", "_id")},
+                "headers_received": l.get("headers"),
+                "error_message": l.get("error"),
+            })
+
+    total_outgoing = await db.payment_integration_logs.count_documents({"direction": "outgoing"})
+    total_incoming = await db.payment_integration_logs.count_documents({"direction": "incoming"})
+    total_errors = await db.payment_integration_logs.count_documents({"success": False})
+    total_all = await db.payment_integration_logs.count_documents({})
+
+    return {
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "pages": max(1, (total + limit - 1) // limit) if total > 0 else 1,
+        "stats": {
+            "total_all": total_all or total,
+            "outgoing": total_outgoing,
+            "incoming": total_incoming,
+            "errors": total_errors,
+        },
+    }
+
+
+@app.delete("/api/admin/payments/logs")
+async def admin_clear_payment_logs(request: Request, user: dict = Depends(require_super_admin())):
+    """Limpa histórico de logs de pagamento."""
+    db = request.app.db
+    r1 = await db.payment_integration_logs.delete_many({})
+    r2 = await db.payment_webhook_logs.delete_many({})
+    return {"status": "ok", "deleted": r1.deleted_count + r2.deleted_count}
 
 
 # ==================== CARTAO DE BENEFICIOS / GIFT CARD ====================

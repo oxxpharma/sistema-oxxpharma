@@ -10,6 +10,7 @@ Credenciais e ambiente armazenados na coleção `settings` (doc _id=global):
   ipag_api_key: string (API Key / Secret Key)
 """
 import os
+import uuid
 import re
 import json
 import base64
@@ -22,6 +23,54 @@ logger = logging.getLogger(__name__)
 
 SANDBOX_URL = "https://sandbox.ipag.com.br"
 PROD_URL = "https://api.ipag.com.br"
+
+
+async def record_payment_log(
+    db,
+    provider: str,
+    direction: str,
+    action: str,
+    order_id: Optional[str] = None,
+    data_id: Optional[str] = None,
+    environment: Optional[str] = None,
+    endpoint: Optional[str] = None,
+    method: str = "POST",
+    status_code: Optional[int] = None,
+    success: bool = True,
+    request_payload: Any = None,
+    response_payload: Any = None,
+    headers_sent: Any = None,
+    headers_received: Any = None,
+    error_message: Optional[str] = None,
+):
+    """Grava log detalhado de integração de pagamento (requisição ou webhook)."""
+    try:
+        if db is None:
+            return None
+        log_entry = {
+            "log_id": f"paylog_{uuid.uuid4().hex[:12]}",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "provider": provider,
+            "direction": direction,  # "outgoing" (enviado) ou "incoming" (recebido)
+            "action": action,
+            "order_id": str(order_id) if order_id else None,
+            "data_id": str(data_id) if data_id else None,
+            "environment": environment,
+            "endpoint": endpoint,
+            "method": method,
+            "status_code": status_code,
+            "success": success,
+            "request_payload": request_payload,
+            "response_payload": response_payload,
+            "headers_sent": headers_sent,
+            "headers_received": headers_received,
+            "error_message": error_message,
+        }
+        await db.payment_integration_logs.insert_one(log_entry)
+        return log_entry
+    except Exception as e:
+        logger.warning(f"Falha ao gravar payment_integration_logs: {e}")
+        return None
 
 
 async def _get_settings(db) -> Dict:
@@ -251,41 +300,104 @@ async def create_ipag_payment(
     link_url_endpoint = f"{base_url}/service/v2/payment_links"
     logger.info(f"Criando Link de Pagamento iPag ({env}): {link_url_endpoint} para pedido {order_id}")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.post(link_url_endpoint, json=link_body, headers=headers)
-        if res.status_code not in (200, 201):
-            logger.error(f"Erro no iPag HTTP {res.status_code}: {res.text}")
-            raise RuntimeError(f"Erro no iPag ({res.status_code}): {res.text}")
+    res_data = None
+    res_status = None
+    error_msg = None
+    headers_for_log = {"Content-Type": "application/json", "x-api-version": "2"}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.post(link_url_endpoint, json=link_body, headers=headers)
+            res_status = res.status_code
+            try:
+                res_data = res.json()
+            except Exception:
+                res_data = {"raw_text": res.text}
 
-        res_data = res.json()
-        logger.info(f"Link iPag v2 criado com sucesso ({order_id}): {res_data}")
+            if res.status_code not in (200, 201):
+                error_msg = f"Erro no iPag HTTP {res.status_code}: {res.text}"
+                logger.error(error_msg)
+                await record_payment_log(
+                    db=db,
+                    provider="ipag",
+                    direction="outgoing",
+                    action="create_payment_link",
+                    order_id=order_id,
+                    environment=env,
+                    endpoint=link_url_endpoint,
+                    method="POST",
+                    status_code=res_status,
+                    success=False,
+                    request_payload=link_body,
+                    response_payload=res_data,
+                    headers_sent=headers_for_log,
+                    error_message=error_msg,
+                )
+                raise RuntimeError(error_msg)
+    except Exception as e:
+        if not error_msg:
+            error_msg = str(e)
+            await record_payment_log(
+                db=db,
+                provider="ipag",
+                direction="outgoing",
+                action="create_payment_link",
+                order_id=order_id,
+                environment=env,
+                endpoint=link_url_endpoint,
+                method="POST",
+                status_code=res_status or 500,
+                success=False,
+                request_payload=link_body,
+                response_payload=res_data,
+                headers_sent=headers_for_log,
+                error_message=error_msg,
+            )
+        raise
 
-        tx = res_data.get("attributes") or res_data.get("data") or res_data
-        trans_id = str(res_data.get("id") or tx.get("id") or tx.get("payment_link_id") or "")
+    logger.info(f"Link iPag v2 criado com sucesso ({order_id}): {res_data}")
+    tx = res_data.get("attributes") or res_data.get("data") or res_data
+    trans_id = str(res_data.get("id") or tx.get("id") or tx.get("payment_link_id") or "")
 
-        links_obj = res_data.get("links") or {}
-        pay_url = (
-            links_obj.get("payment")
-            or tx.get("url")
-            or tx.get("link_url")
-            or tx.get("payment_url")
-            or tx.get("checkout_url")
-            or res_data.get("url")
-            or res_data.get("link_url")
-            or (f"{base_url}/pay/{trans_id}" if trans_id else "")
-        )
+    await record_payment_log(
+        db=db,
+        provider="ipag",
+        direction="outgoing",
+        action="create_payment_link",
+        order_id=order_id,
+        data_id=trans_id,
+        environment=env,
+        endpoint=link_url_endpoint,
+        method="POST",
+        status_code=res_status,
+        success=True,
+        request_payload=link_body,
+        response_payload=res_data,
+        headers_sent=headers_for_log,
+    )
 
-        return {
-            "provider": "ipag",
-            "environment": env,
-            "payment_id": trans_id,
-            "transaction_id": trans_id,
-            "payment_url": pay_url,
-            "status": "1",
-            "amount": amount,
-            "order_id": order_id,
-            "raw_response": res_data,
-        }
+    links_obj = res_data.get("links") or {}
+    pay_url = (
+        links_obj.get("payment")
+        or tx.get("url")
+        or tx.get("link_url")
+        or tx.get("payment_url")
+        or tx.get("checkout_url")
+        or res_data.get("url")
+        or res_data.get("link_url")
+        or (f"{base_url}/pay/{trans_id}" if trans_id else "")
+    )
+
+    return {
+        "provider": "ipag",
+        "environment": env,
+        "payment_id": trans_id,
+        "transaction_id": trans_id,
+        "payment_url": pay_url,
+        "status": "1",
+        "amount": amount,
+        "order_id": order_id,
+        "raw_response": res_data,
+    }
 
 
 def is_ipag_status_paid(status_obj_or_val, event_name: str = "", gateway_obj: Optional[Dict] = None) -> bool:
