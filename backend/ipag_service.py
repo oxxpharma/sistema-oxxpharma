@@ -174,12 +174,16 @@ async def create_ipag_payment(
     shipping = order.get("shipping_address") or {}
     zipcode = _clean_digits(shipping.get("zip_code"))
 
+    raw_street = shipping.get("street") or "Rua Principal"
+    clean_street = re.sub(r"\s*-\s*de\s+\d+.*$", "", raw_street, flags=re.IGNORECASE).strip()
+    clean_street = clean_street[:60] if clean_street else "Rua Principal"
+
     billing_address = {
-        "street": shipping.get("street") or "Rua Principal",
-        "number": shipping.get("number") or "100",
-        "district": shipping.get("neighborhood") or "Centro",
-        "complement": shipping.get("complement") or "",
-        "city": shipping.get("city") or "Sao Paulo",
+        "street": clean_street,
+        "number": str(shipping.get("number") or "100")[:10],
+        "district": str(shipping.get("neighborhood") or "Centro")[:40],
+        "complement": str(shipping.get("complement") or "")[:40],
+        "city": str(shipping.get("city") or "Sao Paulo")[:40],
         "state": (shipping.get("state") or "SP").upper()[:2],
         "zipcode": zipcode if len(zipcode) == 8 else "01001000",
     }
@@ -216,6 +220,14 @@ async def create_ipag_payment(
     # Data de expiração do link (7 dias)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
 
+    # Configurações de checkout explícitas para garantir compatibilidade total no ambiente iPag
+    checkout_settings = {
+        "max_installments": 12,
+        "interest_free_installments": 12,
+        "min_installment_value": 5.0,
+        "payment_method": "all",
+    }
+
     link_body = {
         "amount": round(amount, 2),
         "order_id": order_id[:50],
@@ -225,6 +237,7 @@ async def create_ipag_payment(
         "expires_at": expires_at,
         "callback_url": callback_url,
         "redirect_url": redirect_url,
+        "checkout_settings": checkout_settings,
         "customer": {
             "name": (user.get("name") or order.get("customer_name") or "Cliente OxxPharma")[:60],
             "cpf_cnpj": cpf_cnpj if cpf_cnpj else "00000000000",
