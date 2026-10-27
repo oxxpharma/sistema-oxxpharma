@@ -42,6 +42,7 @@ import twofa_routes
 import opery_service
 import opery_routes
 import audit_service
+import pg_catalog_sync
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1769,7 +1770,10 @@ async def create_product(request: Request, data: ProductCreate, user: dict = Dep
     min_ord = min_order_doc.get("order", 0) if min_order_doc and min_order_doc.get("order") is not None else 0
     prod = {"product_id": gen_id("prod_"), **payload, "order": min_ord - 1, "created_at": now_iso()}
     await db.products.insert_one(prod)
-    return await db.products.find_one({"product_id": prod["product_id"]}, {"_id": 0})
+    created_prod = await db.products.find_one({"product_id": prod["product_id"]}, {"_id": 0})
+    if created_prod:
+        asyncio.create_task(pg_catalog_sync.sync_product_to_pg(created_prod))
+    return created_prod
 
 @app.put("/api/admin/products/{product_id}")
 async def update_product(request: Request, product_id: str, data: ProductCreate, user: dict = Depends(require_admin())):
@@ -1781,7 +1785,10 @@ async def update_product(request: Request, product_id: str, data: ProductCreate,
     r = await db.products.update_one({"product_id": product_id}, {"$set": update})
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
-    return await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    updated_prod = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    if updated_prod:
+        asyncio.create_task(pg_catalog_sync.sync_product_to_pg(updated_prod))
+    return updated_prod
 
 @app.delete("/api/admin/products/{product_id}")
 async def delete_product(request: Request, product_id: str, user: dict = Depends(require_admin())):
@@ -1789,7 +1796,20 @@ async def delete_product(request: Request, product_id: str, user: dict = Depends
     r = await db.products.delete_one({"product_id": product_id})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
+    asyncio.create_task(pg_catalog_sync.delete_product_from_pg(product_id))
     return {"message": "Produto removido"}
+
+@app.post("/api/admin/products/sync-postgres")
+async def admin_sync_products_postgres(request: Request, user: dict = Depends(require_admin())):
+    """Sincroniza todos os produtos do MongoDB com o banco PostgreSQL de catálogo para anúncios."""
+    db = request.app.db
+    return await pg_catalog_sync.bulk_sync_all_products(db)
+
+@app.get("/api/admin/products/sync-postgres/status")
+async def admin_get_sync_postgres_status(request: Request, user: dict = Depends(require_admin())):
+    """Retorna status da conexão e contagem de produtos no PostgreSQL."""
+    db = request.app.db
+    return await pg_catalog_sync.get_sync_status(db)
 
 # ==================== CART ====================
 

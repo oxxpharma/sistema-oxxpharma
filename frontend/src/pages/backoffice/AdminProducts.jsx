@@ -24,7 +24,8 @@ import {
   LayoutGrid,
   GripVertical,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Database
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
@@ -35,6 +36,23 @@ export default function AdminProducts() {
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncingPg, setSyncingPg] = useState(false);
+
+  const syncWithPostgres = async () => {
+    setSyncingPg(true);
+    try {
+      const res = await api.post('/api/admin/products/sync-postgres');
+      if (res?.success) {
+        toast.success(res.message || `${res.synced} produtos sincronizados com sucesso no PostgreSQL!`);
+      } else {
+        toast.error(res?.error || 'Erro ao sincronizar com PostgreSQL');
+      }
+    } catch (e) {
+      toast.error(e?.message || 'Erro ao sincronizar catálogo com PostgreSQL');
+    } finally {
+      setSyncingPg(false);
+    }
+  };
 
   // Modo de visualização: 'list' (lista) ou 'grid' (cards)
   const [viewMode, setViewMode] = useState(() => {
@@ -313,6 +331,17 @@ export default function AdminProducts() {
               <span className="hidden sm:inline">Cards</span>
             </button>
           </div>
+
+          <Button
+            variant="outline"
+            onClick={syncWithPostgres}
+            disabled={syncingPg}
+            className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+            title="Sincroniza todos os produtos e fotos com o banco PostgreSQL de anúncios"
+          >
+            {syncingPg ? <Loader2 className="w-4 h-4 animate-spin text-indigo-600" /> : <Database className="w-4 h-4 text-indigo-600" />}
+            <span className="hidden sm:inline">Sincronizar PostgreSQL</span>
+          </Button>
 
           <Button onClick={() => nav('/backoffice/produtos/novo')} data-testid="new-product-btn" className="gap-2">
             <Plus className="w-4 h-4" /> Novo produto
