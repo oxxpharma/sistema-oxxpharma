@@ -8,7 +8,7 @@ import { useEffect } from 'react';
  *   <SEOHead title="..." description="..." canonical="/categoria/xyz"
  *            image="..." type="website" jsonLd={{...}} />
  */
-export default function SEOHead({ title, description, keywords, canonical, image, type = 'website', jsonLd = null }) {
+export default function SEOHead({ title, description, keywords, canonical, image, type = 'website', jsonLd = null, noindex = false }) {
   useEffect(() => {
     const original = { title: document.title };
 
@@ -48,6 +48,7 @@ export default function SEOHead({ title, description, keywords, canonical, image
     upsertMeta('name', 'twitter:title', title);
     upsertMeta('name', 'twitter:description', description);
     if (image) upsertMeta('name', 'twitter:image', image);
+    if (noindex) upsertMeta('name', 'robots', 'noindex, nofollow');
 
     if (canonical) {
       const abs = canonical.startsWith('http') ? canonical : `${window.location.origin}${canonical}`;
@@ -69,7 +70,7 @@ export default function SEOHead({ title, description, keywords, canonical, image
       document.title = original.title;
       if (ldEl && ldEl.parentNode) ldEl.parentNode.removeChild(ldEl);
     };
-  }, [title, description, keywords, canonical, image, type, jsonLd]);
+  }, [title, description, keywords, canonical, image, type, jsonLd, noindex]);
 
   return null;
 }

@@ -1582,9 +1582,16 @@ async def get_product(request: Request, product_id: str):
     p = await db.products.find_one({"$or": [{"product_id": product_id}, {"slug": product_id}]}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
+
+    user = await get_optional_user(request)
+    is_admin = bool(user and _is_admin_level(user))
+
+    # Se o produto estiver inativo, apenas administradores autenticados podem visualizar (preview)
+    if not p.get("active", True) and not is_admin:
+        raise HTTPException(status_code=404, detail="Produto indisponível ou inativo")
+
     real_pid = p.get("product_id")
     related = await db.products.find({"category": p.get("category"), "product_id": {"$ne": real_pid}, "active": True}, {"_id": 0}).limit(4).to_list(4)
-    user = await get_optional_user(request)
     _tenant = tenant_service.get_tenant(request)
     p = store_extras.apply_pricing_to_product(p, user, tenant=_tenant)
     related = [store_extras.apply_pricing_to_product(r, user, tenant=_tenant) for r in related]
@@ -1592,7 +1599,7 @@ async def get_product(request: Request, product_id: str):
     if emp_ctx and emp_ctx.get("discount_percent", 0) > 0:
         p = _apply_convenio_discount(p, emp_ctx)
         related = [_apply_convenio_discount(r, emp_ctx) for r in related]
-    return {"product": p, "related": related}
+    return {"product": p, "related": related, "is_preview": not p.get("active", True) or bool(request.query_params.get("preview"))}
 
 # ==================== PRODUCTS (ADMIN) ====================
 

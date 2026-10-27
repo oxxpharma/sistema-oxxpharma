@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import {
   Plus,
   Edit,
+  Eye,
   Trash2,
   Search,
   Loader2,
@@ -752,6 +753,16 @@ export default function AdminProducts() {
                     >
                       <Edit className="w-3.5 h-3.5" /> Editar
                     </Link>
+                    <a
+                      href={`/produto/${p.slug || p.product_id}?preview=true`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs h-8 px-2.5 bg-white hover:bg-sky-50 text-gray-600 hover:text-sky-600 border border-border hover:border-sky-200 rounded-lg inline-flex items-center justify-center font-medium transition-colors"
+                      title="Pré-visualizar na loja"
+                      data-testid={`preview-${p.product_id}`}
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </a>
                     <Button
                       variant="outline"
                       size="sm"
@@ -945,6 +956,16 @@ export default function AdminProducts() {
 
                       {/* Ações */}
                       <td className="p-3.5 pr-5 text-right space-x-1">
+                        <a
+                          href={`/produto/${p.slug || p.product_id}?preview=true`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-2 hover:bg-sky-50 text-gray-600 hover:text-sky-600 rounded-lg transition-colors inline-flex items-center"
+                          title="Pré-visualizar na loja"
+                          data-testid={`preview-${p.product_id}`}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </a>
                         <Link
                           to={`/backoffice/produtos/${p.product_id}`}
                           className="p-2 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors inline-flex items-center"

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Plus, Trash2, Upload, Loader2, ArrowLeft, Save, GripVertical, PlusCircle } from 'lucide-react';
+import { Plus, Trash2, Upload, Loader2, ArrowLeft, Save, GripVertical, PlusCircle, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import RichTextEditor from '../../components/admin/RichTextEditor';
 import SEOFormFields from '../../components/admin/SEOFormFields';
@@ -196,8 +196,20 @@ export default function AdminProductForm() {
             <button type="button" onClick={() => nav('/backoffice/produtos')} className="p-2 hover:bg-bg-secondary rounded-lg" data-testid="back-btn"><ArrowLeft className="w-5 h-5" /></button>
             <h1 className="font-heading font-black text-2xl md:text-3xl text-txt-primary">{isEdit ? 'Editar produto' : 'Novo produto'}</h1>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
             <Button type="button" variant="ghost" onClick={() => nav('/backoffice/produtos')} data-testid="cancel-btn">Cancelar</Button>
+            {isEdit && (
+              <a
+                href={`/produto/${form.slug || productId}?preview=true`}
+                target="_blank"
+                rel="noreferrer"
+                className="h-10 px-3.5 rounded-xl border border-gray-300 bg-white hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300 text-gray-700 text-sm font-semibold inline-flex items-center gap-2 transition-colors shadow-xs"
+                title="Pré-visualizar produto na loja (abre em nova aba)"
+                data-testid="preview-product-btn"
+              >
+                <Eye className="w-4 h-4 text-sky-600" /> Pré-visualizar
+              </a>
+            )}
             {!isEdit && (
               <Button type="button" variant="outline" loading={saving} onClick={() => save({ addAnother: true })} data-testid="save-and-add-btn">
                 <PlusCircle className="w-4 h-4" /> Salvar e adicionar novo

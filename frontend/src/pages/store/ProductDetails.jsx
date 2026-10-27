@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
@@ -20,6 +20,8 @@ const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde8
 export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isPreviewParam = searchParams.get('preview') === 'true' || searchParams.get('preview') === '1';
   const { addItem, cart } = useCart();
   const { user } = useAuth();
   const settings = useSiteSettings();
@@ -33,16 +35,17 @@ export default function ProductDetails() {
     (async () => {
       setLoading(true);
       try {
-        const data = await api.get(`/api/products/${id}`);
+        const query = isPreviewParam ? '?preview=true' : '';
+        const data = await api.get(`/api/products/${id}${query}`);
         setProduct(data.product);
         setRelated(data.related || []);
       } catch (err) {
-        toast.error('Produto não encontrado');
+        toast.error('Produto não encontrado ou indisponível');
       } finally {
         setLoading(false);
       }
     })();
-  }, [id]);
+  }, [id, isPreviewParam]);
 
   const addToCart = async () => {
     setAdding(true);
@@ -86,6 +89,7 @@ export default function ProductDetails() {
         canonical={product.canonical_url || `/produto/${product.slug || product.product_id}`}
         image={img}
         type="product"
+        noindex={!product.active || isPreviewParam}
         jsonLd={{
           "@context": "https://schema.org",
           "@type": "Product",
@@ -106,6 +110,33 @@ export default function ProductDetails() {
       <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-txt-secondary hover:text-brand-main mb-4">
         <ArrowLeft className="w-4 h-4" /> Voltar
       </Link>
+
+      {(!product.active || isPreviewParam) && (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 flex items-center justify-between gap-4 flex-wrap shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="px-2.5 py-1 rounded-lg bg-amber-200 text-amber-900 font-bold text-xs uppercase tracking-wider">
+              Modo de Pré-visualização
+            </span>
+            <div className="text-sm">
+              {!product.active ? (
+                <>
+                  <span className="font-semibold text-amber-900">Produto Inativo:</span> Este produto está desativado e <strong>não é exibido na loja pública</strong> nem na página principal.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-amber-900">Pré-visualização:</span> Visualizando como administrador (produto ativo na loja).
+                </>
+              )}
+            </div>
+          </div>
+          <Link
+            to={`/backoffice/produtos/${product.product_id}`}
+            className="text-xs font-semibold px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 rounded-lg text-amber-900 transition-colors shadow-xs"
+          >
+            Editar no Admin
+          </Link>
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-8 bg-white rounded-xl border border-border p-4 md:p-8 items-start">
         <div className="bg-bg-secondary rounded-xl overflow-hidden aspect-square md:sticky md:top-24 md:self-start" data-testid="product-image-wrap">
@@ -239,16 +270,27 @@ export default function ProductDetails() {
           })()}
 
           <div className="mt-6 grid grid-cols-2 gap-3">
-            <Button variant="outline" onClick={addToCart} loading={adding} disabled={product.stock <= 0} data-testid="add-cart-btn">
-              <ShoppingCart className="w-4 h-4" /> Adicionar
+            <Button
+              variant="outline"
+              onClick={addToCart}
+              loading={adding}
+              disabled={!product.active || product.stock <= 0}
+              data-testid="add-cart-btn"
+            >
+              <ShoppingCart className="w-4 h-4" /> {!product.active ? 'Produto inativo' : 'Adicionar'}
             </Button>
-            <Button onClick={buyNow} loading={adding} disabled={product.stock <= 0} data-testid="buy-now-btn">
-              Comprar agora
+            <Button
+              onClick={buyNow}
+              loading={adding}
+              disabled={!product.active || product.stock <= 0}
+              data-testid="buy-now-btn"
+            >
+              {!product.active ? 'Indisponível (Inativo)' : 'Comprar agora'}
             </Button>
           </div>
 
           {/* Iter 61: Comprar pelo WhatsApp */}
-          {settings?.whatsapp?.enabled && settings?.whatsapp?.number && (() => {
+          {product.active && settings?.whatsapp?.enabled && settings?.whatsapp?.number && (() => {
             const rawNum = String(settings.whatsapp.number || '').replace(/\D/g, '');
             const publicUrl = typeof window !== 'undefined' ? window.location.href : '';
             const tpl = settings.whatsapp.message_template || 'Olá! Tenho interesse no produto *{product_name}* — R$ {product_price}.\nLink: {product_url}';
