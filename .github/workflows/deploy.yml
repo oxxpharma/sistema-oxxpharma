@@ -109,44 +109,32 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/var/www/oxxpharma' }}
           BACKEND_PROCESS: ${{ secrets.BACKEND_PROCESS || 'oxxpharma-backend' }}
         run: |
-          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
-            "DEPLOY_PATH='${DEPLOY_PATH}' BACKEND_PROCESS='${BACKEND_PROCESS}' bash -s" <<'REMOTE_EOF'
-          set -e
-          cd "${DEPLOY_PATH}"
-
-          # 1) Instala/atualiza deps do backend em backend/.venv e venv
-          for venv_path in backend/.venv venv; do
-            if [ -d "${venv_path}" ] && [ -f backend/requirements.txt ]; then
-              echo "→ Instalando deps em ${venv_path}..."
-              "./${venv_path}/bin/pip" install -q -r backend/requirements.txt || true
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" "bash -c '
+            set -e
+            cd ${DEPLOY_PATH}
+            if [ -d backend/.venv ] && [ -f backend/requirements.txt ]; then
+              echo "→ Instalando deps em backend/.venv..."
+              ./backend/.venv/bin/pip install -q -r backend/requirements.txt || true
             fi
-          done
-
-          # 2) Reinicia o backend
-          echo "→ Reiniciando ${BACKEND_PROCESS}..."
-          sudo supervisorctl restart "${BACKEND_PROCESS}"
-
-          # 3) Healthcheck com retry resiliente
-          echo "→ Verificando inicializacao do backend..."
-          sleep 4
-          SUCCESS=0
-          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if curl -fsS http://localhost:8001/api/health >/dev/null 2>&1; then
-              SUCCESS=1
-              break
+            if [ -d venv ] && [ -f backend/requirements.txt ]; then
+              echo "→ Instalando deps em venv..."
+              ./venv/bin/pip install -q -r backend/requirements.txt || true
             fi
-            sleep 1
-          done
-
-          if [ "${SUCCESS}" = "1" ]; then
-            echo "✅ Backend respondendo com sucesso na porta 8001"
-          else
+            echo "→ Reiniciando ${BACKEND_PROCESS}..."
+            sudo supervisorctl restart ${BACKEND_PROCESS}
+            echo "→ Verificando inicializacao do backend..."
+            sleep 4
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS http://localhost:8001/api/health >/dev/null 2>&1; then
+                echo "✅ Backend respondendo com sucesso na porta 8001"
+                exit 0
+              fi
+              sleep 1
+            done
             echo "⚠ Backend health check falhou — ultimos logs de erro:"
-            sudo supervisorctl tail "${BACKEND_PROCESS}" stderr || true
+            sudo supervisorctl tail ${BACKEND_PROCESS} stderr || true
             exit 1
-          fi
-REMOTE_EOF
+          '"
 
       - name: Notify success
         if: success()
