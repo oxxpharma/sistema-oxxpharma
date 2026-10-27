@@ -18,20 +18,26 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PG_URL = "postgresql://oxx_backend:OxxBackend2026@Sync@localhost:5432/oxxpharma_catalog"
+DEFAULT_PG_URL = "postgresql://oxx_backend:OxxBackend2026@Sync@127.0.0.1:5432/oxxpharma_catalog"
 
 _pg_pool: Optional[Any] = None
+_last_connection_error: Optional[str] = None
 
 
 def get_pg_url() -> str:
-    return os.environ.get("POSTGRES_CATALOG_URL") or DEFAULT_PG_URL
+    raw_url = os.environ.get("POSTGRES_CATALOG_URL") or DEFAULT_PG_URL
+    # Se usar localhost, substitui por 127.0.0.1 para evitar problemas com IPv6 (::1) no asyncpg
+    if "@localhost:" in raw_url:
+        raw_url = raw_url.replace("@localhost:", "@127.0.0.1:")
+    return raw_url
 
 
 async def get_pool():
     """Retorna o pool de conexões com o PostgreSQL ou None se inacessível."""
-    global _pg_pool
+    global _pg_pool, _last_connection_error
     if asyncpg is None:
-        logger.warning("[Postgres Catalog] Biblioteca 'asyncpg' não instalada no ambiente Python. Sincronização inativa.")
+        _last_connection_error = "Biblioteca 'asyncpg' não instalada no .venv do backend. Rode: /var/www/oxxpharma/backend/.venv/bin/pip install asyncpg"
+        logger.warning(f"[Postgres Catalog] {_last_connection_error}")
         return None
 
     if _pg_pool is not None and not _pg_pool._closed:
@@ -46,10 +52,12 @@ async def get_pool():
             command_timeout=15.0,
             timeout=10.0,
         )
-        logger.info(f"Pool PostgreSQL de catálogo inicializado com sucesso.")
+        logger.info(f"Pool PostgreSQL de catálogo inicializado com sucesso em {url}.")
+        _last_connection_error = None
         await ensure_table(_pg_pool)
         return _pg_pool
     except Exception as e:
+        _last_connection_error = f"{type(e).__name__}: {str(e)}"
         logger.warning(f"Não foi possível conectar ao PostgreSQL de catálogo ({url}): {e}")
         return None
 
@@ -303,9 +311,10 @@ async def bulk_sync_all_products(mongo_db) -> Dict[str, Any]:
     """Varre todos os produtos do MongoDB e sincroniza com o PostgreSQL."""
     pool = await get_pool()
     if not pool:
+        err_detail = _last_connection_error or "Verifique se o cluster PostgreSQL está ativo (pg_lsclusters) na porta 5432."
         return {
             "success": False,
-            "error": "Não foi possível conectar ao banco PostgreSQL. Verifique se o serviço está rodando e a porta 5432 liberada.",
+            "error": f"Falha na conexão com PostgreSQL: {err_detail}",
             "total_mongo": 0,
             "synced": 0,
         }
