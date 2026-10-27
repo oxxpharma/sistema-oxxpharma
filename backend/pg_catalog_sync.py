@@ -11,22 +11,29 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-import asyncpg
+try:
+    import asyncpg
+except ImportError:
+    asyncpg = None
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PG_URL = "postgresql://oxx_backend:OxxBackend2026@Sync@localhost:5432/oxxpharma_catalog"
 
-_pg_pool: Optional[asyncpg.Pool] = None
+_pg_pool: Optional[Any] = None
 
 
 def get_pg_url() -> str:
     return os.environ.get("POSTGRES_CATALOG_URL") or DEFAULT_PG_URL
 
 
-async def get_pool() -> Optional[asyncpg.Pool]:
+async def get_pool():
     """Retorna o pool de conexões com o PostgreSQL ou None se inacessível."""
     global _pg_pool
+    if asyncpg is None:
+        logger.warning("[Postgres Catalog] Biblioteca 'asyncpg' não instalada no ambiente Python. Sincronização inativa.")
+        return None
+
     if _pg_pool is not None and not _pg_pool._closed:
         return _pg_pool
 
@@ -47,7 +54,7 @@ async def get_pool() -> Optional[asyncpg.Pool]:
         return None
 
 
-async def ensure_table(pool: asyncpg.Pool):
+async def ensure_table(pool: Any):
     """Garante que a tabela products_catalog e os índices existam."""
     sql = """
     CREATE TABLE IF NOT EXISTS products_catalog (
