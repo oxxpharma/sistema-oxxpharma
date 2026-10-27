@@ -59,6 +59,7 @@ import AdminWebhook from './pages/backoffice/AdminWebhook';
 import AdminGiftCards from './pages/backoffice/AdminGiftCards';
 import AdminPoints from './pages/backoffice/AdminPoints';
 import AdminPayments from './pages/backoffice/AdminPayments';
+import AdminPgCatalog from './pages/backoffice/AdminPgCatalog';
 import AdminShipping from './pages/backoffice/AdminShipping';
 import AdminMaxx from './pages/backoffice/AdminMaxx';
 import AdminMaxxPending from './pages/backoffice/AdminMaxxPending';
@@ -194,6 +195,7 @@ function AppRoutes() {
         <Route path="cartao" element={<AdminGiftCards />} />
         <Route path="pontos" element={<AdminPoints />} />
         <Route path="pagamentos" element={<AdminPayments />} />
+            <Route path="catalogo-pg" element={<AdminPgCatalog />} />
         <Route path="frete" element={<AdminShipping />} />
         <Route path="maxx" element={<AdminMaxx />} />
         <Route path="maxx-pendentes" element={<AdminMaxxPending />} />

@@ -110,48 +110,43 @@ jobs:
           BACKEND_PROCESS: ${{ secrets.BACKEND_PROCESS || 'oxxpharma-backend' }}
         run: |
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" bash -s <<REMOTE_EOF
+            -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
+            "DEPLOY_PATH='${DEPLOY_PATH}' BACKEND_PROCESS='${BACKEND_PROCESS}' bash -s" <<'REMOTE_EOF'
           set -e
           cd "${DEPLOY_PATH}"
 
-          # 1) Instala/atualiza deps do backend em todos os venvs existentes (backend/.venv e venv)
-          INSTALLED_DEPS=0
+          # 1) Instala/atualiza deps do backend em backend/.venv e venv
           for venv_path in backend/.venv venv; do
             if [ -d "${venv_path}" ] && [ -f backend/requirements.txt ]; then
               echo "→ Instalando deps em ${venv_path}..."
-              "./${venv_path}/bin/pip" install -q -r backend/requirements.txt
-              INSTALLED_DEPS=1
+              "./${venv_path}/bin/pip" install -q -r backend/requirements.txt || true
             fi
           done
-          if [ $INSTALLED_DEPS -eq 0 ]; then
-            echo "⚠ Nenhum venv encontrado em backend/.venv ou venv"
-          fi
 
           # 2) Reinicia o backend
           echo "→ Reiniciando ${BACKEND_PROCESS}..."
           sudo supervisorctl restart "${BACKEND_PROCESS}"
 
-          # 3) Frontend é estático (nginx serve /frontend/build) — nada pra reiniciar
-
-          # 4) Healthcheck com retry resiliente (aguarda até 15s)
-          echo "→ Verificando inicialização do backend..."
-          HEALTHY=0
-          for i in {1..15}; do
+          # 3) Healthcheck com retry resiliente
+          echo "→ Verificando inicializacao do backend..."
+          sleep 4
+          SUCCESS=0
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             if curl -fsS http://localhost:8001/api/health >/dev/null 2>&1; then
-              HEALTHY=1
+              SUCCESS=1
               break
             fi
             sleep 1
           done
 
-          if [ $HEALTHY -eq 1 ]; then
+          if [ "${SUCCESS}" = "1" ]; then
             echo "✅ Backend respondendo com sucesso na porta 8001"
           else
-            echo "⚠ Backend health check falhou — logs de erro recentes:"
-            sudo supervisorctl tail -n 30 "${BACKEND_PROCESS}" stderr || true
+            echo "⚠ Backend health check falhou — ultimos logs de erro:"
+            sudo supervisorctl tail "${BACKEND_PROCESS}" stderr || true
             exit 1
           fi
-          REMOTE_EOF
+REMOTE_EOF
 
       - name: Notify success
         if: success()

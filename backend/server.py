@@ -1800,16 +1800,49 @@ async def delete_product(request: Request, product_id: str, user: dict = Depends
     return {"message": "Produto removido"}
 
 @app.post("/api/admin/products/sync-postgres")
+@app.post("/api/admin/postgres/sync")
 async def admin_sync_products_postgres(request: Request, user: dict = Depends(require_admin())):
     """Sincroniza todos os produtos do MongoDB com o banco PostgreSQL de catálogo para anúncios."""
     db = request.app.db
     return await pg_catalog_sync.bulk_sync_all_products(db)
 
 @app.get("/api/admin/products/sync-postgres/status")
+@app.get("/api/admin/postgres/status")
 async def admin_get_sync_postgres_status(request: Request, user: dict = Depends(require_admin())):
     """Retorna status da conexão e contagem de produtos no PostgreSQL."""
     db = request.app.db
     return await pg_catalog_sync.get_sync_status(db)
+
+@app.get("/api/admin/postgres/config")
+async def admin_get_postgres_config(request: Request, user: dict = Depends(require_admin())):
+    """Retorna dados de configuração do PostgreSQL para catálogo."""
+    db = request.app.db
+    return await pg_catalog_sync.get_pg_config(db)
+
+@app.put("/api/admin/postgres/config")
+async def admin_update_postgres_config(request: Request, user: dict = Depends(require_admin())):
+    """Atualiza as credenciais de conexão do PostgreSQL e testa conexão."""
+    db = request.app.db
+    body = await request.json() or {}
+    return await pg_catalog_sync.update_pg_config(db, body)
+
+@app.post("/api/admin/postgres/test-connection")
+async def admin_test_postgres_connection(request: Request, user: dict = Depends(require_admin())):
+    """Testa credenciais do PostgreSQL antes de salvar."""
+    body = await request.json() or {}
+    return await pg_catalog_sync.test_pg_connection(body)
+
+@app.get("/api/admin/postgres/products")
+async def admin_list_postgres_products(
+    request: Request,
+    page: int = 1,
+    limit: int = 20,
+    search: str = "",
+    user: dict = Depends(require_admin()),
+):
+    """Consulta produtos diretamente da tabela products_catalog no PostgreSQL."""
+    db = request.app.db
+    return await pg_catalog_sync.list_pg_products(db, page=page, limit=limit, search=search)
 
 # ==================== CART ====================
 

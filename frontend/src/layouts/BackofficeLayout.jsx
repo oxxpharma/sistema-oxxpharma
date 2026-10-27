@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, FolderTree, ShoppingBag, Users, LogOut, Store, Menu,
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
-  GitMerge, Calculator, LayoutGrid, Shield, ShoppingCart, Zap, ShieldAlert,
+  GitMerge, Calculator, LayoutGrid, Shield, ShoppingCart, Zap, ShieldAlert, Database,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -37,6 +37,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'editCoupons' },
       { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices', perm: 'financial' },
       { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments', perm: 'integrations' },
+      { to: '/backoffice/catalogo-pg', icon: Database, label: 'Catálogo PostgreSQL', testId: 'nav-pg-catalog', perm: 'integrations' },
       { to: '/backoffice/frete', icon: Truck, label: 'Frete', testId: 'nav-shipping', perm: 'integrations' },
     ],
   },

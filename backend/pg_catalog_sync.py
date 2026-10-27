@@ -24,26 +24,52 @@ _pg_pool: Optional[Any] = None
 _last_connection_error: Optional[str] = None
 
 
-def get_pg_url() -> str:
+async def get_pg_url(db=None) -> str:
+    """Busca URL do PostgreSQL na coleção settings ou fallback para env / default."""
+    if db is not None:
+        try:
+            cfg = await db.settings.find_one({"_id": "postgres_catalog"})
+            if cfg and cfg.get("host") and cfg.get("user") and cfg.get("password") and cfg.get("database"):
+                host = str(cfg["host"]).strip()
+                if host in ("localhost", "127.0.0.1"):
+                    host = "127.0.0.1"
+                port = int(cfg.get("port") or 5432)
+                user = str(cfg["user"]).strip()
+                pwd = str(cfg["password"]).strip()
+                database = str(cfg["database"]).strip()
+                return f"postgresql://{user}:{pwd}@{host}:{port}/{database}"
+        except Exception as e:
+            logger.warning(f"Erro ao buscar configuracao postgres_catalog no settings: {e}")
+
     raw_url = os.environ.get("POSTGRES_CATALOG_URL") or DEFAULT_PG_URL
-    # Se usar localhost, substitui por 127.0.0.1 para evitar problemas com IPv6 (::1) no asyncpg
     if "@localhost:" in raw_url:
         raw_url = raw_url.replace("@localhost:", "@127.0.0.1:")
     return raw_url
 
 
-async def get_pool():
+async def reset_pool():
+    """Fecha o pool atual para forçar reconexão com novas credenciais."""
+    global _pg_pool
+    if _pg_pool is not None:
+        try:
+            await _pg_pool.close()
+        except Exception:
+            pass
+        _pg_pool = None
+
+
+async def get_pool(db=None):
     """Retorna o pool de conexões com o PostgreSQL ou None se inacessível."""
     global _pg_pool, _last_connection_error
     if asyncpg is None:
-        _last_connection_error = "Biblioteca 'asyncpg' não instalada no .venv do backend. Rode: /var/www/oxxpharma/backend/.venv/bin/pip install asyncpg"
+        _last_connection_error = "Biblioteca 'asyncpg' não instalada no ambiente Python do backend (/backend/.venv). Rode: /var/www/oxxpharma/backend/.venv/bin/pip install asyncpg"
         logger.warning(f"[Postgres Catalog] {_last_connection_error}")
         return None
 
     if _pg_pool is not None and not _pg_pool._closed:
         return _pg_pool
 
-    url = get_pg_url()
+    url = await get_pg_url(db)
     try:
         _pg_pool = await asyncpg.create_pool(
             dsn=url,
@@ -52,13 +78,13 @@ async def get_pool():
             command_timeout=15.0,
             timeout=10.0,
         )
-        logger.info(f"Pool PostgreSQL de catálogo inicializado com sucesso em {url}.")
+        logger.info(f"Pool PostgreSQL de catálogo conectado com sucesso.")
         _last_connection_error = None
         await ensure_table(_pg_pool)
         return _pg_pool
     except Exception as e:
         _last_connection_error = f"{type(e).__name__}: {str(e)}"
-        logger.warning(f"Não foi possível conectar ao PostgreSQL de catálogo ({url}): {e}")
+        logger.warning(f"Não foi possível conectar ao PostgreSQL de catálogo: {_last_connection_error}")
         return None
 
 
@@ -110,7 +136,6 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
     slug = str(doc.get("slug") or pid or "").strip()
     name = str(doc.get("name") or "Produto sem nome").strip()[:255]
 
-    # Imagens
     images_raw = doc.get("images") or []
     if isinstance(images_raw, str):
         images_list = [images_raw]
@@ -121,7 +146,6 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     main_image = images_list[0] if len(images_list) > 0 else None
 
-    # Preços
     try:
         price = float(doc.get("price") or 0.0)
     except (ValueError, TypeError):
@@ -138,7 +162,6 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     effective_price = discount_price if (discount_price and discount_price > 0) else price
 
-    # Estoque e status
     try:
         stock = int(doc.get("stock") if doc.get("stock") is not None else 0)
     except (ValueError, TypeError):
@@ -147,15 +170,11 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
     is_active = bool(doc.get("active", True))
     is_featured = bool(doc.get("featured", False))
 
-    # Categorias e Subcategorias
     category = str(doc.get("category") or "").strip() or None
     categories = doc.get("categories") or ([category] if category else [])
     subcategories = doc.get("subcategories") or ([doc.get("subcategory")] if doc.get("subcategory") else [])
-
-    # Features / Benefícios
     features = doc.get("features") or []
 
-    # Peso e Dimensões
     def _to_float(v):
         try:
             return float(v) if v is not None else None
@@ -167,7 +186,6 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
     width_cm = _to_float(doc.get("width_cm"))
     height_cm = _to_float(doc.get("height_cm"))
 
-    # Link completo do produto para anúncios
     product_url = f"https://oxxpharma.com.br/produto/{slug}"
 
     return {
@@ -199,12 +217,12 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def sync_product_to_pg(product_doc: Dict[str, Any]) -> bool:
+async def sync_product_to_pg(product_doc: Dict[str, Any], db=None) -> bool:
     """Insere ou atualiza um produto no banco PostgreSQL."""
     if not product_doc or not product_doc.get("product_id"):
         return False
 
-    pool = await get_pool()
+    pool = await get_pool(db)
     if not pool:
         return False
 
@@ -281,19 +299,19 @@ async def sync_product_to_pg(product_doc: Dict[str, Any]) -> bool:
                 data["height_cm"],
                 data["updated_at"],
             )
-        logger.info(f"[Postgres Catalog] Produto sincronizado com sucesso: {data['product_id']} ({data['name']})")
+        logger.info(f"[Postgres Catalog] Produto sincronizado: {data['product_id']} ({data['name']})")
         return True
     except Exception as e:
         logger.error(f"[Postgres Catalog] Falha ao sincronizar produto {data['product_id']}: {e}")
         return False
 
 
-async def delete_product_from_pg(product_id: str) -> bool:
+async def delete_product_from_pg(product_id: str, db=None) -> bool:
     """Remove produto do catálogo no PostgreSQL."""
     if not product_id:
         return False
 
-    pool = await get_pool()
+    pool = await get_pool(db)
     if not pool:
         return False
 
@@ -309,9 +327,9 @@ async def delete_product_from_pg(product_id: str) -> bool:
 
 async def bulk_sync_all_products(mongo_db) -> Dict[str, Any]:
     """Varre todos os produtos do MongoDB e sincroniza com o PostgreSQL."""
-    pool = await get_pool()
+    pool = await get_pool(mongo_db)
     if not pool:
-        err_detail = _last_connection_error or "Verifique se o cluster PostgreSQL está ativo (pg_lsclusters) na porta 5432."
+        err_detail = _last_connection_error or "Verifique as credenciais e se o serviço PostgreSQL está ativo."
         return {
             "success": False,
             "error": f"Falha na conexão com PostgreSQL: {err_detail}",
@@ -327,11 +345,28 @@ async def bulk_sync_all_products(mongo_db) -> Dict[str, Any]:
         errors = 0
 
         for p in products:
-            ok = await sync_product_to_pg(p)
+            ok = await sync_product_to_pg(p, db=mongo_db)
             if ok:
                 synced += 1
             else:
                 errors += 1
+
+        sync_info = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "synced": synced,
+            "errors": errors,
+            "total": total,
+        }
+
+        # Salva o registro da última sincronização
+        try:
+            await mongo_db.settings.update_one(
+                {"_id": "postgres_catalog"},
+                {"$set": {"last_sync": sync_info}},
+                upsert=True
+            )
+        except Exception:
+            pass
 
         return {
             "success": True,
@@ -339,6 +374,7 @@ async def bulk_sync_all_products(mongo_db) -> Dict[str, Any]:
             "synced": synced,
             "errors": errors,
             "message": f"{synced} produtos sincronizados com sucesso no PostgreSQL de anúncios.",
+            "last_sync": sync_info,
         }
     except Exception as e:
         logger.exception(f"Erro durante bulk_sync_all_products: {e}")
@@ -350,19 +386,148 @@ async def bulk_sync_all_products(mongo_db) -> Dict[str, Any]:
         }
 
 
+async def test_pg_connection(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Testa a conexão com o PostgreSQL usando os parâmetros fornecidos."""
+    if asyncpg is None:
+        return {
+            "success": False,
+            "error": "Biblioteca 'asyncpg' não instalada no ambiente Python.",
+        }
+
+    host = str(params.get("host") or "127.0.0.1").strip()
+    if host in ("localhost", "127.0.0.1"):
+        host = "127.0.0.1"
+    port = int(params.get("port") or 5432)
+    database = str(params.get("database") or "oxxpharma_catalog").strip()
+    user = str(params.get("user") or "oxx_backend").strip()
+    password = str(params.get("password") or "").strip()
+
+    dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+    try:
+        conn = await asyncpg.connect(dsn, timeout=5.0)
+        try:
+            version_str = await conn.fetchval("SELECT version();")
+            table_check = await conn.fetchval("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'products_catalog'
+                );
+            """)
+            return {
+                "success": True,
+                "version": version_str.split(",")[0] if version_str else "PostgreSQL",
+                "table_exists": bool(table_check),
+                "message": "Conexão com PostgreSQL estabelecida com sucesso!",
+            }
+        finally:
+            await conn.close()
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"{type(e).__name__}: {str(e)}",
+        }
+
+
+async def get_pg_config(db) -> Dict[str, Any]:
+    """Retorna a configuração atual do PostgreSQL (com senha mascarada) e credenciais da agência."""
+    doc = await db.settings.find_one({"_id": "postgres_catalog"}) or {}
+
+    host = doc.get("host") or "127.0.0.1"
+    port = int(doc.get("port") or 5432)
+    database = doc.get("database") or "oxxpharma_catalog"
+    user = doc.get("user") or "oxx_backend"
+    has_pwd = bool(doc.get("password") or os.environ.get("POSTGRES_CATALOG_URL"))
+
+    agency_user = doc.get("agency_user") or "ads_agency"
+    agency_pwd = doc.get("agency_password") or "AgenciaOxxAds#2026"
+
+    return {
+        "host": host,
+        "port": port,
+        "database": database,
+        "user": user,
+        "has_password": has_pwd,
+        "password_masked": "••••••••••••" if has_pwd else "",
+        "agency_user": agency_user,
+        "agency_password": agency_pwd,
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+async def update_pg_config(db, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Atualiza as credenciais de conexão do PostgreSQL e reseta o pool."""
+    doc = await db.settings.find_one({"_id": "postgres_catalog"}) or {}
+
+    host = str(data.get("host") or doc.get("host") or "127.0.0.1").strip()
+    port = int(data.get("port") or doc.get("port") or 5432)
+    database = str(data.get("database") or doc.get("database") or "oxxpharma_catalog").strip()
+    user = str(data.get("user") or doc.get("user") or "oxx_backend").strip()
+
+    # Só altera a senha se foi enviada uma nova
+    new_pwd = data.get("password")
+    if new_pwd and str(new_pwd).strip() and not str(new_pwd).startswith("••••"):
+        password = str(new_pwd).strip()
+    else:
+        password = doc.get("password") or "OxxBackend2026@Sync"
+
+    agency_user = str(data.get("agency_user") or doc.get("agency_user") or "ads_agency").strip()
+    agency_pwd = str(data.get("agency_password") or doc.get("agency_password") or "AgenciaOxxAds#2026").strip()
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_doc = {
+        "host": host,
+        "port": port,
+        "database": database,
+        "user": user,
+        "password": password,
+        "agency_user": agency_user,
+        "agency_password": agency_pwd,
+        "updated_at": now,
+    }
+
+    await db.settings.update_one({"_id": "postgres_catalog"}, {"$set": update_doc}, upsert=True)
+    await reset_pool()
+
+    # Testa a nova conexão imediatamente
+    test_res = await test_pg_connection(update_doc)
+
+    return {
+        "success": True,
+        "message": "Configurações do PostgreSQL salvas com sucesso!",
+        "test": test_res,
+        "config": await get_pg_config(db),
+    }
+
+
 async def get_sync_status(mongo_db) -> Dict[str, Any]:
-    """Retorna o status da sincronização e contagem de produtos."""
-    pool = await get_pool()
+    """Retorna o status detalhado da conexão e sincronização."""
+    pool = await get_pool(mongo_db)
     pg_connected = pool is not None
 
     pg_count = 0
+    pg_version = ""
+    table_exists = False
+
     if pg_connected:
         try:
             async with pool.acquire() as conn:
-                val = await conn.fetchval("SELECT COUNT(*) FROM products_catalog;")
-                pg_count = int(val or 0)
+                v = await conn.fetchval("SELECT version();")
+                pg_version = v.split(",")[0] if v else "PostgreSQL"
+                table_check = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'products_catalog'
+                    );
+                """)
+                table_exists = bool(table_check)
+                if table_exists:
+                    val = await conn.fetchval("SELECT COUNT(*) FROM products_catalog;")
+                    pg_count = int(val or 0)
         except Exception as e:
-            logger.warning(f"Erro ao contar produtos no PostgreSQL: {e}")
+            logger.warning(f"Erro ao obter status no PostgreSQL: {e}")
             pg_connected = False
 
     mongo_count = 0
@@ -371,9 +536,95 @@ async def get_sync_status(mongo_db) -> Dict[str, Any]:
     except Exception:
         pass
 
+    doc = await mongo_db.settings.find_one({"_id": "postgres_catalog"}) or {}
+    last_sync = doc.get("last_sync")
+
     return {
         "pg_connected": pg_connected,
+        "pg_version": pg_version,
+        "table_exists": table_exists,
         "pg_count": pg_count,
         "mongo_count": mongo_count,
-        "in_sync": (pg_connected and pg_count == mongo_count),
+        "in_sync": (pg_connected and pg_count >= mongo_count and mongo_count > 0),
+        "last_sync": last_sync,
+        "error": _last_connection_error if not pg_connected else None,
     }
+
+
+async def list_pg_products(db, page: int = 1, limit: int = 20, search: str = "") -> Dict[str, Any]:
+    """Consulta os produtos diretamente da tabela products_catalog no PostgreSQL."""
+    pool = await get_pool(db)
+    if not pool:
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "pages": 1,
+            "error": _last_connection_error or "PostgreSQL desconectado",
+        }
+
+    offset = (page - 1) * limit
+    search_term = f"%{search.strip()}%" if search and search.strip() else None
+
+    try:
+        async with pool.acquire() as conn:
+            if search_term:
+                count_sql = """
+                    SELECT COUNT(*) FROM products_catalog
+                    WHERE name ILIKE $1 OR sku ILIKE $1 OR ean_gtin ILIKE $1 OR product_id ILIKE $1;
+                """
+                total = await conn.fetchval(count_sql, search_term)
+
+                query_sql = """
+                    SELECT product_id, name, slug, product_url, main_image, all_images,
+                           sku, ean_gtin, brand, category, categories, price, discount_price,
+                           effective_price, stock, is_active, is_featured, updated_at
+                    FROM products_catalog
+                    WHERE name ILIKE $1 OR sku ILIKE $1 OR ean_gtin ILIKE $1 OR product_id ILIKE $1
+                    ORDER BY updated_at DESC
+                    LIMIT $2 OFFSET $3;
+                """
+                rows = await conn.fetch(query_sql, search_term, limit, offset)
+            else:
+                total = await conn.fetchval("SELECT COUNT(*) FROM products_catalog;")
+                query_sql = """
+                    SELECT product_id, name, slug, product_url, main_image, all_images,
+                           sku, ean_gtin, brand, category, categories, price, discount_price,
+                           effective_price, stock, is_active, is_featured, updated_at
+                    FROM products_catalog
+                    ORDER BY updated_at DESC
+                    LIMIT $1 OFFSET $2;
+                """
+                rows = await conn.fetch(query_sql, limit, offset)
+
+            items = []
+            for r in rows:
+                d = dict(r)
+                if isinstance(d.get("updated_at"), datetime):
+                    d["updated_at"] = d["updated_at"].isoformat()
+                # Parse all_images json if string
+                if isinstance(d.get("all_images"), str):
+                    try:
+                        d["all_images"] = json.loads(d["all_images"])
+                    except Exception:
+                        d["all_images"] = []
+                items.append(d)
+
+            total_val = int(total or 0)
+            pages = max(1, (total_val + limit - 1) // limit) if total_val > 0 else 1
+
+            return {
+                "items": items,
+                "total": total_val,
+                "page": page,
+                "pages": pages,
+            }
+    except Exception as e:
+        logger.exception(f"Erro ao listar produtos do PostgreSQL: {e}")
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "pages": 1,
+            "error": str(e),
+        }
