@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
@@ -31,7 +31,7 @@ import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 
 export default function AdminProducts() {
-  const nav = useNavigate();
+
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -343,9 +343,13 @@ export default function AdminProducts() {
             <span className="hidden sm:inline">Sincronizar PostgreSQL</span>
           </Button>
 
-          <Button onClick={() => nav('/backoffice/produtos/novo')} data-testid="new-product-btn" className="gap-2">
+          <Link
+            to="/backoffice/produtos/novo"
+            data-testid="new-product-btn"
+            className="h-10 px-4 rounded-xl bg-brand-main text-white text-sm font-semibold hover:bg-brand-main/90 transition-colors inline-flex items-center gap-2 shadow-xs"
+          >
             <Plus className="w-4 h-4" /> Novo produto
-          </Button>
+          </Link>
         </div>
       </div>
 
@@ -627,15 +631,21 @@ export default function AdminProducts() {
                 >
                   {/* Top: Imagem com Grip Handle, Reordenar e Badges */}
                   <div className="relative aspect-square bg-gray-50 flex items-center justify-center overflow-hidden border-b border-gray-100">
-                    {(p.images || [])[0] ? (
-                      <img
-                        src={p.images[0]}
-                        alt={p.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 pointer-events-none"
-                      />
-                    ) : (
-                      <ImageIcon className="w-12 h-12 text-gray-300" />
-                    )}
+                    <Link
+                      to={`/backoffice/produtos/${p.product_id}`}
+                      className="w-full h-full flex items-center justify-center"
+                      title={`Editar ${p.name}`}
+                    >
+                      {(p.images || [])[0] ? (
+                        <img
+                          src={p.images[0]}
+                          alt={p.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 pointer-events-none"
+                        />
+                      ) : (
+                        <ImageIcon className="w-12 h-12 text-gray-300" />
+                      )}
+                    </Link>
 
                     {/* Controles de Ordem (Grip Handle + Setas para cima/baixo) */}
                     <div className="absolute top-2.5 left-2.5 flex items-center gap-1 bg-white/90 backdrop-blur-xs p-1 rounded-lg border border-gray-200/80 shadow-xs">
@@ -688,12 +698,14 @@ export default function AdminProducts() {
                         </span>
                       </div>
 
-                      <h3
-                        onClick={() => nav(`/backoffice/produtos/${p.product_id}`)}
-                        className="font-bold text-sm text-gray-900 line-clamp-2 hover:text-brand-main cursor-pointer transition-colors mt-1.5"
-                        title={p.name}
-                      >
-                        {p.name}
+                      <h3>
+                        <Link
+                          to={`/backoffice/produtos/${p.product_id}`}
+                          className="font-bold text-sm text-gray-900 line-clamp-2 hover:text-brand-main transition-colors mt-1.5 block"
+                          title={p.name}
+                        >
+                          {p.name}
+                        </Link>
                       </h3>
 
                       <div className="flex items-center gap-2 mt-1.5 text-xs text-txt-secondary flex-wrap">
@@ -733,14 +745,13 @@ export default function AdminProducts() {
 
                   {/* Ações do Card */}
                   <div className="px-4 py-2.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => nav(`/backoffice/produtos/${p.product_id}`)}
-                      className="flex-1 text-xs gap-1.5 h-8 bg-white hover:bg-orange-50 hover:text-brand-main hover:border-brand-main/40"
+                    <Link
+                      to={`/backoffice/produtos/${p.product_id}`}
+                      className="flex-1 text-xs gap-1.5 h-8 bg-white hover:bg-orange-50 hover:text-brand-main hover:border-brand-main/40 border border-border rounded-lg inline-flex items-center justify-center font-medium transition-colors"
+                      title="Editar produto"
                     >
                       <Edit className="w-3.5 h-3.5" /> Editar
-                    </Button>
+                    </Link>
                     <Button
                       variant="outline"
                       size="sm"
@@ -856,21 +867,25 @@ export default function AdminProducts() {
                       {/* Produto */}
                       <td className="p-3.5">
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-xl bg-bg-secondary overflow-hidden flex-shrink-0 border border-gray-100 flex items-center justify-center">
+                          <Link
+                            to={`/backoffice/produtos/${p.product_id}`}
+                            className="w-12 h-12 rounded-xl bg-bg-secondary overflow-hidden flex-shrink-0 border border-gray-100 flex items-center justify-center hover:opacity-80 transition-opacity"
+                            title={`Editar ${p.name}`}
+                          >
                             {(p.images || [])[0] ? (
                               <img src={p.images[0]} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <ImageIcon className="w-5 h-5 text-gray-400" />
                             )}
-                          </div>
+                          </Link>
                           <div className="min-w-0 max-w-md">
-                            <div
-                              onClick={() => nav(`/backoffice/produtos/${p.product_id}`)}
-                              className="font-semibold text-txt-primary truncate hover:text-brand-main cursor-pointer"
+                            <Link
+                              to={`/backoffice/produtos/${p.product_id}`}
+                              className="font-semibold text-txt-primary truncate hover:text-brand-main block"
                               title={p.name}
                             >
                               {p.name}
-                            </div>
+                            </Link>
                             <div className="flex items-center gap-2 mt-0.5 text-xs text-txt-secondary">
                               {p.brand && (
                                 <span className="font-medium text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">
@@ -930,14 +945,14 @@ export default function AdminProducts() {
 
                       {/* Ações */}
                       <td className="p-3.5 pr-5 text-right space-x-1">
-                        <button
-                          onClick={() => nav(`/backoffice/produtos/${p.product_id}`)}
+                        <Link
+                          to={`/backoffice/produtos/${p.product_id}`}
                           className="p-2 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors inline-flex items-center"
                           title="Editar produto"
                           data-testid={`edit-${p.product_id}`}
                         >
                           <Edit className="w-4 h-4" />
-                        </button>
+                        </Link>
                         <button
                           onClick={() => del(p.product_id, p.name)}
                           className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors inline-flex items-center"
