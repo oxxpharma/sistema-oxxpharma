@@ -370,6 +370,8 @@ class CategoryCreate(BaseModel):
     name: str
     description: Optional[str] = None
     image_url: Optional[str] = None
+    icon: Optional[str] = None
+    icon_svg: Optional[str] = None
     parent: Optional[str] = None
     order: int = 0
     active: bool = True
@@ -810,7 +812,7 @@ async def admin_set_brands_unified(request: Request, user: dict = Depends(requir
 
 VALID_BLOCK_TYPES = {"hero", "hero_carousel", "section_title", "product_grid",
                      "category_grid", "text", "image", "cta_banner", "divider", "html",
-                     "spacer", "trust_bar", "benefits"}
+                     "spacer", "trust_bar", "benefits", "rich_text", "custom_text"}
 
 
 def _default_home_blocks() -> list:
@@ -1362,6 +1364,8 @@ class SubcategoryCreate(BaseModel):
     name: str
     description: Optional[str] = None
     category_ids: List[str] = []  # muitos-para-muitos com categorias
+    icon: Optional[str] = None
+    icon_svg: Optional[str] = None
     order: int = 0
     active: bool = True
     # SEO (Search Engine Optimization)

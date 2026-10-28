@@ -14,6 +14,7 @@ const BLOCK_LIBRARY = [
   { type: 'hero', label: 'Banner Hero', icon: ImageIcon, desc: 'Banner principal com título + CTA' },
   { type: 'hero_carousel', label: 'Banner Carrossel', icon: GalleryHorizontal, desc: 'Vários slides girando automaticamente' },
   { type: 'section_title', label: 'Título de Seção', icon: Type, desc: 'Cabeçalho com subtítulo' },
+  { type: 'rich_text', label: 'Texto / Título Rico', icon: Type, desc: 'Título com tag, cores variadas e estilos na mesma frase' },
   { type: 'product_grid', label: 'Grade de produtos', icon: LayoutGrid, desc: 'Destaques, categoria, manuais' },
   { type: 'category_grid', label: 'Grade de categorias', icon: Tag, desc: 'Mosaico de categorias' },
   { type: 'cta_banner', label: 'Banner CTA', icon: Megaphone, desc: 'Chamada com botão' },
@@ -34,9 +35,18 @@ const DEFAULT_PROPS = {
       { title: 'Slide 1', subtitle: '', image_url: '', cta_label: 'Comprar', cta_link: '/loja', overlay_opacity: 0.4 },
     ],
   },
-  section_title: { title: 'Em destaque', subtitle: '', align: 'left' },
+  section_title: { title: 'Em destaque', subtitle: '', align: 'left', eyebrow: '', eyebrow_color: '#E8731A', font_family: 'heading', size: '3xl' },
+  rich_text: {
+    eyebrow: 'PRODUTOS',
+    eyebrow_color: '#E8731A',
+    html: 'Encontre o cuidado que <span style="color: #E8731A">combina com você</span>',
+    subtitle: 'Linhas completas para cada fase da sua vida.',
+    font_family: 'serif',
+    size: '3xl',
+    align: 'center',
+  },
   product_grid: { source: 'featured', category: '', product_ids: '', limit: 8, columns: 4 },
-  category_grid: { limit: 6 },
+  category_grid: { limit: 16, columns: 8, show_all_button: true, button_label: 'VER TODOS OS PRODUTOS >', button_link: '/produtos' },
   cta_banner: { title: 'Frete grátis acima de R$ 199', subtitle: 'Em todo o Brasil', cta_label: 'Comprar agora', cta_link: '/loja', bg_color: '' },
   trust_bar: {
     use_store_settings: true,
@@ -259,7 +269,8 @@ function summary(block) {
   if (block.type === 'hero' || block.type === 'cta_banner' || block.type === 'section_title') return p.title || '(sem título)';
   if (block.type === 'hero_carousel') return `${(p.slides || []).length} slide(s)`;
   if (block.type === 'product_grid') return `${p.source} · ${p.limit || 8} produtos`;
-  if (block.type === 'category_grid') return `${p.limit || 6} categorias`;
+  if (block.type === 'rich_text') return p.eyebrow ? `${p.eyebrow} · ${p.subtitle || 'Título'}` : (p.html ? 'Texto formatado' : 'Título rico');
+  if (block.type === 'category_grid') return `${p.limit || 16} categorias · ${p.columns || 8} cols`;
   if (block.type === 'image') return p.src ? '✓ imagem' : '(sem imagem)';
   if (block.type === 'spacer') return `${p.height || 40}px`;
   if (block.type === 'trust_bar') return p.use_store_settings ? 'Itens padrões da loja' : `${(p.items || []).length} benefício(s)`;
@@ -286,8 +297,19 @@ function BlockEditor({ block, onChange }) {
 
   if (t === 'section_title') return (
     <div className="space-y-3">
+      <Input label="Tag Superior / Eyebrow (opcional)" value={p.eyebrow || ''} onChange={e => onChange({ eyebrow: e.target.value })} placeholder="Ex: PRODUTOS" />
       <Input label="Título" value={p.title || ''} onChange={e => onChange({ title: e.target.value })} />
       <Input label="Subtítulo" value={p.subtitle || ''} onChange={e => onChange({ subtitle: e.target.value })} />
+      <SelectInput
+        label="Família da Fonte"
+        value={p.font_family || 'heading'}
+        onChange={v => onChange({ font_family: v })}
+        options={[
+          { value: 'heading', label: 'Heading Marcante (OxxPharma)' },
+          { value: 'serif', label: 'Serif Elegante' },
+          { value: 'sans', label: 'Sans Moderno' },
+        ]}
+      />
       <SelectInput label="Alinhamento" value={p.align || 'left'} onChange={v => onChange({ align: v })} options={[{ value: 'left', label: 'Esquerda' }, { value: 'center', label: 'Centro' }]} />
     </div>
   );
@@ -311,8 +333,39 @@ function BlockEditor({ block, onChange }) {
   );
 
   if (t === 'category_grid') return (
-    <Input label="Quantidade" type="number" value={p.limit || 6} onChange={e => onChange({ limit: parseInt(e.target.value) || 6 })} />
+    <div className="space-y-3">
+      <Input label="Quantidade máxima de categorias" type="number" value={p.limit ?? 16} onChange={e => onChange({ limit: parseInt(e.target.value) || 0 })} placeholder="0 para todas" />
+      <SelectInput
+        label="Colunas no Desktop"
+        value={String(p.columns || 8)}
+        onChange={v => onChange({ columns: parseInt(v) })}
+        options={[
+          { value: '4', label: '4 colunas' },
+          { value: '6', label: '6 colunas' },
+          { value: '8', label: '8 colunas (recomendado)' },
+        ]}
+      />
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={p.show_all_button !== false}
+            onChange={e => onChange({ show_all_button: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          Exibir botão "Ver todos os produtos"
+        </label>
+        {p.show_all_button !== false && (
+          <div className="pt-2 space-y-2 border-t border-gray-200/60">
+            <Input label="Texto do botão" value={p.button_label || 'VER TODOS OS PRODUTOS >'} onChange={e => onChange({ button_label: e.target.value })} />
+            <Input label="Link de destino" value={p.button_link || '/produtos'} onChange={e => onChange({ button_link: e.target.value })} />
+          </div>
+        )}
+      </div>
+    </div>
   );
+
+  if (t === 'rich_text') return <RichTextBlockEditor props={p} onChange={onChange} />;
 
   if (t === 'cta_banner') return (
     <div className="space-y-3">
@@ -618,6 +671,210 @@ function TrustBarBlockEditor({ props, onChange }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+function RichTextBlockEditor({ props, onChange }) {
+  const textareaRef = React.useRef(null);
+  const [customColor, setCustomColor] = React.useState('#E8731A');
+
+  const applyFormat = (openTag, closeTag) => {
+    const el = textareaRef.current;
+    const currentText = props.html || props.title || '';
+    if (!el) {
+      onChange({ html: currentText + openTag + 'texto' + closeTag });
+      return;
+    }
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    if (start === end) {
+      const newText = currentText.slice(0, start) + openTag + 'texto' + closeTag + currentText.slice(end);
+      onChange({ html: newText, title: newText });
+    } else {
+      const selected = currentText.slice(start, end);
+      const newText = currentText.slice(0, start) + openTag + selected + closeTag + currentText.slice(end);
+      onChange({ html: newText, title: newText });
+    }
+  };
+
+  const applyColor = (hex) => {
+    applyFormat(`<span style="color: ${hex}">`, '</span>');
+  };
+
+  const clearFormatting = () => {
+    const currentText = props.html || props.title || '';
+    const stripped = currentText.replace(/<[^>]*>/g, '');
+    onChange({ html: stripped, title: stripped });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Eyebrow / Tag superior */}
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
+        <label className="text-xs font-bold text-txt-primary block">Tag Superior / Eyebrow (Opcional)</label>
+        <p className="text-[11px] text-txt-secondary leading-relaxed">Ex: "PRODUTOS" em letras maiúsculas espaçadas acima do título.</p>
+        <div className="flex items-center gap-2">
+          <Input
+            value={props.eyebrow || ''}
+            onChange={(e) => onChange({ eyebrow: e.target.value })}
+            placeholder="Ex: PRODUTOS"
+          />
+          <div className="flex items-center gap-1 shrink-0" title="Cor da Tag">
+            <input
+              type="color"
+              value={props.eyebrow_color || '#E8731A'}
+              onChange={(e) => onChange({ eyebrow_color: e.target.value })}
+              className="w-8 h-8 p-0 border border-border rounded-lg cursor-pointer bg-white"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Editor do Título Principal com Formatação */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-bold text-txt-primary">Título Principal</label>
+          <span className="text-[10px] text-txt-secondary">Selecione o trecho e clique nos botões</span>
+        </div>
+
+        {/* Toolbar de Formatação Rápida */}
+        <div className="flex items-center gap-1.5 p-1.5 bg-gray-100/90 border border-border rounded-lg flex-wrap">
+          <button
+            type="button"
+            onClick={() => applyColor('#E8731A')}
+            className="px-2 py-0.5 text-xs font-bold text-white bg-brand-main hover:bg-brand-dark rounded shadow-2xs transition"
+            title="Destacar com Laranja da Marca"
+          >
+            Laranja Oxx
+          </button>
+          <button
+            type="button"
+            onClick={() => applyFormat('<strong>', '</strong>')}
+            className="w-7 h-6 flex items-center justify-center font-black text-xs bg-white hover:bg-gray-200 border border-gray-300 rounded transition"
+            title="Negrito"
+          >
+            B
+          </button>
+          <button
+            type="button"
+            onClick={() => applyFormat('<em>', '</em>')}
+            className="w-7 h-6 flex items-center justify-center italic font-serif text-xs bg-white hover:bg-gray-200 border border-gray-300 rounded transition"
+            title="Itálico"
+          >
+            I
+          </button>
+
+          {/* Cores rápidas */}
+          <div className="flex items-center gap-1 border-l border-gray-300 pl-1.5 ml-0.5">
+            {['#111827', '#E8731A', '#10B981', '#3B82F6', '#8B5CF6'].map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => applyColor(hex)}
+                style={{ backgroundColor: hex }}
+                className="w-4 h-4 rounded-full border border-white shadow-2xs hover:scale-125 transition"
+                title={`Aplicar cor ${hex}`}
+              />
+            ))}
+            <input
+              type="color"
+              value={customColor}
+              onChange={(e) => {
+                setCustomColor(e.target.value);
+                applyColor(e.target.value);
+              }}
+              className="w-5 h-5 p-0 border-0 rounded cursor-pointer ml-0.5"
+              title="Cor personalizada"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={clearFormatting}
+            className="ml-auto text-[10px] text-gray-500 hover:text-red-500 px-1 py-0.5 rounded transition"
+            title="Remover formatação do título"
+          >
+            Limpar
+          </button>
+        </div>
+
+        {/* Textarea do Título */}
+        <textarea
+          ref={textareaRef}
+          rows={3}
+          value={props.html || props.title || ''}
+          onChange={(e) => onChange({ html: e.target.value, title: e.target.value })}
+          className="w-full px-3 py-2 border border-border rounded-lg text-xs font-medium focus:ring-2 focus:ring-brand-main/20 focus:border-brand-main leading-relaxed"
+          placeholder="Ex: Encontre o cuidado que <span style='color: #E8731A'>combina com você</span>"
+        />
+
+        {/* Mini Preview do Título */}
+        <div className="p-3 bg-white border border-dashed border-gray-200 rounded-xl space-y-1">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-txt-secondary">Visualização:</div>
+          {props.eyebrow && (
+            <div
+              className="text-[10px] uppercase font-extrabold tracking-[0.2em]"
+              style={{ color: props.eyebrow_color || '#E8731A' }}
+            >
+              {props.eyebrow}
+            </div>
+          )}
+          <div
+            className={`text-sm leading-snug ${
+              props.font_family === 'serif' ? 'font-serif' : props.font_family === 'sans' ? 'font-sans' : 'font-heading font-black'
+            }`}
+            dangerouslySetInnerHTML={{ __html: props.html || props.title || '<span class="text-gray-400 italic">Digite o título acima</span>' }}
+          />
+        </div>
+      </div>
+
+      {/* Subtítulo */}
+      <Input
+        label="Subtítulo"
+        value={props.subtitle || ''}
+        onChange={(e) => onChange({ subtitle: e.target.value })}
+        placeholder="Ex: Linhas completas para cada fase da sua vida."
+      />
+
+      {/* Família da Fonte */}
+      <SelectInput
+        label="Família da Fonte do Título"
+        value={props.font_family || 'serif'}
+        onChange={(v) => onChange({ font_family: v })}
+        options={[
+          { value: 'serif', label: 'Serif Elegante (estilo print 2)' },
+          { value: 'sans', label: 'Sans Moderno (Inter)' },
+          { value: 'heading', label: 'Heading Marcante (OxxPharma)' },
+        ]}
+      />
+
+      {/* Tamanho */}
+      <SelectInput
+        label="Tamanho do Título"
+        value={props.size || '3xl'}
+        onChange={(v) => onChange({ size: v })}
+        options={[
+          { value: 'xl', label: 'Pequeno (XL)' },
+          { value: '2xl', label: 'Médio (2XL)' },
+          { value: '3xl', label: 'Grande (3XL - Padrão)' },
+          { value: '4xl', label: 'Extra Grande (4XL)' },
+          { value: '5xl', label: 'Super Destaque (5XL)' },
+        ]}
+      />
+
+      {/* Alinhamento */}
+      <SelectInput
+        label="Alinhamento"
+        value={props.align || 'center'}
+        onChange={(v) => onChange({ align: v })}
+        options={[
+          { value: 'center', label: 'Centralizado' },
+          { value: 'left', label: 'À Esquerda' },
+          { value: 'right', label: 'À Direita' },
+        ]}
+      />
     </div>
   );
 }

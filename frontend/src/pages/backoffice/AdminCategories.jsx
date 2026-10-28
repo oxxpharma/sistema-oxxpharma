@@ -5,9 +5,11 @@ import { Input, Textarea } from '../../components/ui/Input';
 import { Plus, Edit, Trash2, X, Loader2, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import SEOFormFields from '../../components/admin/SEOFormFields';
+import IconPicker from '../../components/admin/IconPicker';
+import { getIcon } from '../../lib/iconLibrary';
 
-const empty = { name: '', description: '', image_url: '', parent: null, order: 0, active: true, slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '' };
-const emptySub = { name: '', description: '', category_ids: [], order: 0, active: true, slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '' };
+const empty = { name: '', description: '', image_url: '', icon: '', icon_svg: null, parent: null, order: 0, active: true, slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '' };
+const emptySub = { name: '', description: '', icon: '', icon_svg: null, category_ids: [], order: 0, active: true, slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '' };
 
 export default function AdminCategories() {
   const [cats, setCats] = useState([]);
@@ -80,22 +82,33 @@ export default function AdminCategories() {
 
       {loading ? <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin inline text-brand-main" /></div> : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {cats.map(c => (
+          {cats.map(c => {
+            const CatIcon = getIcon(c.icon || 'Sparkles');
+            return (
             <div key={c.category_id} className={`bg-white rounded-xl border border-border p-4 flex items-start justify-between ${!c.active ? 'opacity-70' : ''}`}>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="font-heading font-black">{c.name}</div>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
+                  {c.icon_svg ? (
+                    <img src={c.icon_svg} alt={c.name} className="w-6 h-6 object-contain" />
+                  ) : (
+                    <CatIcon className="w-5 h-5 text-brand-main" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="font-heading font-black">{c.name}</div>
                   {!c.active && <span className="text-[10px] font-bold uppercase bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Inativa</span>}
                 </div>
                 <div className="text-xs text-txt-secondary mt-0.5">Ordem: {c.order} · {c.active ? 'Ativa' : 'Inativa'}</div>
                 {c.description && <p className="text-xs text-txt-secondary mt-2">{c.description}</p>}
+                </div>
               </div>
               <div className="flex gap-1">
                 <button onClick={() => { setEditing(c.category_id); setForm({ ...c }); setShowForm(true); }} className="p-2 hover:bg-bg-secondary rounded" data-testid={`edit-cat-${c.category_id}`}><Edit className="w-4 h-4" /></button>
                 <button onClick={() => del(c.category_id)} className="p-2 hover:bg-red-50 text-red-500 rounded" data-testid={`del-cat-${c.category_id}`}><Trash2 className="w-4 h-4" /></button>
               </div>
             </div>
-          ))}
+          ); })}
           {cats.length === 0 && <div className="col-span-full p-10 text-center text-txt-secondary bg-white rounded-xl border border-border">Nenhuma categoria.</div>}
         </div>
       )}
@@ -107,11 +120,21 @@ export default function AdminCategories() {
       </div>
       <p className="text-xs text-txt-secondary mb-4">Uma subcategoria pode ser vinculada a uma ou mais categorias. Produtos aceitam múltiplas subcategorias.</p>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {subs.map(sc => (
+        {subs.map(sc => {
+          const SubIcon = getIcon(sc.icon || 'Sparkles');
+          return (
           <div key={sc.subcategory_id} className={`bg-white rounded-xl border border-border p-4 flex items-start justify-between ${!sc.active ? 'opacity-70' : ''}`} data-testid={`subcat-card-${sc.subcategory_id}`}>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="font-heading font-black">{sc.name}</div>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
+                {sc.icon_svg ? (
+                  <img src={sc.icon_svg} alt={sc.name} className="w-6 h-6 object-contain" />
+                ) : (
+                  <SubIcon className="w-5 h-5 text-brand-main" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="font-heading font-black">{sc.name}</div>
                 {!sc.active && <span className="text-[10px] font-bold uppercase bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Inativa</span>}
               </div>
               <div className="text-xs text-txt-secondary mt-0.5">Ordem: {sc.order} · {sc.active ? 'Ativa' : 'Inativa'}</div>
@@ -121,6 +144,7 @@ export default function AdminCategories() {
                 ) : (
                   <span className="text-txt-secondary">Em: {sc.category_ids.map(catName).join(', ')}</span>
                 )}
+                </div>
               </div>
             </div>
             <div className="flex gap-1">
@@ -128,7 +152,7 @@ export default function AdminCategories() {
               <button onClick={() => delSub(sc.subcategory_id)} className="p-2 hover:bg-red-50 text-red-500 rounded" data-testid={`del-subcat-${sc.subcategory_id}`}><Trash2 className="w-4 h-4" /></button>
             </div>
           </div>
-        ))}
+        ); })}
         {subs.length === 0 && <div className="col-span-full p-10 text-center text-txt-secondary bg-white rounded-xl border border-border">Nenhuma subcategoria.</div>}
       </div>
 
@@ -144,6 +168,8 @@ export default function AdminCategories() {
                 <Input label="Nome*" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
                 <Textarea label="Descrição" rows={2} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} />
                 <Input label="Ordem" type="number" value={form.order} onChange={e => setForm({ ...form, order: e.target.value })} />
+
+                <IconPicker value={form.icon} svgValue={form.icon_svg} onChange={({ icon, icon_svg }) => setForm(f => ({ ...f, icon, icon_svg }))} label="Ícone da Categoria" />
                 
                 <SEOFormFields
                   values={form}
@@ -211,6 +237,8 @@ export default function AdminCategories() {
                   </div>
                 </div>
                 <Input label="Ordem" type="number" value={subForm.order} onChange={e => setSubForm({ ...subForm, order: e.target.value })} />
+
+                <IconPicker value={subForm.icon} svgValue={subForm.icon_svg} onChange={({ icon, icon_svg }) => setSubForm(f => ({ ...f, icon, icon_svg }))} label="Ícone da Subcategoria" />
                 
                 <SEOFormFields
                   values={subForm}

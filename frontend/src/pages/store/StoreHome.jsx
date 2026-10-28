@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import ProductCard from '../../components/store/ProductCard';
 import HeroCarousel from '../../components/store/HeroCarousel';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
+import { getIcon } from '../../lib/iconLibrary';
 import { Loader2, ArrowRight, Pill, Baby, Heart, Sparkles, Droplets, Leaf } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 
@@ -94,17 +95,21 @@ export default function StoreHome() {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3" data-testid="categories-grid">
           {categories.map(cat => {
-            const Icon = ICONS[cat.name] || Sparkles;
+            const Icon = (cat.icon && getIcon(cat.icon)) || ICONS[cat.name] || Sparkles;
             const active = categoryFilter === cat.name;
             return (
               <Link
                 key={cat.category_id}
                 to={`/?categoria=${encodeURIComponent(cat.name)}`}
-                className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all hover:-translate-y-0.5 ${active ? 'bg-brand-main text-white border-brand-main' : 'bg-white border-border hover:border-brand-main/40 hover:shadow-md'}`}
+                className={`flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border transition-all hover:-translate-y-1 ${active ? 'bg-brand-main text-white border-brand-main shadow-md' : 'bg-[#FFF9F5] border-orange-100/80 hover:border-brand-main/50 hover:shadow-md'}`}
                 data-testid={`category-${cat.name}`}
               >
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${active ? 'bg-white/15' : 'bg-brand-light'}`}>
-                  <Icon className={`w-5 h-5 ${active ? 'text-white' : 'text-brand-main'}`} />
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${active ? 'bg-white/20' : 'bg-white border border-orange-100/70 shadow-2xs'}`}>
+                  {cat.icon_svg ? (
+                    <img src={cat.icon_svg} alt={cat.name} className="w-6 h-6 object-contain" />
+                  ) : (
+                    <Icon className={`w-5 h-5 ${active ? 'text-white' : 'text-brand-main'}`} />
+                  )}
                 </div>
                 <span className={`text-xs font-bold text-center ${active ? 'text-white' : 'text-txt-primary'}`}>{cat.name}</span>
               </Link>

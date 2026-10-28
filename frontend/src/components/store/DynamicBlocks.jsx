@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import ProductCard from './ProductCard';
 import TrustBar from './TrustBar';
+import { getIcon } from '../../lib/iconLibrary';
 
 /**
  * Renderiza blocos dinamicos definidos no Page Builder.
@@ -32,6 +33,7 @@ function BlockRouter({ block }) {
   else if (t === 'trust_bar' || t === 'benefits') content = <TrustBarBlock {...p} />;
   else if (t === 'spacer') content = <div style={{ height: `${p.height || 40}px` }} />;
   else if (t === 'section_title') content = <SectionTitle {...p} />;
+  else if (t === 'rich_text' || t === 'custom_text') content = <RichTextBlock {...p} />;
   else if (t === 'product_grid') content = <ProductGridBlock {...p} />;
   else if (t === 'category_grid') content = <CategoryGridBlock {...p} />;
   else if (t === 'text') content = <TextBlock {...p} />;
@@ -177,11 +179,90 @@ function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, o
   );
 }
 
-function SectionTitle({ title, subtitle, align = 'left' }) {
+function SectionTitle({ title, subtitle, align = 'left', eyebrow, eyebrow_color, font_family, size }) {
+  if (eyebrow || (title && (title.includes('<') || title.includes('&lt;'))) || font_family) {
+    return (
+      <RichTextBlock
+        eyebrow={eyebrow}
+        eyebrow_color={eyebrow_color}
+        title={title}
+        subtitle={subtitle}
+        align={align}
+        font_family={font_family || 'heading'}
+        size={size || '3xl'}
+      />
+    );
+  }
   return (
-    <div className={`${align === 'center' ? 'text-center' : ''}`}>
-      <h2 className="font-heading font-black text-2xl sm:text-3xl">{title}</h2>
+    <div className={`py-4 ${align === 'center' ? 'text-center mx-auto' : ''}`}>
+      {eyebrow && (
+        <div
+          className="text-xs sm:text-sm uppercase font-extrabold tracking-[0.25em] mb-2"
+          style={{ color: eyebrow_color || 'var(--brand-main, #E8731A)' }}
+        >
+          {eyebrow}
+        </div>
+      )}
+      <h2 className="font-heading font-black text-2xl sm:text-3xl text-txt-primary" dangerouslySetInnerHTML={{ __html: title || '' }} />
       {subtitle && <p className="text-txt-secondary mt-1 text-sm sm:text-base">{subtitle}</p>}
+    </div>
+  );
+}
+
+function RichTextBlock({
+  eyebrow = '',
+  eyebrow_color = '#E8731A',
+  title = '',
+  html = '',
+  subtitle = '',
+  font_family = 'serif',
+  size = '3xl',
+  align = 'center',
+}) {
+  const content = html || title || '';
+  const alignClass = {
+    left: 'text-left',
+    center: 'text-center mx-auto',
+    right: 'text-right ml-auto',
+  }[align] || 'text-center mx-auto';
+
+  const fontClass = {
+    serif: 'font-serif',
+    heading: 'font-heading font-black',
+    sans: 'font-sans font-bold',
+  }[font_family] || 'font-serif';
+
+  const sizeClass = {
+    xl: 'text-xl sm:text-2xl',
+    '2xl': 'text-2xl sm:text-3xl',
+    '3xl': 'text-2xl sm:text-3xl md:text-4xl',
+    '4xl': 'text-3xl sm:text-4xl md:text-5xl',
+    '5xl': 'text-4xl sm:text-5xl md:text-6xl',
+  }[size] || 'text-2xl sm:text-3xl md:text-4xl';
+
+  return (
+    <div className={`py-5 sm:py-7 ${alignClass} max-w-4xl`} data-testid="rich-text-block">
+      {eyebrow && (
+        <div
+          className="text-xs sm:text-sm uppercase font-extrabold tracking-[0.25em] mb-2 sm:mb-2.5"
+          style={{ color: eyebrow_color || 'var(--brand-main, #E8731A)' }}
+        >
+          {eyebrow}
+        </div>
+      )}
+
+      {content && (
+        <h2
+          className={`${fontClass} ${sizeClass} text-txt-primary leading-tight tracking-tight`}
+          dangerouslySetInnerHTML={{ __html: content }}
+        />
+      )}
+
+      {subtitle && (
+        <p className="text-txt-secondary text-sm sm:text-base md:text-lg mt-2 sm:mt-3 leading-relaxed max-w-2xl mx-auto">
+          {subtitle}
+        </p>
+      )}
     </div>
   );
 }
@@ -216,29 +297,75 @@ function ProductGridBlock({ source = 'featured', category, product_ids, limit = 
   );
 }
 
-function CategoryGridBlock({ limit = 6 }) {
+function CategoryGridBlock({
+  limit = 16,
+  columns = 8,
+  show_all_button = true,
+  button_label = 'VER TODOS OS PRODUTOS >',
+  button_link = '/produtos',
+}) {
   const [cats, setCats] = useState([]);
   useEffect(() => {
     (async () => {
       try {
         const r = await api.get('/api/categories');
-        setCats((r.categories || r || []).slice(0, limit));
+        const list = r.categories || r || [];
+        setCats(limit && Number(limit) > 0 ? list.slice(0, Number(limit)) : list);
       } catch { /* silent */ }
     })();
   }, [limit]);
+
   if (!cats.length) return null;
+
+  const colsClass = {
+    4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
+    6: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6',
+    8: 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8',
+  }[columns] || 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8';
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-      {cats.map((c) => (
-        <Link
-          key={c.category_id || c.name}
-          to={`/loja?category=${encodeURIComponent(c.name)}`}
-          className="bg-white border border-border rounded-xl p-4 text-center hover:border-brand-main hover:shadow-md transition"
-        >
-          {c.image && <img src={c.image} alt={c.name} className="w-16 h-16 object-contain mx-auto mb-2" />}
-          <div className="font-bold text-sm">{c.name}</div>
-        </Link>
-      ))}
+    <div className="py-6 sm:py-8" data-testid="category-grid-block">
+      <div className={`grid ${colsClass} gap-3 sm:gap-4`}>
+        {cats.map((c) => {
+          const IconComponent = getIcon(c.icon || 'Sparkles');
+          const href = c.slug ? `/categoria/${c.slug}` : `/loja?category=${encodeURIComponent(c.name)}`;
+          return (
+            <Link
+              key={c.category_id || c.name}
+              to={href}
+              className="group bg-[#FFF9F5] hover:bg-[#FFF2E8] border border-orange-100/80 hover:border-brand-main/50 rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center text-center gap-2.5 min-h-[110px] transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+              data-testid={`category-card-${c.category_id || c.slug}`}
+            >
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white border border-orange-100/70 shadow-2xs flex items-center justify-center transition-transform group-hover:scale-110">
+                {c.icon_svg ? (
+                  <img
+                    src={c.icon_svg}
+                    alt={c.name}
+                    className="w-6 h-6 sm:w-7 sm:h-7 object-contain"
+                  />
+                ) : (
+                  <IconComponent className="w-5 h-5 sm:w-6 sm:h-6 text-brand-main stroke-[1.6]" />
+                )}
+              </div>
+              <span className="text-xs sm:text-[13px] font-bold text-txt-primary group-hover:text-brand-main line-clamp-2 leading-tight transition-colors">
+                {c.name}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
+      {show_all_button && (
+        <div className="mt-8 flex justify-center">
+          <Link
+            to={button_link || '/produtos'}
+            className="inline-flex items-center gap-2 bg-brand-main hover:bg-brand-dark text-white font-extrabold text-xs sm:text-sm px-8 py-3.5 rounded-full uppercase tracking-wider shadow-sm transition hover:scale-[1.02]"
+            data-testid="category-view-all-btn"
+          >
+            {button_label || 'VER TODOS OS PRODUTOS >'}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
