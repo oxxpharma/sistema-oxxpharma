@@ -11,6 +11,7 @@ import { useSiteSettings } from '../../hooks/useSiteSettings';
 import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibility';
 import { evaluateFreeShipping } from '../../lib/freeShipping';
 import FreeShippingProgress from '../../components/store/FreeShippingProgress';
+import TrustBar from '../../components/store/TrustBar';
 import SEOHead from '../../components/SEOHead';
 import { ShoppingCart, Minus, Plus, Loader2, ArrowLeft, Award, Check, MessageCircle, Star } from 'lucide-react';
 import { toast } from 'sonner';
@@ -391,6 +392,9 @@ export default function ProductDetails() {
               </a>
             );
           })()}
+
+          {/* Barra de Benefícios da Loja */}
+          <TrustBar variant="compact" />
 
           {/* Iter 61: campos personalizados (quadros) */}
           {Array.isArray(product.custom_fields) && product.custom_fields.length > 0 && (

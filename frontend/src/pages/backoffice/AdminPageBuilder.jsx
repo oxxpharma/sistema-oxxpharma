@@ -5,8 +5,9 @@ import { Input } from '../../components/ui/Input';
 import { toast } from 'sonner';
 import {
   Plus, Trash2, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
-  Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal,
+  Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck,
 } from 'lucide-react';
+import { ICON_KEYS, ICON_LABELS } from '../../lib/iconLibrary';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
 
 const BLOCK_LIBRARY = [
@@ -16,6 +17,7 @@ const BLOCK_LIBRARY = [
   { type: 'product_grid', label: 'Grade de produtos', icon: LayoutGrid, desc: 'Destaques, categoria, manuais' },
   { type: 'category_grid', label: 'Grade de categorias', icon: Tag, desc: 'Mosaico de categorias' },
   { type: 'cta_banner', label: 'Banner CTA', icon: Megaphone, desc: 'Chamada com botão' },
+  { type: 'trust_bar', label: 'Barra de Benefícios', icon: ShieldCheck, desc: 'Frete grátis, Pix, parcelamento, etc.' },
   { type: 'text', label: 'Bloco de texto', icon: FileText, desc: 'Texto/HTML livre' },
   { type: 'image', label: 'Imagem', icon: ImageIcon, desc: 'Imagem única (com link opcional)' },
   { type: 'divider', label: 'Divisor', icon: Minus, desc: 'Linha horizontal' },
@@ -36,6 +38,14 @@ const DEFAULT_PROPS = {
   product_grid: { source: 'featured', category: '', product_ids: '', limit: 8, columns: 4 },
   category_grid: { limit: 6 },
   cta_banner: { title: 'Frete grátis acima de R$ 199', subtitle: 'Em todo o Brasil', cta_label: 'Comprar agora', cta_link: '/loja', bg_color: '' },
+  trust_bar: {
+    use_store_settings: true,
+    items: [
+      { icon: 'Truck', title: 'Frete grátis', desc: 'Em compras acima de R$ 500,00' },
+      { icon: 'DollarSign', title: 'Desconto no Pix', desc: '3% Off' },
+      { icon: 'CreditCard', title: 'Parcelamento', desc: 'em até 6x sem juros' },
+    ],
+  },
   text: { html: '<p>Texto aqui...</p>', align: 'left' },
   image: { src: '', alt: '', link: '' },
   divider: {},
@@ -252,6 +262,7 @@ function summary(block) {
   if (block.type === 'category_grid') return `${p.limit || 6} categorias`;
   if (block.type === 'image') return p.src ? '✓ imagem' : '(sem imagem)';
   if (block.type === 'spacer') return `${p.height || 40}px`;
+  if (block.type === 'trust_bar') return p.use_store_settings ? 'Itens padrões da loja' : `${(p.items || []).length} benefício(s)`;
   return block.type;
 }
 
@@ -337,6 +348,8 @@ function BlockEditor({ block, onChange }) {
   if (t === 'spacer') return (
     <Input label="Altura (px)" type="number" value={p.height || 40} onChange={e => onChange({ height: parseInt(e.target.value) || 40 })} />
   );
+
+  if (t === 'trust_bar') return <TrustBarBlockEditor props={p} onChange={onChange} />;
 
   if (t === 'divider') return <div className="text-xs text-txt-secondary">Bloco sem propriedades. Apenas uma linha divisória.</div>;
 
@@ -505,6 +518,106 @@ function CarouselEditor({ props, onChange }) {
           <Plus className="w-4 h-4" /> Adicionar slide
         </Button>
       </div>
+    </div>
+  );
+}
+function TrustBarBlockEditor({ props, onChange }) {
+  const items = Array.isArray(props.items) ? props.items : [];
+  const useStore = props.use_store_settings ?? true;
+
+  const updateItem = (index, patch) => {
+    const next = [...items];
+    next[index] = { ...next[index], ...patch };
+    onChange({ items: next, use_store_settings: false });
+  };
+
+  const addItem = () => {
+    if (items.length >= 6) return;
+    const next = [...items, { icon: 'Star', title: 'Novo Benefício', desc: 'Descrição curta' }];
+    onChange({ items: next, use_store_settings: false });
+  };
+
+  const removeItem = (index) => {
+    const next = items.filter((_, i) => i !== index);
+    onChange({ items: next, use_store_settings: false });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={useStore}
+            onChange={(e) => onChange({ use_store_settings: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          Usar benefícios configurados na loja (Aparência)
+        </label>
+        <p className="text-[11px] text-txt-secondary leading-relaxed">
+          {useStore
+            ? 'Este bloco exibirá automaticamente os itens de benefícios configurados globalmente no menu Aparência da loja.'
+            : 'Personalize os itens de benefícios exclusivamente para esta seção abaixo.'}
+        </p>
+      </div>
+
+      {!useStore && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-txt-secondary uppercase tracking-wider">Itens de Benefício ({items.length}/6)</span>
+            {items.length < 6 && (
+              <Button size="sm" variant="outline" onClick={addItem} className="text-xs h-7 gap-1">
+                <Plus className="w-3.5 h-3.5" /> Adicionar
+              </Button>
+            )}
+          </div>
+
+          {items.map((it, idx) => (
+            <div key={idx} className="p-3 border border-border rounded-xl bg-white space-y-2 relative group">
+              <div className="flex items-center justify-between pb-1 border-b border-gray-100">
+                <span className="text-xs font-bold text-brand-main">Benefício #{idx + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => removeItem(idx)}
+                  className="p-1 text-gray-400 hover:text-red-500 rounded transition"
+                  title="Remover"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-txt-secondary block mb-1">Ícone</label>
+                <select
+                  value={it.icon || 'Truck'}
+                  onChange={(e) => updateItem(idx, { icon: e.target.value })}
+                  className="w-full px-2.5 py-1.5 border border-border rounded-lg text-xs bg-white"
+                >
+                  {ICON_KEYS.map((k) => (
+                    <option key={k} value={k}>
+                      {ICON_LABELS[k] || k}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <Input
+                label="Título"
+                value={it.title || ''}
+                onChange={(e) => updateItem(idx, { title: e.target.value })}
+                placeholder="Ex: Frete Grátis"
+              />
+
+              <Input
+                label="Descrição"
+                value={it.desc || ''}
+                onChange={(e) => updateItem(idx, { desc: e.target.value })}
+                placeholder="Ex: Em compras acima de R$ 500"
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

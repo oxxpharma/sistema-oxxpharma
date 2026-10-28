@@ -3,33 +3,15 @@ import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, Instagram, Facebook, Youtube, MessageCircle } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import BrandLogo from '../branding/BrandLogo';
-import { getIcon } from '../../lib/iconLibrary';
 
-const DEFAULT_TRUST = [
-  { icon: 'Truck', title: 'Entrega rápida', desc: 'Receba em todo Brasil' },
-  { icon: 'ShieldCheck', title: 'Compra segura', desc: 'Dados 100% protegidos' },
-  { icon: 'CreditCard', title: 'Parcele em até 6x', desc: 'Cartão, PIX ou boleto' },
-];
 
 export default function StoreFooter() {
   const s = useSiteSettings();
   const storeName = s?.store_name || 'OxxPharma';
   const footerPages = s?.footer_pages || [];
-  const trustEnabled = s?.trust_bar_enabled !== false;
-  const trustItems = (s?.trust_items && s.trust_items.length > 0) ? s.trust_items : DEFAULT_TRUST;
 
   return (
     <footer className="bg-white border-t border-border mt-16" data-testid="store-footer">
-      {/* Trust strip */}
-      {trustEnabled && trustItems.length > 0 && (
-        <div className="border-b border-border">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {trustItems.slice(0, 6).map((it, i) => (
-              <TrustItem key={i} icon={getIcon(it.icon)} title={it.title} desc={it.desc} />
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 grid grid-cols-1 md:grid-cols-4 gap-8">
         <div>
@@ -90,19 +72,7 @@ export default function StoreFooter() {
   );
 }
 
-function TrustItem({ icon: Icon, title, desc }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-lg bg-brand-light flex items-center justify-center">
-        <Icon className="w-5 h-5 text-brand-main" />
-      </div>
-      <div>
-        <div className="text-sm font-bold text-txt-primary">{title}</div>
-        <div className="text-xs text-txt-secondary">{desc}</div>
-      </div>
-    </div>
-  );
-}
+
 
 function SocialLink({ href, icon: Icon }) {
   return (

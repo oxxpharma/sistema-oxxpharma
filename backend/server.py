@@ -810,7 +810,7 @@ async def admin_set_brands_unified(request: Request, user: dict = Depends(requir
 
 VALID_BLOCK_TYPES = {"hero", "hero_carousel", "section_title", "product_grid",
                      "category_grid", "text", "image", "cta_banner", "divider", "html",
-                     "spacer"}
+                     "spacer", "trust_bar", "benefits"}
 
 
 def _default_home_blocks() -> list:

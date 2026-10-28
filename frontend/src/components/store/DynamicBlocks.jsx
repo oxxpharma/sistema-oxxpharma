@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import ProductCard from './ProductCard';
+import TrustBar from './TrustBar';
 
 /**
  * Renderiza blocos dinamicos definidos no Page Builder.
@@ -30,6 +31,7 @@ function BlockRouter({ block }) {
   if (t === 'text') return <TextBlock {...p} />;
   if (t === 'image') return <ImageBlock {...p} />;
   if (t === 'cta_banner') return <CtaBanner {...p} />;
+  if (t === 'trust_bar' || t === 'benefits') return <TrustBarBlock {...p} />;
   if (t === 'divider') return <hr className="border-border my-8" />;
   if (t === 'spacer') return <div style={{ height: `${p.height || 40}px` }} />;
   if (t === 'html') return <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: p.html || '' }} />;
@@ -255,4 +257,7 @@ function CtaBanner({ title, subtitle, cta_label, cta_link, bg_color }) {
       )}
     </div>
   );
+}
+function TrustBarBlock({ items, use_store_settings = true }) {
+  return <TrustBar items={items} use_store_settings={use_store_settings} variant="horizontal" />;
 }
