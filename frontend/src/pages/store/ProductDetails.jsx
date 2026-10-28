@@ -378,14 +378,16 @@ export default function ProductDetails() {
               .replace(/\{product_url\}/g, publicUrl);
             const href = `https://wa.me/${rawNum}?text=${encodeURIComponent(msg)}`;
             return (
-              <a
+               
+			  
+			  <a
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-3 flex items-center justify-center gap-2 w-full bg-[#25D366] hover:bg-[#20b358] text-white font-bold rounded-lg py-3 transition"
+                className="mt-3 flex items-center justify-center gap-2 w-full font-bold py-3 transition"
                 data-testid="whatsapp-buy-btn"
               >
-                <MessageCircle className="w-5 h-5" /> Comprar pelo WhatsApp
+                Ou se preferir <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true"><path fill="#25D366" d="M16 0a16 16 0 00-13.66 24.41L0 32l7.78-2.3A16 16 0 1016 0z"></path><path fill="#fff" d="M23.6 19.27c-.39-.2-2.3-1.13-2.66-1.26-.36-.13-.62-.2-.88.2-.26.39-1.01 1.26-1.24 1.52-.23.26-.46.29-.85.1-2.32-1.16-3.84-2.07-5.37-4.69-.4-.7.4-.64 1.16-2.13.13-.26.06-.49-.03-.68-.1-.2-.88-2.12-1.2-2.9-.32-.76-.64-.66-.88-.67h-.75c-.26 0-.68.1-1.04.49-.36.39-1.36 1.33-1.36 3.24s1.4 3.76 1.59 4.02c.2.26 2.74 4.18 6.64 5.86.93.4 1.65.64 2.21.82.93.3 1.78.25 2.45.15.75-.11 2.3-.94 2.62-1.84.32-.91.32-1.68.23-1.84-.1-.16-.36-.26-.75-.46z"></path></svg> Compre pelo WhatsApp
               </a>
             );
           })()}
