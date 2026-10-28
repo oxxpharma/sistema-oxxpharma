@@ -9145,6 +9145,85 @@ async def public_site_settings(request: Request):
     return out
 
 
+@app.get("/api/site-settings/logo")
+@app.get("/api/site-settings/logo.png")
+async def public_site_logo(request: Request):
+    """Retorna os bytes da logo configurada no site-settings como imagem binária (PNG/JPEG)
+    para exibição pública em e-mails e páginas externas."""
+    import base64
+    db = request.app.db
+    tid = tenant_service.get_tenant(request)
+    s = await _get_site_settings(db, tid)
+    logo_data = (s.get("logo_url") or "").strip()
+
+    if logo_data.startswith("data:image/"):
+        try:
+            header, b64 = logo_data.split(",", 1)
+            media_type = "image/png"
+            if ";" in header and ":" in header:
+                media_type = header.split(":")[1].split(";")[0]
+            img_bytes = base64.b64decode(b64)
+            return Response(
+                content=img_bytes,
+                media_type=media_type,
+                headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"}
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao decodificar logo base64: {e}")
+
+    if logo_data.startswith(("http://", "https://")):
+        return RedirectResponse(url=logo_data, status_code=302)
+
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(curr_dir)
+    for fallback_path in [
+        os.path.join(curr_dir, "uploads", "branding", "logo.png"),
+        os.path.join(parent_dir, "frontend", "public", "logo.png"),
+        os.path.join(parent_dir, "frontend", "build", "logo.png"),
+        "/var/www/oxxpharma/frontend/build/logo.png"
+    ]:
+        if os.path.isfile(fallback_path):
+            with open(fallback_path, "rb") as f:
+                return Response(
+                    content=f.read(),
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"}
+                )
+
+    raise HTTPException(status_code=404, detail="Logo não configurada")
+
+
+@app.get("/api/site-settings/logo-dark")
+@app.get("/api/site-settings/logo-dark.png")
+async def public_site_logo_dark(request: Request):
+    """Retorna os bytes da logo versão escura configurada no site-settings."""
+    import base64
+    db = request.app.db
+    tid = tenant_service.get_tenant(request)
+    s = await _get_site_settings(db, tid)
+    logo_data = (s.get("logo_dark_url") or s.get("logo_url") or "").strip()
+
+    if logo_data.startswith("data:image/"):
+        try:
+            header, b64 = logo_data.split(",", 1)
+            media_type = "image/png"
+            if ";" in header and ":" in header:
+                media_type = header.split(":")[1].split(";")[0]
+            img_bytes = base64.b64decode(b64)
+            return Response(
+                content=img_bytes,
+                media_type=media_type,
+                headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"}
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao decodificar logo_dark base64: {e}")
+
+    if logo_data.startswith(("http://", "https://")):
+        return RedirectResponse(url=logo_data, status_code=302)
+
+    raise HTTPException(status_code=404, detail="Logo escura não configurada")
+
+
 @app.get("/api/admin/site-settings")
 async def admin_get_site_settings(request: Request, user: dict = Depends(require_admin())):
     """Iter 44: GET admin retorna settings da marca selecionada (via X-Tenant ou ?tenant=).

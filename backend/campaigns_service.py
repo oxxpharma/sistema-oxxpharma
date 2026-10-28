@@ -177,8 +177,10 @@ async def run_all_campaigns(db) -> Dict[str, Any]:
     total_dispatched = 0
     errors = []
 
-    app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or "https://oxxpharma.com"
+    app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or "https://oxxpharma.com.br"
     app_url = app_url.rstrip("/")
+    if "localhost" in app_url:
+        app_url = "https://oxxpharma.com.br"
 
     for camp in campaigns:
         camp_id = camp["campaign_id"]
@@ -562,7 +564,7 @@ def register_campaigns_routes(app, deps: Dict[str, Any]):
         if not camp:
             raise HTTPException(status_code=404, detail="Campanha não encontrada")
 
-        app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or "https://oxxpharma.com"
+        app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or "https://oxxpharma.com.br"
         app_url = app_url.rstrip("/")
 
         # Amostra de produto para o teste

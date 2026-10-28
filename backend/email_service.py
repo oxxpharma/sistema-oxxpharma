@@ -59,7 +59,7 @@ async def wrap_email_html(db, inner_html: str) -> str:
     s = await _get_site_settings(db)
 
     store_name = (s.get("store_name") or "OxxPharma").strip()
-    logo_url = (s.get("logo_url") or "").strip()
+    raw_logo_url = (s.get("logo_url") or "").strip()
     sizes = s.get("logo_sizes") or {}
     header_cfg = sizes.get("email_header") or {"height": 48, "max_width": 200}
     footer_cfg = sizes.get("email_footer") or {"height": 32, "max_width": 140}
@@ -67,17 +67,30 @@ async def wrap_email_html(db, inner_html: str) -> str:
     app_url = ""
     try:
         import os
-        app_url = os.environ.get("APP_URL") or os.environ.get("BACKEND_URL") or ""
+        app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or os.environ.get("BACKEND_URL") or ""
     except Exception:
         pass
-    app_url = app_url.rstrip("/") or "#"
+    app_url = app_url.rstrip("/")
+    if not app_url or app_url == "#" or "localhost" in app_url:
+        app_url = "https://oxxpharma.com.br"
+
+    # Define URL da imagem da logo para o e-mail
+    if raw_logo_url.startswith(("http://", "https://")):
+        logo_img_url = raw_logo_url
+    elif raw_logo_url:
+        # Logo salva no admin (base64) -> rota pública binária
+        logo_img_url = f"{app_url}/api/site-settings/logo"
+    else:
+        # Fallback estático
+        logo_img_url = f"{app_url}/logo.png"
 
     # Topo
-    if logo_url and logo_url.startswith(("http://", "https://")):
+    if logo_img_url:
         header_html = (
-            f'<a href="{app_url}" style="text-decoration:none;display:inline-block;">'
-            f'<img src="{logo_url}" alt="{store_name}" '
-            f'style="height:{int(header_cfg.get("height", 48))}px;max-width:{int(header_cfg.get("max_width", 200))}px;object-fit:contain;display:block;" />'
+            f'<a href="{app_url}" style="text-decoration:none;display:inline-block;" target="_blank">'
+            f'<img src="{logo_img_url}" alt="{store_name}" '
+            f'height="{int(header_cfg.get("height", 48))}" '
+            f'style="height:{int(header_cfg.get("height", 48))}px;max-width:{int(header_cfg.get("max_width", 200))}px;width:auto;object-fit:contain;display:block;border:0;outline:none;" />'
             f'</a>'
         )
     else:
@@ -87,11 +100,14 @@ async def wrap_email_html(db, inner_html: str) -> str:
         )
 
     # Rodape
-    if logo_url and logo_url.startswith(("http://", "https://")):
+    if logo_img_url:
         footer_brand = (
-            f'<img src="{logo_url}" alt="{store_name}" '
-            f'style="height:{int(footer_cfg.get("height", 32))}px;max-width:{int(footer_cfg.get("max_width", 140))}px;'
-            f'object-fit:contain;display:inline-block;vertical-align:middle;" />'
+            f'<a href="{app_url}" style="text-decoration:none;display:inline-block;" target="_blank">'
+            f'<img src="{logo_img_url}" alt="{store_name}" '
+            f'height="{int(footer_cfg.get("height", 32))}" '
+            f'style="height:{int(footer_cfg.get("height", 32))}px;max-width:{int(footer_cfg.get("max_width", 140))}px;width:auto;'
+            f'object-fit:contain;display:inline-block;vertical-align:middle;border:0;outline:none;" />'
+            f'</a>'
         )
     else:
         footer_brand = (

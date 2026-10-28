@@ -13,7 +13,7 @@ import uuid
 import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query, Response
 from pydantic import BaseModel, EmailStr, Field
