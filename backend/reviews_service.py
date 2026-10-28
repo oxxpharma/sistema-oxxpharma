@@ -83,11 +83,40 @@ def register_reviews_routes(app, deps: Dict[str, Any]):
                 verified_purchase = True
         elif user and user.get("user_id"):
             has_order = await db.orders.find_one(
-                {"user_id": user["user_id"], "status": {"$in": ["paid", "delivered", "shipped", "completed"]}, "items.product_id": real_pid},
+                {"user_id": user["user_id"], "status": {"$in": ["paid", "delivered", "shipped", "completed", "available_for_pickup", "separating"]}, "items.product_id": real_pid},
                 {"_id": 0, "order_id": 1}
             )
             if has_order:
                 verified_purchase = True
+                order_id = has_order["order_id"]
+
+        # EXCLUSIVO PARA COMPRADORES: Nao permite avaliacao sem compra comprovada
+        if not verified_purchase:
+            raise HTTPException(
+                status_code=403,
+                detail="Apenas clientes que compraram este produto podem avaliá-lo."
+            )
+
+        # Se ja existir avaliacao para este pedido + produto, atualiza ao inves de duplicar
+        if order_id:
+            existing = await db.reviews.find_one({"product_id": real_pid, "order_id": order_id})
+            if existing:
+                await db.reviews.update_one(
+                    {"review_id": existing["review_id"]},
+                    {"$set": {
+                        "rating": rating,
+                        "comment": comment,
+                        "user_name": user_name,
+                        "user_email": user_email,
+                        "status": "pending",
+                        "updated_at": now_iso(),
+                    }}
+                )
+                return {
+                    "ok": True,
+                    "review_id": existing["review_id"],
+                    "message": "Sua avaliação foi atualizada e será publicada após a aprovação do moderador."
+                }
 
         review_id = f"rev_{uuid.uuid4().hex[:12]}"
         review_doc = {
@@ -127,11 +156,20 @@ def register_reviews_routes(app, deps: Dict[str, Any]):
         for it in items:
             pid = it.get("product_id")
             prod = await db.products.find_one({"product_id": pid}, {"_id": 0, "name": 1, "images": 1, "slug": 1})
+            # Verifica se este produto ja foi avaliado neste pedido
+            existing_rev = await db.reviews.find_one(
+                {"order_id": order_id, "product_id": pid},
+                {"_id": 0, "rating": 1, "comment": 1, "status": 1}
+            )
             enriched_items.append({
                 "product_id": pid,
                 "name": (prod.get("name") if prod else None) or it.get("name") or it.get("product_name"),
                 "image": (prod.get("images") or [None])[0] if prod else None,
                 "slug": prod.get("slug") if prod else None,
+                "already_reviewed": bool(existing_rev),
+                "existing_rating": existing_rev.get("rating") if existing_rev else None,
+                "existing_comment": existing_rev.get("comment") if existing_rev else None,
+                "existing_status": existing_rev.get("status") if existing_rev else None,
             })
 
         user_name = order.get("customer_name") or order.get("shipping_address", {}).get("name") or ""

@@ -545,6 +545,70 @@ def register_campaigns_routes(app, deps: Dict[str, Any]):
             raise HTTPException(status_code=404, detail="Campanha não encontrada")
         return {"ok": True, "deleted": campaign_id}
 
+    @router.post("/{campaign_id}/test")
+    async def send_test_campaign_email(
+        request: Request,
+        campaign_id: str,
+        user: dict = Depends(require_admin()),
+    ):
+        """Envia um email de teste da campanha para o endereço fornecido pelo admin."""
+        db = request.app.db
+        body = await request.json()
+        target_email = (body.get("email") or user.get("email") or "").strip()
+        if not target_email or "@" not in target_email:
+            raise HTTPException(status_code=400, detail="Informe um endereço de e-mail válido para o teste")
+
+        camp = await db.email_campaigns.find_one({"campaign_id": campaign_id}, {"_id": 0})
+        if not camp:
+            raise HTTPException(status_code=404, detail="Campanha não encontrada")
+
+        app_url = os.environ.get("APP_URL") or os.environ.get("FRONTEND_URL") or "https://oxxpharma.com"
+        app_url = app_url.rstrip("/")
+
+        # Amostra de produto para o teste
+        sample_prod = await db.products.find_one({"active": True}, {"_id": 0, "name": 1, "images": 1, "slug": 1})
+        sample_pname = (sample_prod.get("name") if sample_prod else None) or "Ozoxx SPA Corpo 60ml"
+        sample_slug = (sample_prod.get("slug") if sample_prod else None) or "produto-exemplo"
+        sample_img = ((sample_prod.get("images") or []) if sample_prod else [None])[0]
+
+        subject = (camp.get("subject") or "").replace("{customer_name}", "Cliente (Teste)").replace("{product_name}", sample_pname).replace("{store_name}", "OxxPharma")
+        headline = (camp.get("headline") or "").replace("{customer_name}", "Cliente (Teste)").replace("{product_name}", sample_pname)
+        body_txt = (camp.get("body_text") or "").replace("{customer_name}", "Cliente (Teste)").replace("{product_name}", sample_pname).replace("{coupon_code}", camp.get("coupon_code") or "PROMO10").replace("{store_name}", "OxxPharma")
+
+        if camp.get("type") == "days_after_purchase":
+            cta_url = f"{app_url}/avaliar/EXEMPLO-12345"
+        elif camp.get("type") == "consumption_time":
+            cta_url = f"{app_url}/produto/{sample_slug}"
+        else:
+            cta_url = app_url
+
+        inner_html = render_campaign_email_html(
+            headline=headline,
+            body_text=body_txt,
+            cta_text=camp.get("cta_text") or "Acessar Loja",
+            cta_url=cta_url,
+            coupon_code=camp.get("coupon_code"),
+            product_image=sample_img if camp.get("type") == "consumption_time" else None,
+        )
+        full_html = await email_service.wrap_email_html(db, inner_html)
+
+        res = await email_service.send_email(
+            db,
+            to=target_email,
+            subject=f"[TESTE] {subject}",
+            html=full_html,
+            meta={"is_test": True, "campaign_id": campaign_id}
+        )
+
+        if not res.get("sent"):
+            reason = res.get("reason")
+            raise HTTPException(status_code=400, detail=f"Falha ao enviar email de teste ({reason}). Verifique a chave de API do Resend em Configurações.")
+
+        return {
+            "ok": True,
+            "message": f"Email de teste enviado com sucesso para {target_email}!"
+        }
+
     @router.post("/run")
     async def execute_campaigns_now(request: Request, user: dict = Depends(require_admin())):
         """Dispara a execução imediata das campanhas."""

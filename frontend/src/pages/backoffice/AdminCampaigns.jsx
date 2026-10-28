@@ -38,6 +38,12 @@ export default function AdminCampaigns() {
   const [logsSearch, setLogsSearch] = useState('');
   const [logsCampFilter, setLogsCampFilter] = useState('all');
 
+  // Modal de envio de teste
+  const [showTestModal, setShowTestModal] = useState(false);
+  const [testCamp, setTestCamp] = useState(null);
+  const [testEmail, setTestEmail] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
+
   // Modal de edição / criação
   const [showModal, setShowModal] = useState(false);
   const [editingCamp, setEditingCamp] = useState(null);
@@ -120,6 +126,32 @@ export default function AdminCampaigns() {
       loadCampaigns();
     } catch (err) {
       toast.error(err.message || 'Erro ao atualizar campanha');
+    }
+  };
+
+  const openTestModal = (camp) => {
+    setTestCamp(camp);
+    setShowTestModal(true);
+  };
+
+  const handleSendTestEmail = async (e) => {
+    e.preventDefault();
+    if (!testCamp) return;
+    if (!testEmail.trim() || !testEmail.includes('@')) {
+      toast.error('Informe um e-mail de destino válido para o teste');
+      return;
+    }
+    setSendingTest(true);
+    try {
+      const res = await api.post(`/api/admin/campaigns/${testCamp.campaign_id}/test`, {
+        email: testEmail.trim(),
+      });
+      toast.success(res.message || `E-mail de teste enviado com sucesso para ${testEmail}!`);
+      setShowTestModal(false);
+    } catch (err) {
+      toast.error(err.message || 'Erro ao enviar e-mail de teste');
+    } finally {
+      setSendingTest(false);
     }
   };
 
@@ -397,6 +429,17 @@ export default function AdminCampaigns() {
                     >
                       {camp.active ? 'Pausar' : 'Ativar'}
                     </button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openTestModal(camp)}
+                      className="text-xs h-8 px-2.5 gap-1 text-brand-main border-brand-main/30 hover:bg-brand-main/10"
+                      title="Disparar email de teste"
+                      data-testid={`test-campaign-${camp.campaign_id}`}
+                    >
+                      <Send className="w-3.5 h-3.5" /> Enviar Teste
+                    </Button>
 
                     <Button
                       size="sm"
@@ -684,6 +727,67 @@ export default function AdminCampaigns() {
                 </Button>
                 <Button type="submit" loading={savingCamp}>
                   Salvar Campanha
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Disparar E-mail de Teste */}
+      {showTestModal && testCamp && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-border w-full max-w-md p-6 shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-border mb-4">
+              <h3 className="font-heading font-black text-lg text-txt-primary flex items-center gap-2">
+                <Send className="w-5 h-5 text-brand-main" />
+                Disparar E-mail de Teste
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowTestModal(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSendTestEmail} className="space-y-4">
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-xs space-y-1">
+                <div>
+                  <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">Campanha:</span>{' '}
+                  <span className="font-semibold text-txt-primary">{testCamp.name}</span>
+                </div>
+                <div>
+                  <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">Assunto:</span>{' '}
+                  <span className="text-gray-800">{testCamp.subject}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-txt-secondary uppercase tracking-wider mb-1.5">
+                  E-mail de Destino para o Teste*
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={testEmail}
+                  onChange={(e) => setTestEmail(e.target.value)}
+                  placeholder="exemplo@oxxpharma.com ou seu email"
+                  className="w-full px-3.5 py-2.5 border border-border rounded-xl text-sm focus:outline-hidden focus:border-brand-main"
+                  autoFocus
+                />
+                <p className="text-[11px] text-txt-secondary mt-1.5 leading-relaxed">
+                  O e-mail será enviado em tempo real via Resend com dados ilustrativos para você conferir a formatação visual e os links antes de colocar em produção.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-border">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowTestModal(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" loading={sendingTest} className="gap-2">
+                  <Send className="w-3.5 h-3.5" /> Enviar Teste Agora
                 </Button>
               </div>
             </form>

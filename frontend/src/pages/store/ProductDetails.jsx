@@ -12,7 +12,7 @@ import { canSeeProductPoints, formatPointsLabel } from '../../lib/pointsVisibili
 import { evaluateFreeShipping } from '../../lib/freeShipping';
 import FreeShippingProgress from '../../components/store/FreeShippingProgress';
 import SEOHead from '../../components/SEOHead';
-import { ShoppingCart, Minus, Plus, Loader2, ArrowLeft, Award, Check, MessageCircle, Star, X } from 'lucide-react';
+import { ShoppingCart, Minus, Plus, Loader2, ArrowLeft, Award, Check, MessageCircle, Star } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PLACEHOLDER = 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=800';
@@ -35,16 +35,8 @@ export default function ProductDetails() {
   const containerRef = useRef(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
-  // Reviews
+  // Reviews (exclusivo para visualizacao de avaliacoes aprovadas)
   const [reviewsData, setReviewsData] = useState({ reviews: [], average: 5, count: 0 });
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const [submittingReview, setSubmittingReview] = useState(false);
-  const [reviewForm, setReviewForm] = useState({
-    rating: 5,
-    comment: '',
-    user_name: user?.name || '',
-    user_email: user?.email || '',
-  });
 
   const images = (product?.images && product.images.length > 0) ? product.images : [PLACEHOLDER];
 
@@ -84,29 +76,7 @@ export default function ProductDetails() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [images.length]);
 
-  const handleSendReview = async (e) => {
-    e.preventDefault();
-    if (!reviewForm.comment.trim() || !reviewForm.user_name.trim()) {
-      toast.error('Preencha seu nome e seu comentário');
-      return;
-    }
-    setSubmittingReview(true);
-    try {
-      const res = await api.post(`/api/products/${product.product_id}/reviews`, {
-        rating: reviewForm.rating,
-        comment: reviewForm.comment.trim(),
-        user_name: reviewForm.user_name.trim(),
-        user_email: reviewForm.user_email || (user?.email || ''),
-      });
-      toast.success(res.message || 'Avaliação enviada com sucesso! Ficará visível após moderação.');
-      setShowReviewModal(false);
-      setReviewForm({ rating: 5, comment: '', user_name: user?.name || '', user_email: user?.email || '' });
-    } catch (err) {
-      toast.error(err.message || 'Erro ao enviar avaliação');
-    } finally {
-      setSubmittingReview(false);
-    }
-  };
+
 
   useEffect(() => {
     (async () => {
@@ -436,7 +406,7 @@ export default function ProductDetails() {
         </div>
       </div>
 
-            {/* SEÇÃO DE REVIEWS (Avaliações dos Clientes) */}
+      {/* SEÇÃO DE REVIEWS (Avaliações dos Compradores) */}
       <section className="mt-12 bg-white rounded-2xl border border-border p-6 md:p-8 shadow-xs" data-testid="product-reviews-section">
         <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
           <div>
@@ -463,28 +433,19 @@ export default function ProductDetails() {
                   ))}
                 </div>
                 <span className="font-bold text-sm text-txt-primary">{reviewsData.average.toFixed(1)}</span>
-                <span className="text-xs text-txt-secondary">com base em {reviewsData.count} avaliação{reviewsData.count > 1 ? 'ões' : ''}</span>
+                <span className="text-xs text-txt-secondary">com base em {reviewsData.count} avaliação{reviewsData.count > 1 ? 'ões' : ''} de compradores verificados</span>
               </div>
             ) : (
-              <p className="text-xs text-txt-secondary mt-1">Este produto ainda não possui avaliações públicas.</p>
+              <p className="text-xs text-txt-secondary mt-1">Avaliações exclusivas de clientes que compraram este produto.</p>
             )}
           </div>
-
-          <Button
-            variant="outline"
-            onClick={() => setShowReviewModal(true)}
-            className="gap-2 text-xs h-9"
-            data-testid="leave-review-btn"
-          >
-            <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> Deixar uma avaliação
-          </Button>
         </div>
 
         {reviewsData.reviews.length === 0 ? (
           <div className="text-center py-10 bg-gray-50/70 rounded-xl border border-dashed border-gray-200">
             <Star className="w-8 h-8 text-gray-300 mx-auto mb-2" />
             <p className="text-sm text-txt-secondary font-medium">Ainda não há avaliações publicadas para este produto.</p>
-            <p className="text-xs text-gray-400 mt-0.5">Seja o primeiro a avaliar após receber seu pedido!</p>
+            <p className="text-xs text-gray-400 mt-0.5">As avaliações são enviadas exclusivamente por clientes que compraram este item.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -522,93 +483,6 @@ export default function ProductDetails() {
           </div>
         )}
       </section>
-
-      {/* Modal Deixar Avaliação */}
-      {showReviewModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-border w-full max-w-lg p-6 shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-border mb-4">
-              <h3 className="font-heading font-black text-lg text-txt-primary flex items-center gap-2">
-                <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-                Avaliar {product?.name}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowReviewModal(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSendReview} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">
-                  Sua Nota (1 a 5 estrelas)
-                </label>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setReviewForm({ ...reviewForm, rating: s })}
-                      className="p-1 hover:scale-110 transition-transform"
-                    >
-                      <Star
-                        className={`w-7 h-7 ${
-                          s <= reviewForm.rating
-                            ? 'text-amber-400 fill-amber-400'
-                            : 'text-gray-300'
-                        }`}
-                      />
-                    </button>
-                  ))}
-                  <span className="ml-2 text-xs font-bold text-amber-600">
-                    {reviewForm.rating}/5
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-txt-secondary uppercase tracking-wider mb-1.5">
-                  Seu Nome*
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={reviewForm.user_name}
-                  onChange={(e) => setReviewForm({ ...reviewForm, user_name: e.target.value })}
-                  placeholder="Seu nome ou apelido"
-                  className="w-full px-3.5 py-2.5 border border-border rounded-xl text-sm focus:outline-hidden focus:border-brand-main"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-txt-secondary uppercase tracking-wider mb-1.5">
-                  Seu Depoimento sobre o Produto*
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  value={reviewForm.comment}
-                  onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
-                  placeholder="Conte o que achou da fórmula, benefícios notados, sabor, facilidade de uso, etc..."
-                  className="w-full px-3.5 py-2.5 border border-border rounded-xl text-sm focus:outline-hidden focus:border-brand-main"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowReviewModal(false)}>
-                  Cancelar
-                </Button>
-                <Button type="submit" size="sm" loading={submittingReview}>
-                  Enviar Avaliação
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {related.length > 0 && (
         <section className="mt-10">

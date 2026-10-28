@@ -4,7 +4,7 @@ import { api } from '../../lib/api';
 import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Package, ShoppingBag, ArrowRight, Loader2 } from 'lucide-react';
+import { Package, ShoppingBag, ArrowRight, Loader2, Star } from 'lucide-react';
 
 const STATUS_LABELS = {
   pending: { label: 'Aguardando pagamento', variant: 'warning' },
@@ -35,7 +35,9 @@ export default function MyOrders() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8" data-testid="my-orders">
-      <h1 className="font-heading font-black text-3xl text-txt-primary mb-6 flex items-center gap-3"><Package className="w-7 h-7 text-brand-main" /> Meus pedidos</h1>
+      <h1 className="font-heading font-black text-3xl text-txt-primary mb-6 flex items-center gap-3">
+        <Package className="w-7 h-7 text-brand-main" /> Meus pedidos
+      </h1>
       {orders.length === 0 ? (
         <div className="bg-white rounded-xl border border-border p-12 text-center">
           <ShoppingBag className="w-12 h-12 mx-auto text-txt-secondary mb-3" />
@@ -46,21 +48,49 @@ export default function MyOrders() {
         <div className="space-y-3">
           {orders.map(o => {
             const s = STATUS_LABELS[o.order_status] || STATUS_LABELS.pending;
+            const canReview = ['paid', 'separating', 'shipped', 'available_for_pickup', 'delivered', 'completed'].includes(o.order_status);
+
             return (
-              <Link key={o.order_id} to={`/pedido/${o.order_id}`} className="block bg-white rounded-xl border border-border p-5 hover:border-brand-main/40 hover:shadow-md transition" data-testid={`order-${o.order_id}`}>
-                <div className="flex items-center justify-between flex-wrap gap-3">
+              <div
+                key={o.order_id}
+                className="bg-white rounded-xl border border-border p-5 hover:border-brand-main/40 hover:shadow-xs transition"
+                data-testid={`order-${o.order_id}`}
+              >
+                <div className="flex items-center justify-between flex-wrap gap-4">
                   <div>
-                    <div className="text-xs text-txt-secondary">Pedido #{o.order_id.slice(-8).toUpperCase()}</div>
+                    <div className="text-xs text-txt-secondary font-mono">Pedido #{o.order_id.slice(-8).toUpperCase()}</div>
                     <div className="text-sm font-semibold mt-0.5">{formatDateTime(o.created_at)}</div>
-                    <div className="text-xs text-txt-secondary mt-1">{o.items?.length || 0} itens</div>
+                    <div className="text-xs text-txt-secondary mt-1">
+                      {o.items?.length || 0} {o.items?.length === 1 ? 'item' : 'itens'}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
+
+                  <div className="flex items-center gap-4 flex-wrap">
                     <Badge variant={s.variant}>{s.label}</Badge>
                     <div className="font-heading font-black text-lg text-txt-primary">{formatCurrency(o.total)}</div>
-                    <ArrowRight className="w-4 h-4 text-txt-secondary" />
+
+                    <div className="flex items-center gap-2">
+                      {canReview && (
+                        <Link
+                          to={`/avaliar/${o.order_id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition shadow-2xs"
+                          data-testid={`review-order-${o.order_id}`}
+                        >
+                          <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                          Avaliar
+                        </Link>
+                      )}
+
+                      <Link
+                        to={`/pedido/${o.order_id}`}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-txt-secondary hover:text-brand-main hover:bg-gray-50 border border-transparent hover:border-gray-200 transition"
+                      >
+                        Ver detalhes <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>
