@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { toast } from 'sonner';
 import {
   Plus, Trash2, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
-  Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck,
+  Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck, Layers,
 } from 'lucide-react';
 import { ICON_KEYS, ICON_LABELS } from '../../lib/iconLibrary';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
@@ -16,7 +16,8 @@ const BLOCK_LIBRARY = [
   { type: 'section_title', label: 'Título de Seção', icon: Type, desc: 'Cabeçalho com subtítulo' },
   { type: 'rich_text', label: 'Texto / Título Rico', icon: Type, desc: 'Título com tag, cores variadas e estilos na mesma frase' },
   { type: 'product_grid', label: 'Grade de produtos', icon: LayoutGrid, desc: 'Destaques, categoria, manuais' },
-  { type: 'category_grid', label: 'Grade de categorias', icon: Tag, desc: 'Mosaico de categorias' },
+  { type: 'category_grid', label: 'Grade de categorias', icon: Tag, desc: 'Mosaico de categorias com ícones' },
+  { type: 'subcategory_grid', label: 'Grade de subcategorias', icon: Layers, desc: 'Mosaico de subcategorias com ícones' },
   { type: 'cta_banner', label: 'Banner CTA', icon: Megaphone, desc: 'Chamada com botão' },
   { type: 'trust_bar', label: 'Barra de Benefícios', icon: ShieldCheck, desc: 'Frete grátis, Pix, parcelamento, etc.' },
   { type: 'text', label: 'Bloco de texto', icon: FileText, desc: 'Texto/HTML livre' },
@@ -47,6 +48,7 @@ const DEFAULT_PROPS = {
   },
   product_grid: { source: 'featured', category: '', product_ids: '', limit: 8, columns: 4 },
   category_grid: { limit: 16, columns: 8, show_all_button: true, button_label: 'VER TODOS OS PRODUTOS >', button_link: '/produtos' },
+  subcategory_grid: { category_id: '', limit: 16, columns: 8, show_all_button: false, button_label: 'VER TODOS OS PRODUTOS >', button_link: '/produtos' },
   cta_banner: { title: 'Frete grátis acima de R$ 199', subtitle: 'Em todo o Brasil', cta_label: 'Comprar agora', cta_link: '/loja', bg_color: '' },
   trust_bar: {
     use_store_settings: true,
@@ -271,6 +273,7 @@ function summary(block) {
   if (block.type === 'product_grid') return `${p.source} · ${p.limit || 8} produtos`;
   if (block.type === 'rich_text') return p.eyebrow ? `${p.eyebrow} · ${p.subtitle || 'Título'}` : (p.html ? 'Texto formatado' : 'Título rico');
   if (block.type === 'category_grid') return `${p.limit || 16} categorias · ${p.columns || 8} cols`;
+  if (block.type === 'subcategory_grid') return `${p.limit || 16} subcategorias · ${p.columns || 8} cols`;
   if (block.type === 'image') return p.src ? '✓ imagem' : '(sem imagem)';
   if (block.type === 'spacer') return `${p.height || 40}px`;
   if (block.type === 'trust_bar') return p.use_store_settings ? 'Itens padrões da loja' : `${(p.items || []).length} benefício(s)`;
@@ -331,6 +334,8 @@ function BlockEditor({ block, onChange }) {
       ]} />
     </div>
   );
+
+  if (t === 'subcategory_grid') return <SubcategoryGridBlockEditor props={p} onChange={onChange} />;
 
   if (t === 'category_grid') return (
     <div className="space-y-3">
@@ -875,6 +880,89 @@ function RichTextBlockEditor({ props, onChange }) {
           { value: 'right', label: 'À Direita' },
         ]}
       />
+    </div>
+  );
+}
+
+
+function SubcategoryGridBlockEditor({ props, onChange }) {
+  const [categories, setCategories] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get('/api/categories');
+        setCategories(r.categories || r || []);
+      } catch { /* silent */ }
+    })();
+  }, []);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs font-bold text-txt-secondary block mb-1">Filtrar por Categoria (Opcional)</label>
+        <select
+          value={props.category_id || ''}
+          onChange={(e) => onChange({ category_id: e.target.value })}
+          className="w-full px-2.5 py-2 border border-border rounded-lg text-xs bg-white font-medium"
+        >
+          <option value="">Todas as subcategorias</option>
+          {categories.map((c) => (
+            <option key={c.category_id} value={c.category_id}>
+              Apenas de: {c.name}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-txt-secondary mt-1">
+          {props.category_id
+            ? 'Mostrando apenas subcategorias vinculadas à categoria selecionada.'
+            : 'Mostrando todas as subcategorias ativas da loja.'}
+        </p>
+      </div>
+
+      <Input
+        label="Quantidade máxima de subcategorias"
+        type="number"
+        value={props.limit ?? 16}
+        onChange={(e) => onChange({ limit: parseInt(e.target.value) || 0 })}
+        placeholder="0 para todas"
+      />
+
+      <SelectInput
+        label="Colunas no Desktop"
+        value={String(props.columns || 8)}
+        onChange={(v) => onChange({ columns: parseInt(v) })}
+        options={[
+          { value: '4', label: '4 colunas' },
+          { value: '6', label: '6 colunas' },
+          { value: '8', label: '8 colunas (recomendado)' },
+        ]}
+      />
+
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={Boolean(props.show_all_button)}
+            onChange={(e) => onChange({ show_all_button: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          Exibir botão "Ver todos os produtos"
+        </label>
+        {props.show_all_button && (
+          <div className="pt-2 space-y-2 border-t border-gray-200/60">
+            <Input
+              label="Texto do botão"
+              value={props.button_label || 'VER TODOS OS PRODUTOS >'}
+              onChange={(e) => onChange({ button_label: e.target.value })}
+            />
+            <Input
+              label="Link de destino"
+              value={props.button_link || '/produtos'}
+              onChange={(e) => onChange({ button_link: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

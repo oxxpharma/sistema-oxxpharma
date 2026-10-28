@@ -36,6 +36,7 @@ function BlockRouter({ block }) {
   else if (t === 'rich_text' || t === 'custom_text') content = <RichTextBlock {...p} />;
   else if (t === 'product_grid') content = <ProductGridBlock {...p} />;
   else if (t === 'category_grid') content = <CategoryGridBlock {...p} />;
+  else if (t === 'subcategory_grid' || t === 'subcategories') content = <SubcategoryGridBlock {...p} />;
   else if (t === 'text') content = <TextBlock {...p} />;
   else if (t === 'image') content = <ImageBlock {...p} />;
   else if (t === 'cta_banner') content = <CtaBanner {...p} />;
@@ -400,4 +401,82 @@ function CtaBanner({ title, subtitle, cta_label, cta_link, bg_color }) {
 }
 function TrustBarBlock({ items, use_store_settings = true }) {
   return <TrustBar items={items} use_store_settings={use_store_settings} variant="horizontal" />;
+}
+
+
+function SubcategoryGridBlock({
+  category_id = '',
+  limit = 16,
+  columns = 8,
+  show_all_button = false,
+  button_label = 'VER TODOS OS PRODUTOS >',
+  button_link = '/produtos',
+}) {
+  const [subs, setSubs] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const url = category_id
+          ? `/api/subcategories?category_id=${encodeURIComponent(category_id)}`
+          : '/api/subcategories';
+        const r = await api.get(url);
+        const list = r.subcategories || r || [];
+        setSubs(limit && Number(limit) > 0 ? list.slice(0, Number(limit)) : list);
+      } catch { /* silent */ }
+    })();
+  }, [category_id, limit]);
+
+  if (!subs.length) return null;
+
+  const colsClass = {
+    4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
+    6: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6',
+    8: 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8',
+  }[columns] || 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8';
+
+  return (
+    <div className="py-6 sm:py-8" data-testid="subcategory-grid-block">
+      <div className={`grid ${colsClass} gap-3 sm:gap-4`}>
+        {subs.map((sc) => {
+          const IconComponent = getIcon(sc.icon || 'Sparkles');
+          const href = sc.slug ? `/subcategoria/${sc.slug}` : `/loja?subcategory=${encodeURIComponent(sc.name)}`;
+          return (
+            <Link
+              key={sc.subcategory_id || sc.name}
+              to={href}
+              className="group bg-[#FFF9F5] hover:bg-[#FFF2E8] border border-orange-100/80 hover:border-brand-main/50 rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center text-center gap-2.5 min-h-[110px] transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+              data-testid={`subcategory-card-${sc.subcategory_id || sc.slug}`}
+            >
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white border border-orange-100/70 shadow-2xs flex items-center justify-center transition-transform group-hover:scale-110">
+                {sc.icon_svg ? (
+                  <img
+                    src={sc.icon_svg}
+                    alt={sc.name}
+                    className="w-6 h-6 sm:w-7 sm:h-7 object-contain"
+                  />
+                ) : (
+                  <IconComponent className="w-5 h-5 sm:w-6 sm:h-6 text-brand-main stroke-[1.6]" />
+                )}
+              </div>
+              <span className="text-xs sm:text-[13px] font-bold text-txt-primary group-hover:text-brand-main line-clamp-2 leading-tight transition-colors">
+                {sc.name}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
+      {show_all_button && (
+        <div className="mt-8 flex justify-center">
+          <Link
+            to={button_link || '/produtos'}
+            className="inline-flex items-center gap-2 bg-brand-main hover:bg-brand-dark text-white font-extrabold text-xs sm:text-sm px-8 py-3.5 rounded-full uppercase tracking-wider shadow-sm transition hover:scale-[1.02]"
+            data-testid="subcategory-view-all-btn"
+          >
+            {button_label || 'VER TODOS OS PRODUTOS >'}
+          </Link>
+        </div>
+      )}
+    </div>
+  );
 }
