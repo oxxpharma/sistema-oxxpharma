@@ -60,7 +60,7 @@ export default function StoreHome() {
     <div data-testid="store-home">
       {/* Iter 43.5: Se houver layout dinamico publicado, renderiza no lugar do default */}
       {pageLayout && pageLayout.blocks?.length > 0 ? (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="w-full">
           <DynamicBlocks blocks={pageLayout.blocks} />
         </div>
       ) : (

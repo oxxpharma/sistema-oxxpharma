@@ -9,10 +9,12 @@ import TrustBar from './TrustBar';
  * Renderiza blocos dinamicos definidos no Page Builder.
  * Cada bloco: { id, type, props }
  */
+const FULL_WIDTH_TYPES = new Set(['hero', 'hero_carousel', 'trust_bar', 'benefits', 'spacer']);
+
 export default function DynamicBlocks({ blocks }) {
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
   return (
-    <div className="space-y-12" data-testid="dynamic-blocks">
+    <div className="w-full flex flex-col" data-testid="dynamic-blocks">
       {blocks.map((b) => (
         <BlockRouter key={b.id} block={b} />
       ))}
@@ -23,19 +25,32 @@ export default function DynamicBlocks({ blocks }) {
 function BlockRouter({ block }) {
   const t = block.type;
   const p = block.props || {};
-  if (t === 'hero') return <HeroBlock {...p} />;
-  if (t === 'hero_carousel') return <HeroCarouselBlock {...p} />;
-  if (t === 'section_title') return <SectionTitle {...p} />;
-  if (t === 'product_grid') return <ProductGridBlock {...p} />;
-  if (t === 'category_grid') return <CategoryGridBlock {...p} />;
-  if (t === 'text') return <TextBlock {...p} />;
-  if (t === 'image') return <ImageBlock {...p} />;
-  if (t === 'cta_banner') return <CtaBanner {...p} />;
-  if (t === 'trust_bar' || t === 'benefits') return <TrustBarBlock {...p} />;
-  if (t === 'divider') return <hr className="border-border my-8" />;
-  if (t === 'spacer') return <div style={{ height: `${p.height || 40}px` }} />;
-  if (t === 'html') return <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: p.html || '' }} />;
-  return null;
+
+  let content = null;
+  if (t === 'hero') content = <HeroBlock {...p} />;
+  else if (t === 'hero_carousel') content = <HeroCarouselBlock {...p} />;
+  else if (t === 'trust_bar' || t === 'benefits') content = <TrustBarBlock {...p} />;
+  else if (t === 'spacer') content = <div style={{ height: `${p.height || 40}px` }} />;
+  else if (t === 'section_title') content = <SectionTitle {...p} />;
+  else if (t === 'product_grid') content = <ProductGridBlock {...p} />;
+  else if (t === 'category_grid') content = <CategoryGridBlock {...p} />;
+  else if (t === 'text') content = <TextBlock {...p} />;
+  else if (t === 'image') content = <ImageBlock {...p} />;
+  else if (t === 'cta_banner') content = <CtaBanner {...p} />;
+  else if (t === 'divider') content = <hr className="border-border my-2" />;
+  else if (t === 'html') content = <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: p.html || '' }} />;
+
+  if (!content) return null;
+
+  if (FULL_WIDTH_TYPES.has(t)) {
+    return content;
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+      {content}
+    </div>
+  );
 }
 
 function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true }) {
@@ -55,13 +70,12 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
   if (!total) return null;
   const cur = slides[Math.min(idx, total - 1)] || {};
   const overlay = Number(cur.overlay_opacity ?? 0.4);
-  // Break-out do container pai (max-w-7xl) para 100% da viewport
-  const breakout = { width: '100vw', marginLeft: 'calc(-50vw + 50%)' };
+
 
   return (
     <section
-      className="relative text-white overflow-hidden"
-      style={breakout}
+      className="relative text-white overflow-hidden w-full"
+      
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
@@ -132,9 +146,8 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
 }
 
 function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, overlay_opacity = 0.4 }) {
-  const breakout = { width: '100vw', marginLeft: 'calc(-50vw + 50%)' };
   return (
-    <section className="relative text-white overflow-hidden" style={breakout} data-testid="hero-block">
+    <section className="relative text-white overflow-hidden w-full"  data-testid="hero-block">
       <div
         className="absolute inset-0"
         style={
