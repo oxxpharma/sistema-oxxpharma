@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import StoreHeader from '../components/store/StoreHeader';
 import StoreFooter from '../components/store/StoreFooter';
+import FloatingWhatsApp from '../components/store/FloatingWhatsApp';
 
 export default function StoreLayout() {
   return (
@@ -11,6 +12,7 @@ export default function StoreLayout() {
         <Outlet />
       </main>
       <StoreFooter />
+      <FloatingWhatsApp />
     </div>
   );
 }
