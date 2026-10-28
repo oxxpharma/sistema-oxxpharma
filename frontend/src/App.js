@@ -98,6 +98,9 @@ import AdminMergeUsers from './pages/backoffice/AdminMergeUsers';
 import AdminRecalcCommissions from './pages/backoffice/AdminRecalcCommissions';
 import AdminRoles from './pages/backoffice/AdminRoles';
 import AdminAuditLogs from './pages/backoffice/AdminAuditLogs';
+import CustomerReviewPage from './pages/store/CustomerReviewPage';
+import AdminReviews from './pages/backoffice/AdminReviews';
+import AdminCampaigns from './pages/backoffice/AdminCampaigns';
 
 function Guard({ children, requireAuth = false, requireAdmin = false, requireCompanyAdmin = false, requirePropagandista = false }) {
   const { isAuthenticated, isAdmin, loading, user } = useAuth();
@@ -153,6 +156,8 @@ function AppRoutes() {
         <Route path="/meu-cartao-consignado" element={<Guard requireAuth><MyConsignmentCardPage /></Guard>} />
         <Route path="/meus-pontos" element={<Guard requireAuth><MyPoints /></Guard>} />
         <Route path="/p/:slug" element={<CmsPageView />} />
+        <Route path="/avaliar/:orderId" element={<CustomerReviewPage />} />
+        <Route path="/avaliar" element={<CustomerReviewPage />} />
       </Route>
 
       {/* Nota de faturamento: standalone (sem header/footer) para impressão limpa */}
@@ -179,6 +184,8 @@ function AppRoutes() {
         <Route path="produtos/:productId" element={<AdminProductForm />} />
         <Route path="categorias" element={<AdminCategories />} />
         <Route path="pedidos" element={<AdminOrders />} />
+        <Route path="avaliacoes" element={<AdminReviews />} />
+        <Route path="campanhas" element={<AdminCampaigns />} />
         <Route path="pdv" element={<AdminPDV />} />
         <Route path="campanha" element={<AdminMultiplierCampaign />} />
         <Route path="usuarios" element={<AdminUsers />} />

@@ -6275,6 +6275,8 @@ async def update_admin_settings(request: Request, user: dict = Depends(require_s
         "d4sign_enabled", "d4sign_token_api", "d4sign_crypt_key",
         "d4sign_safe_uuid", "d4sign_folder_uuid", "d4sign_environment",
         "d4sign_oxx_signer_name", "d4sign_oxx_signer_email",
+        # WhatsApp de Vendas
+        "whatsapp_enabled", "whatsapp_number", "whatsapp_message_template",
     }
     update = {k: v for k, v in body.items() if k in allowed_keys}
     # Sanitizar generations (garantir lista de 6 floats)
@@ -11244,4 +11246,19 @@ async def audit_logger_middleware(request: Request, call_next):
     return response
 
 audit_service.register_audit_routes(app, {"get_current_user": get_current_user})
+
+# Registra rotas de Avaliacoes (Reviews) e Campanhas de Recompra
+import reviews_service
+import campaigns_service
+
+reviews_service.register_reviews_routes(app, {
+    "get_optional_user": get_optional_user,
+    "require_admin": require_admin,
+})
+
+campaigns_service.register_campaigns_routes(app, {
+    "require_admin": require_admin,
+    "require_super_admin": require_super_admin,
+})
+
 

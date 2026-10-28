@@ -32,6 +32,8 @@ const NAV_GROUPS = [
     label: 'Vendas',
     items: [
       { to: '/backoffice/pedidos', icon: ShoppingBag, label: 'Pedidos', testId: 'nav-orders', perm: 'editOrders' },
+      { to: '/backoffice/avaliacoes', icon: Star, label: 'Avaliações (Reviews)', testId: 'nav-reviews', perm: 'editProducts' },
+      { to: '/backoffice/campanhas', icon: Send, label: 'Campanhas Recompra', testId: 'nav-campaigns', perm: 'integrations' },
       { to: '/backoffice/pdv', icon: ShoppingCart, label: 'PDV (Balcão)', testId: 'nav-pdv', perm: 'editOrders' },
       { to: '/backoffice/campanha', icon: Zap, label: 'Campanha Multi', testId: 'nav-campaign', perm: 'integrations' },
       { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'editCoupons' },
