@@ -229,7 +229,7 @@ export default function StoreHeader() {
             <Link
               to="/"
               className={`relative py-2 text-[15px] transition-colors ${
-                isItemActive('/') ? 'text-gray-900 font-normal' : 'text-gray-700 hover:text-brand-main font-extralight'
+                isItemActive('/') ? 'text-gray-900 font-normal' : 'text-gray-700 hover:text-brand-main font-light'
               }`}
             >
               Início
