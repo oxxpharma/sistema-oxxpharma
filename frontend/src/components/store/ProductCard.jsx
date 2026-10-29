@@ -57,21 +57,21 @@ export default function ProductCard({ product }) {
       <div className="p-4 flex flex-col flex-1">
         {product.brand && (
           <div
-            className="uppercase tracking-wider text-brand-main font-bold mb-1"
+            className="uppercase tracking-wider text-brand-main font-semibold mb-1"
             style={{ fontSize: `${settings?.product_card_brand_px || 11}px` }}
           >
             {product.brand}
           </div>
         )}
         <h3
-          className="font-semibold text-txt-primary line-clamp-2 min-h-[40px]"
+          className="font-medium text-txt-primary line-clamp-2 min-h-[40px]"
           style={{ fontSize: `${settings?.product_card_title_px || 14}px`, lineHeight: 1.25 }}
         >
           {product.name}
         </h3>
         {tierApplied && (
           <div
-            className="mt-1 inline-block self-start uppercase tracking-wider bg-brand-light text-brand-main rounded-full px-2 py-0.5 font-bold"
+            className="mt-1 inline-block self-start uppercase tracking-wider bg-brand-light text-brand-main rounded-full px-2 py-0.5 font-semibold"
             style={{ fontSize: `${settings?.product_card_label_px || 10}px` }}
           >
             {/* Iter 42k: para tier=guest, label global em site_settings tem precedencia */}
@@ -82,7 +82,7 @@ export default function ProductCard({ product }) {
         )}
         <div className="mt-3 flex items-baseline gap-2">
           <span
-            className="font-heading font-black text-txt-primary"
+            className="font-heading font-bold text-txt-primary"
             style={{ fontSize: `${settings?.product_card_price_px || 18}px` }}
           >
             {formatCurrency(effective)}

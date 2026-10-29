@@ -103,7 +103,7 @@ export default function StoreHome() {
               <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white border border-orange-100/70 shadow-2xs">
                 <LayoutGrid className="w-5 h-5 text-brand-main" />
               </div>
-              <span className="text-xs font-bold text-center text-txt-primary">Todos</span>
+              <span className="text-xs font-semibold text-center text-txt-primary">Todos</span>
             </Link>
           )}
           {categories.map(cat => {
@@ -123,7 +123,7 @@ export default function StoreHome() {
                     <Icon className={`w-5 h-5 ${active ? 'text-white' : 'text-brand-main'}`} />
                   )}
                 </div>
-                <span className={`text-xs font-bold text-center ${active ? 'text-white' : 'text-txt-primary'}`}>{cat.name}</span>
+                <span className={`text-xs font-semibold text-center ${active ? 'text-white' : 'text-txt-primary'}`}>{cat.name}</span>
               </Link>
             );
           })}

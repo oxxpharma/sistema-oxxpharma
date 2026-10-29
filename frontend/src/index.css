@@ -1,12 +1,21 @@
 /* ==========================================================================
    TIPOGRAFIA OFICIAL OXXPHARMA: Tosh A (Títulos) & Anona (Textos e Interface)
+   Pesos calibrados e suavizados para um acabamento visual elegante e leve
    ========================================================================== */
 
-/* --- Tosh A (Títulos mais destacados) --- */
+/* --- Tosh A (Títulos mais destacados - Serif Elegante) --- */
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Thin.otf') format('opentype');
-  font-weight: 100 200;
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Thin.otf') format('opentype');
+  font-weight: 200;
   font-style: normal;
   font-display: swap;
 }
@@ -37,25 +46,43 @@
 
 @font-face {
   font-family: 'Tosh A';
-  src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
-  font-weight: 600 700;
+  src: url('./assets/fonts/ToshA-Medium.otf') format('opentype');
+  font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
   font-family: 'Tosh A';
-  src: url('./assets/fonts/ToshA-Black.otf') format('opentype');
-  font-weight: 800 900;
+  src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
+
+/* Suavizado: 800 e 900 usam Bold em vez do pesadíssimo Black */
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 
 /* --- Anona (Textos comuns, corpo, labels e descrições) --- */
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Thin.otf') format('opentype');
-  font-weight: 100 200;
+  font-weight: 100;
   font-style: normal;
   font-display: swap;
 }
@@ -63,7 +90,23 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-ThinItalic.otf') format('opentype');
-  font-weight: 100 200;
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Thin.otf') format('opentype');
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-ThinItalic.otf') format('opentype');
+  font-weight: 200;
   font-style: italic;
   font-display: swap;
 }
@@ -116,10 +159,28 @@
   font-display: swap;
 }
 
+/* Suavizado: 600 usa Medium para manter textos e botões limpos */
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Medium.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-MediumItalic.otf') format('opentype');
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Suavizado: 700 usa SemiBold em vez de Bold pesado */
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-SemiBold.otf') format('opentype');
-  font-weight: 600;
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -127,15 +188,16 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-SemiBoldItalic.otf') format('opentype');
-  font-weight: 600;
+  font-weight: 700;
   font-style: italic;
   font-display: swap;
 }
 
+/* Suavizado: 800 e 900 usam Bold em vez do pesadíssimo Black */
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Bold.otf') format('opentype');
-  font-weight: 700;
+  font-weight: 800;
   font-style: normal;
   font-display: swap;
 }
@@ -143,22 +205,6 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-BoldItalic.otf') format('opentype');
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Anona';
-  src: url('./assets/fonts/Anona-ExtraBold.otf') format('opentype');
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Anona';
-  src: url('./assets/fonts/Anona-ExtraBoldItalic.otf') format('opentype');
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -166,7 +212,7 @@
 
 @font-face {
   font-family: 'Anona';
-  src: url('./assets/fonts/Anona-Black.otf') format('opentype');
+  src: url('./assets/fonts/Anona-Bold.otf') format('opentype');
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -174,7 +220,7 @@
 
 @font-face {
   font-family: 'Anona';
-  src: url('./assets/fonts/Anona-BlackItalic.otf') format('opentype');
+  src: url('./assets/fonts/Anona-BoldItalic.otf') format('opentype');
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -199,7 +245,7 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Tosh A', sans-serif;
+  font-family: 'Tosh A', Georgia, serif;
 }
 
 ::-webkit-scrollbar {
