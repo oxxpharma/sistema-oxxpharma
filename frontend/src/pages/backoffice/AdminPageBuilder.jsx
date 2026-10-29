@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { toast } from 'sonner';
 import {
   Plus, Trash2, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
-  Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck, Layers,
+  Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck, Layers, Columns,
 } from 'lucide-react';
 import { ICON_KEYS, ICON_LABELS, getIcon } from '../../lib/iconLibrary';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
@@ -18,6 +18,7 @@ const BLOCK_LIBRARY = [
   { type: 'product_grid', label: 'Grade de produtos', icon: LayoutGrid, desc: 'Destaques, categoria, manuais' },
   { type: 'category_grid', label: 'Grade de categorias', icon: Tag, desc: 'Mosaico de categorias com ícones' },
   { type: 'subcategory_grid', label: 'Grade de subcategorias', icon: Layers, desc: 'Mosaico de subcategorias com ícones' },
+  { type: 'column_cards', label: 'Bloco de Colunas', icon: Columns, desc: 'Cards com imagem, título, texto e botão configurável' },
   { type: 'cta_banner', label: 'Banner CTA', icon: Megaphone, desc: 'Chamada com botão' },
   { type: 'trust_bar', label: 'Barra de Benefícios', icon: ShieldCheck, desc: 'Frete grátis, Pix, parcelamento, etc.' },
   { type: 'text', label: 'Bloco de texto', icon: FileText, desc: 'Texto/HTML livre' },
@@ -73,6 +74,59 @@ const DEFAULT_PROPS = {
     show_all_button: false,
     button_label: 'VER TODOS OS PRODUTOS >',
     button_link: '/produtos',
+  },
+  column_cards: {
+    columns: 5,
+    mobile_columns: 1,
+    gap: 'medium',
+    align: 'left',
+    aspect_ratio: 'square',
+    image_rounded: '2xl',
+    button_style: 'circle_arrow',
+    title_font: 'serif',
+    title_size: 'xl',
+    show_header: false,
+    header_eyebrow: 'OXXPHARMA MAGISTRAL',
+    header_title: 'Encontre o <span style="color: #E8731A">cuidado</span> que faz sentido para você.',
+    header_subtitle: 'Soluções personalizadas para diferentes necessidades, momentos e objetivos.',
+    header_align: 'center',
+    items: [
+      {
+        title: 'Cuidado',
+        description: 'Beleza, pele, cabelo e autocuidado.',
+        image_url: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=500',
+        link: '/loja',
+        button_label: '',
+      },
+      {
+        title: 'Bem-estar',
+        description: 'Sono, equilíbrio, saúde intestinal e imunidade.',
+        image_url: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500',
+        link: '/loja',
+        button_label: '',
+      },
+      {
+        title: 'Performance',
+        description: 'Energia, força, treino e recuperação.',
+        image_url: 'https://images.unsplash.com/photo-1579722821273-0f6c7d44362f?w=500',
+        link: '/loja',
+        button_label: '',
+      },
+      {
+        title: 'Metabolismo',
+        description: 'Controle de peso, composição corporal e equilíbrio metabólico.',
+        image_url: 'https://images.unsplash.com/photo-1584017911766-d451b3d0e843?w=500',
+        link: '/loja',
+        button_label: '',
+      },
+      {
+        title: 'Óleos Ozonizados',
+        description: 'Soluções para diferentes necessidades de cuidado.',
+        image_url: 'https://images.unsplash.com/photo-1608248597359-0080f55e5b70?w=500',
+        link: '/loja',
+        button_label: '',
+      },
+    ],
   },
   cta_banner: { title: 'Frete grátis acima de R$ 199', subtitle: 'Em todo o Brasil', cta_label: 'Comprar agora', cta_link: '/loja', bg_color: '' },
   trust_bar: {
@@ -305,6 +359,10 @@ function summary(block) {
     const mode = p.selection_mode === 'custom' ? `${(p.selected_ids || []).length} selecionadas` : (p.limit ? `${p.limit} subcategorias` : 'Todas');
     return `${mode} · ${p.columns || 8} cols${p.include_all_card ? ' (+ Todos)' : ''}`;
   }
+  if (block.type === 'column_cards' || block.type === 'columns') {
+    const count = (p.items || []).length;
+    return `${count} coluna(s) · ${p.columns || 5} cols no desktop`;
+  }
   if (block.type === 'image') return p.src ? '✓ imagem' : '(sem imagem)';
   if (block.type === 'spacer') return `${p.height || 40}px`;
   if (block.type === 'trust_bar') return p.use_store_settings ? 'Itens padrões da loja' : `${(p.items || []).length} benefício(s)`;
@@ -371,6 +429,8 @@ function BlockEditor({ block, onChange }) {
   if (t === 'subcategory_grid') return <SubcategoryGridBlockEditor props={p} onChange={onChange} />;
 
   if (t === 'rich_text') return <RichTextBlockEditor props={p} onChange={onChange} />;
+
+  if (t === 'column_cards' || t === 'columns') return <ColumnCardsBlockEditor props={p} onChange={onChange} />;
 
   if (t === 'cta_banner') return (
     <div className="space-y-3">
@@ -1360,6 +1420,363 @@ function SubcategoryGridBlockEditor({ props, onChange }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+
+function ColumnCardsBlockEditor({ props, onChange }) {
+  const items = Array.isArray(props.items) ? props.items : [];
+  const [tab, setTab] = useState('columns');
+
+  const updateItem = (index, patch) => {
+    const next = [...items];
+    next[index] = { ...next[index], ...patch };
+    onChange({ items: next });
+  };
+
+  const addItem = () => {
+    if (items.length >= 12) {
+      toast.error('Limite máximo de 12 colunas atingido');
+      return;
+    }
+    const next = [
+      ...items,
+      {
+        title: `Coluna ${items.length + 1}`,
+        description: 'Descrição breve da coluna...',
+        image_url: '',
+        link: '/loja',
+        button_label: '',
+      },
+    ];
+    onChange({ items: next });
+  };
+
+  const removeItem = (index) => {
+    const next = items.filter((_, i) => i !== index);
+    onChange({ items: next });
+  };
+
+  const moveItem = (index, delta) => {
+    const target = index + delta;
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    onChange({ items: next });
+  };
+
+  return (
+    <div className="space-y-4" data-testid="column-cards-editor">
+      {/* Abas internas para edição clara */}
+      <div className="flex border-b border-border text-xs font-bold">
+        <button
+          type="button"
+          onClick={() => setTab('columns')}
+          className={`px-3 py-2 border-b-2 transition ${
+            tab === 'columns'
+              ? 'border-brand-main text-brand-main'
+              : 'border-transparent text-txt-secondary hover:text-txt-primary'
+          }`}
+        >
+          Colunas ({items.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('layout')}
+          className={`px-3 py-2 border-b-2 transition ${
+            tab === 'layout'
+              ? 'border-brand-main text-brand-main'
+              : 'border-transparent text-txt-secondary hover:text-txt-primary'
+          }`}
+        >
+          Layout & Estilo
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('header')}
+          className={`px-3 py-2 border-b-2 transition ${
+            tab === 'header'
+              ? 'border-brand-main text-brand-main'
+              : 'border-transparent text-txt-secondary hover:text-txt-primary'
+          }`}
+        >
+          Cabeçalho
+        </button>
+      </div>
+
+      {tab === 'layout' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <SelectInput
+              label="Colunas no Computador"
+              value={String(props.columns ?? 5)}
+              onChange={(v) => onChange({ columns: Number(v) })}
+              options={[
+                { value: '2', label: '2 Colunas' },
+                { value: '3', label: '3 Colunas' },
+                { value: '4', label: '4 Colunas' },
+                { value: '5', label: '5 Colunas (Padrão)' },
+                { value: '6', label: '6 Colunas' },
+              ]}
+            />
+            <SelectInput
+              label="Colunas no Celular"
+              value={String(props.mobile_columns ?? 1)}
+              onChange={(v) => onChange({ mobile_columns: Number(v) })}
+              options={[
+                { value: '1', label: '1 Coluna' },
+                { value: '2', label: '2 Colunas' },
+              ]}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <SelectInput
+              label="Espaçamento (Gap)"
+              value={props.gap || 'medium'}
+              onChange={(v) => onChange({ gap: v })}
+              options={[
+                { value: 'none', label: 'Sem Espaçamento (0px)' },
+                { value: 'small', label: 'Pequeno (12px)' },
+                { value: 'medium', label: 'Médio (20px - Padrão)' },
+                { value: 'large', label: 'Grande (32px)' },
+              ]}
+            />
+            <SelectInput
+              label="Alinhamento do Texto"
+              value={props.align || 'left'}
+              onChange={(v) => onChange({ align: v })}
+              options={[
+                { value: 'left', label: 'À Esquerda (Padrão)' },
+                { value: 'center', label: 'Centralizado' },
+              ]}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <SelectInput
+              label="Formato da Imagem"
+              value={props.aspect_ratio || 'square'}
+              onChange={(v) => onChange({ aspect_ratio: v })}
+              options={[
+                { value: 'square', label: 'Quadrada (1:1)' },
+                { value: 'portrait', label: 'Vertical (4:5)' },
+                { value: 'landscape', label: 'Horizontal (16:9)' },
+                { value: 'auto', label: 'Altura Livre' },
+              ]}
+            />
+            <SelectInput
+              label="Arredondamento da Imagem"
+              value={props.image_rounded || '2xl'}
+              onChange={(v) => onChange({ image_rounded: v })}
+              options={[
+                { value: '2xl', label: 'Muito Arredondado (2xl)' },
+                { value: 'xl', label: 'Arredondado (xl)' },
+                { value: 'lg', label: 'Suave (lg)' },
+                { value: 'none', label: 'Reto (Sem curva)' },
+              ]}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <SelectInput
+              label="Fonte do Título"
+              value={props.title_font || 'serif'}
+              onChange={(v) => onChange({ title_font: v })}
+              options={[
+                { value: 'serif', label: 'Tosh A (Serifado - Como no print)' },
+                { value: 'anona', label: 'Anona (Moderno)' },
+                { value: 'montserrat', label: 'Montserrat' },
+                { value: 'sans', label: 'IBM Plex Sans (Padrão)' },
+              ]}
+            />
+            <SelectInput
+              label="Tamanho do Título"
+              value={props.title_size || 'xl'}
+              onChange={(v) => onChange({ title_size: v })}
+              options={[
+                { value: 'lg', label: 'Médio (18px)' },
+                { value: 'xl', label: 'Grande (22px - Padrão)' },
+                { value: '2xl', label: 'Extra Grande (24px)' },
+              ]}
+            />
+          </div>
+
+          <SelectInput
+            label="Estilo do Botão"
+            value={props.button_style || 'circle_arrow'}
+            onChange={(v) => onChange({ button_style: v })}
+            options={[
+              { value: 'circle_arrow', label: 'Círculo com Seta (->) - Como no print' },
+              { value: 'text_arrow', label: 'Texto com Seta (Ex: Saiba mais ->)' },
+              { value: 'solid', label: 'Botão Sólido Preenchido' },
+              { value: 'outline', label: 'Botão com Contorno' },
+              { value: 'none', label: 'Sem Botão (Card Inteiro Clicável)' },
+            ]}
+          />
+        </div>
+      )}
+
+      {tab === 'header' && (
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 cursor-pointer p-2.5 rounded-lg bg-bg-secondary/40 border border-border">
+            <input
+              type="checkbox"
+              checked={props.show_header === true}
+              onChange={(e) => onChange({ show_header: e.target.checked })}
+              className="rounded text-brand-main w-4 h-4"
+            />
+            <span className="text-xs font-semibold text-txt-primary">Exibir título e cabeçalho acima das colunas</span>
+          </label>
+
+          {props.show_header && (
+            <div className="space-y-3 pt-1">
+              <Input
+                label="Tag Superior / Eyebrow"
+                value={props.header_eyebrow || ''}
+                onChange={(e) => onChange({ header_eyebrow: e.target.value })}
+                placeholder="Ex: OXXPHARMA MAGISTRAL"
+              />
+              <Input
+                label="Título Principal (HTML permitido)"
+                value={props.header_title || ''}
+                onChange={(e) => onChange({ header_title: e.target.value })}
+                placeholder="Ex: Encontre o <span style='color: #E8731A'>cuidado</span> que faz sentido para você."
+              />
+              <Input
+                label="Subtítulo / Descrição"
+                value={props.header_subtitle || ''}
+                onChange={(e) => onChange({ header_subtitle: e.target.value })}
+                placeholder="Ex: Soluções personalizadas para diferentes necessidades..."
+              />
+              <SelectInput
+                label="Alinhamento do Cabeçalho"
+                value={props.header_align || 'center'}
+                onChange={(v) => onChange({ header_align: v })}
+                options={[
+                  { value: 'center', label: 'Centralizado' },
+                  { value: 'left', label: 'À Esquerda' },
+                ]}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'columns' && (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">
+              Colunas Adicionadas ({items.length})
+            </div>
+            <Button variant="outline" size="sm" onClick={addItem} data-testid="add-column-card">
+              <Plus className="w-4 h-4 mr-1" /> Adicionar coluna
+            </Button>
+          </div>
+
+          {items.map((it, idx) => (
+            <div
+              key={idx}
+              className="border border-border rounded-lg p-3 bg-bg-secondary/30 space-y-2.5"
+              data-testid={`column-card-item-${idx}`}
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-brand-light text-brand-main text-[11px] font-bold flex items-center justify-center">
+                    {idx + 1}
+                  </span>
+                  <span className="text-xs font-bold text-txt-primary truncate max-w-[130px]">
+                    {it.title || `Coluna ${idx + 1}`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => moveItem(idx, -1)}
+                    disabled={idx === 0}
+                    className="p-1 hover:bg-white rounded disabled:opacity-30"
+                    title="Mover para esquerda/cima"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveItem(idx, 1)}
+                    disabled={idx === items.length - 1}
+                    className="p-1 hover:bg-white rounded disabled:opacity-30"
+                    title="Mover para direita/baixo"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(idx)}
+                    className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                    title="Excluir coluna"
+                    data-testid={`remove-column-card-${idx}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <ImageUploadField
+                label="Imagem da Coluna"
+                value={it.image_url || ''}
+                onChange={(v) => updateItem(idx, { image_url: v })}
+                testIdPrefix={`col-card-${idx}-img`}
+              />
+
+              <Input
+                label="Título"
+                value={it.title || ''}
+                onChange={(e) => updateItem(idx, { title: e.target.value })}
+                placeholder="Ex: Cuidado"
+              />
+
+              <div>
+                <label className="text-xs font-bold text-txt-secondary block mb-1">Descrição</label>
+                <textarea
+                  value={it.description || ''}
+                  onChange={(e) => updateItem(idx, { description: e.target.value })}
+                  placeholder="Ex: Beleza, pele, cabelo e autocuidado."
+                  rows={2}
+                  className="w-full px-3 py-1.5 border border-border rounded-lg text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  label="Link de destino"
+                  value={it.link || ''}
+                  onChange={(e) => updateItem(idx, { link: e.target.value })}
+                  placeholder="/loja"
+                />
+                {props.button_style !== 'circle_arrow' && props.button_style !== 'none' && (
+                  <Input
+                    label="Texto do botão"
+                    value={it.button_label || ''}
+                    onChange={(e) => updateItem(idx, { button_label: e.target.value })}
+                    placeholder="Ex: Saiba mais"
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+
+          {items.length === 0 && (
+            <div className="p-4 text-center text-txt-secondary text-xs bg-bg-secondary/20 rounded-lg">
+              Nenhuma coluna adicionada. Clique abaixo para adicionar a primeira.
+            </div>
+          )}
+
+          <Button variant="outline" size="sm" onClick={addItem} className="w-full mt-2" data-testid="add-column-card-bottom">
+            <Plus className="w-4 h-4 mr-1" /> Adicionar coluna
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

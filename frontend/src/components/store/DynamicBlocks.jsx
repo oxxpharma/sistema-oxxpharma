@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid, Image as ImageIcon } from 'lucide-react';
 import ProductCard from './ProductCard';
 import TrustBar from './TrustBar';
 import { getIcon } from '../../lib/iconLibrary';
@@ -37,6 +37,7 @@ function BlockRouter({ block }) {
   else if (t === 'product_grid') content = <ProductGridBlock {...p} />;
   else if (t === 'category_grid') content = <CategoryGridBlock {...p} />;
   else if (t === 'subcategory_grid' || t === 'subcategories') content = <SubcategoryGridBlock {...p} />;
+  else if (t === 'column_cards' || t === 'columns') content = <ColumnCardsBlock {...p} />;
   else if (t === 'text') content = <TextBlock {...p} />;
   else if (t === 'image') content = <ImageBlock {...p} />;
   else if (t === 'cta_banner') content = <CtaBanner {...p} />;
@@ -542,6 +543,196 @@ function SubcategoryGridBlock({
           </Link>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function ColumnCardsBlock({
+  columns = 5,
+  mobile_columns = 1,
+  gap = 'medium',
+  align = 'left',
+  aspect_ratio = 'square',
+  image_rounded = '2xl',
+  button_style = 'circle_arrow',
+  title_font = 'serif',
+  title_size = 'xl',
+  show_header = false,
+  header_eyebrow = '',
+  header_title = '',
+  header_subtitle = '',
+  header_align = 'center',
+  items = [],
+}) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+
+  const isMobile2 = Number(mobile_columns) === 2;
+  const numCols = Number(columns) || 5;
+
+  const colsClass = {
+    2: isMobile2 ? 'grid-cols-2 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2',
+    3: isMobile2 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3',
+    4: isMobile2 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4',
+    5: isMobile2 ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5',
+    6: isMobile2 ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6',
+  }[numCols] || (isMobile2 ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5');
+
+  const gapClass = {
+    none: 'gap-0',
+    small: 'gap-3 sm:gap-4',
+    medium: 'gap-4 sm:gap-5 lg:gap-6',
+    large: 'gap-6 sm:gap-8 lg:gap-10',
+  }[gap] || 'gap-4 sm:gap-5 lg:gap-6';
+
+  const aspectClass = {
+    square: 'aspect-square',
+    portrait: 'aspect-[4/5]',
+    landscape: 'aspect-[16/9]',
+    auto: 'h-auto',
+  }[aspect_ratio] || 'aspect-square';
+
+  const roundedClass = {
+    '2xl': 'rounded-2xl sm:rounded-3xl',
+    xl: 'rounded-xl sm:rounded-2xl',
+    lg: 'rounded-lg sm:rounded-xl',
+    none: 'rounded-none',
+  }[image_rounded] || 'rounded-2xl sm:rounded-3xl';
+
+  const fontClass = {
+    serif: 'font-serif',
+    anona: 'font-anona font-bold',
+    montserrat: 'font-montserrat font-bold',
+    sans: 'font-sans font-semibold',
+  }[title_font] || 'font-serif';
+
+  const sizeClass = {
+    lg: 'text-base sm:text-lg',
+    xl: 'text-lg sm:text-xl md:text-[22px]',
+    '2xl': 'text-xl sm:text-2xl',
+  }[title_size] || 'text-lg sm:text-xl md:text-[22px]';
+
+  const isCenter = align === 'center';
+
+  return (
+    <div className="py-8 sm:py-12" data-testid="column-cards-block">
+      {/* Cabeçalho opcional do bloco */}
+      {show_header && (header_title || header_eyebrow) && (
+        <div className={`mb-8 sm:mb-12 ${header_align === 'left' ? 'text-left' : 'text-center mx-auto max-w-3xl'}`}>
+          {header_eyebrow && (
+            <div className="font-montserrat font-bold text-xs sm:text-sm uppercase tracking-[0.25em] text-brand-main mb-2 sm:mb-3">
+              {header_eyebrow}
+            </div>
+          )}
+          {header_title && (
+            <h2
+              className="font-serif text-2xl sm:text-3xl md:text-4xl text-txt-primary leading-tight"
+              dangerouslySetInnerHTML={{ __html: header_title }}
+            />
+          )}
+          {header_subtitle && (
+            <p className="font-montserrat text-txt-secondary text-sm sm:text-base mt-2.5 leading-relaxed">
+              {header_subtitle}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Grid de Colunas */}
+      <div className={`grid ${colsClass} ${gapClass}`}>
+        {items.map((it, idx) => {
+          const href = it.link || '/loja';
+          return (
+            <div
+              key={idx}
+              className={`group flex flex-col h-full ${isCenter ? 'items-center text-center' : 'items-start text-left'}`}
+              data-testid={`column-card-${idx}`}
+            >
+              {/* Imagem */}
+              <Link
+                to={href}
+                className={`relative w-full ${aspectClass} ${roundedClass} overflow-hidden bg-[#FAF2EB] block transition-shadow duration-300 group-hover:shadow-lg`}
+              >
+                {it.image_url ? (
+                  <img
+                    src={it.image_url}
+                    alt={it.title || ''}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-brand-main/60 p-4">
+                    <ImageIcon className="w-10 h-10 stroke-[1.5] mb-2 opacity-60" />
+                    <span className="text-[11px] font-montserrat text-txt-secondary">Sem imagem</span>
+                  </div>
+                )}
+              </Link>
+
+              {/* Textos */}
+              <div className={`mt-4 sm:mt-5 flex flex-col flex-1 w-full ${isCenter ? 'items-center' : 'items-start'}`}>
+                {it.title && (
+                  <Link to={href} className="group-hover:text-brand-main transition-colors">
+                    <h3 className={`${fontClass} ${sizeClass} text-txt-primary leading-snug`}>
+                      {it.title}
+                    </h3>
+                  </Link>
+                )}
+
+                {it.description && (
+                  <p className="mt-2 text-xs sm:text-sm text-txt-secondary leading-relaxed font-montserrat font-normal flex-1">
+                    {it.description}
+                  </p>
+                )}
+
+                {/* Botão de Ação */}
+                {button_style !== 'none' && (
+                  <div className="mt-4 sm:mt-5">
+                    {button_style === 'circle_arrow' && (
+                      <Link
+                        to={href}
+                        className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-orange-200/90 group-hover:border-brand-main bg-white/70 group-hover:bg-brand-main text-brand-main group-hover:text-white flex items-center justify-center transition-all duration-200 shadow-2xs group-hover:shadow-sm"
+                        aria-label={it.title || 'Ver mais'}
+                      >
+                        <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+                      </Link>
+                    )}
+
+                    {button_style === 'text_arrow' && (
+                      <Link
+                        to={href}
+                        className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-montserrat font-semibold text-brand-main hover:text-brand-dark transition-colors"
+                      >
+                        <span>{it.button_label || 'Saiba mais'}</span>
+                        <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
+                      </Link>
+                    )}
+
+                    {button_style === 'solid' && (
+                      <Link
+                        to={href}
+                        className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-brand-main hover:bg-brand-dark text-white text-xs sm:text-sm font-montserrat font-semibold transition-all shadow-2xs hover:shadow"
+                      >
+                        {it.button_label || 'Ver mais'}
+                      </Link>
+                    )}
+
+                    {button_style === 'outline' && (
+                      <Link
+                        to={href}
+                        className="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-brand-main/70 text-brand-main hover:bg-brand-main hover:text-white text-xs sm:text-sm font-montserrat font-semibold transition-all"
+                      >
+                        {it.button_label || 'Ver mais'}
+                      </Link>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
