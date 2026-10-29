@@ -15,7 +15,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Thin.otf') format('opentype');
-  font-weight: 200;
+  font-weight: 100;
   font-style: normal;
   font-display: swap;
 }
@@ -23,7 +23,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Light.otf') format('opentype');
-  font-weight: 300;
+  font-weight: 200;
   font-style: normal;
   font-display: swap;
 }
@@ -31,7 +31,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Regular.otf') format('opentype');
-  font-weight: 400;
+  font-weight: 200;
   font-style: normal;
   font-display: swap;
 }
@@ -39,7 +39,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Medium.otf') format('opentype');
-  font-weight: 500;
+  font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
@@ -47,7 +47,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Medium.otf') format('opentype');
-  font-weight: 600;
+  font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
@@ -55,7 +55,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
-  font-weight: 700;
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
@@ -64,7 +64,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
-  font-weight: 800;
+  font-weight: 500;
   font-style: normal;
   font-display: swap;
 }
@@ -72,7 +72,7 @@
 @font-face {
   font-family: 'Tosh A';
   src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
-  font-weight: 900;
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -98,7 +98,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Thin.otf') format('opentype');
-  font-weight: 200;
+  font-weight: 100;
   font-style: normal;
   font-display: swap;
 }
@@ -114,7 +114,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Light.otf') format('opentype');
-  font-weight: 300;
+  font-weight: 200;
   font-style: normal;
   font-display: swap;
 }
@@ -122,7 +122,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-LightItalic.otf') format('opentype');
-  font-weight: 300;
+  font-weight: 200;
   font-style: italic;
   font-display: swap;
 }
@@ -130,7 +130,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Regular.otf') format('opentype');
-  font-weight: 400;
+  font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
@@ -138,7 +138,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Italic.otf') format('opentype');
-  font-weight: 400;
+  font-weight: 300;
   font-style: italic;
   font-display: swap;
 }
@@ -146,7 +146,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Medium.otf') format('opentype');
-  font-weight: 500;
+  font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
@@ -154,7 +154,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-MediumItalic.otf') format('opentype');
-  font-weight: 500;
+  font-weight: 300;
   font-style: italic;
   font-display: swap;
 }
@@ -163,7 +163,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Medium.otf') format('opentype');
-  font-weight: 600;
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
@@ -171,7 +171,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-MediumItalic.otf') format('opentype');
-  font-weight: 600;
+  font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
@@ -180,7 +180,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-SemiBold.otf') format('opentype');
-  font-weight: 700;
+  font-weight: 500;
   font-style: normal;
   font-display: swap;
 }
@@ -188,7 +188,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-SemiBoldItalic.otf') format('opentype');
-  font-weight: 700;
+  font-weight: 500;
   font-style: italic;
   font-display: swap;
 }
@@ -197,7 +197,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Bold.otf') format('opentype');
-  font-weight: 800;
+  font-weight: 550;
   font-style: normal;
   font-display: swap;
 }
@@ -205,7 +205,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-BoldItalic.otf') format('opentype');
-  font-weight: 800;
+  font-weight: 550;
   font-style: italic;
   font-display: swap;
 }
@@ -213,7 +213,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-Bold.otf') format('opentype');
-  font-weight: 900;
+  font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
@@ -221,7 +221,7 @@
 @font-face {
   font-family: 'Anona';
   src: url('./assets/fonts/Anona-BoldItalic.otf') format('opentype');
-  font-weight: 900;
+  font-weight: 600;
   font-style: italic;
   font-display: swap;
 }
