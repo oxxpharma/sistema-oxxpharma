@@ -108,7 +108,7 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
         <div className="max-w-2xl w-full">
-          <h1 className="font-anona font-bold text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-tight">{cur.title}</h1>
+          <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{cur.title}</h1>
           {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{cur.subtitle}</p>}
           {cur.cta_label && cur.cta_link && (
             <div className="mt-5 sm:mt-8">
@@ -167,7 +167,7 @@ function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, o
               {tagline}
             </div>
           )}
-          <h1 className="font-anona font-bold text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-tight">{title}</h1>
+          <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{title}</h1>
           {subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{subtitle}</p>}
           {cta_label && cta_link && (
             <Link to={cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base mt-5 hover:bg-white/90">

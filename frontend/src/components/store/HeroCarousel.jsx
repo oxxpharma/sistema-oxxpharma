@@ -67,7 +67,7 @@ export default function HeroCarousel({ slides = [], settings }) {
               {cfg.tagline}
             </div>
           )}
-          <h1 className="font-anona font-bold text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-tight" data-testid="hero-title">
+          <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight" data-testid="hero-title">
             {slide.title || 'Saúde e bem-estar na sua porta.'}
           </h1>
           {slide.subtitle && (
