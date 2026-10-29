@@ -7,7 +7,7 @@ import {
   Plus, Trash2, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
   Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck, Layers,
 } from 'lucide-react';
-import { ICON_KEYS, ICON_LABELS } from '../../lib/iconLibrary';
+import { ICON_KEYS, ICON_LABELS, getIcon } from '../../lib/iconLibrary';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
 
 const BLOCK_LIBRARY = [
@@ -47,8 +47,33 @@ const DEFAULT_PROPS = {
     align: 'center',
   },
   product_grid: { source: 'featured', category: '', product_ids: '', limit: 8, columns: 4 },
-  category_grid: { limit: 16, columns: 8, show_all_button: true, button_label: 'VER TODOS OS PRODUTOS >', button_link: '/produtos' },
-  subcategory_grid: { category_id: '', limit: 16, columns: 8, show_all_button: false, button_label: 'VER TODOS OS PRODUTOS >', button_link: '/produtos' },
+  category_grid: {
+    selection_mode: 'all',
+    selected_ids: [],
+    include_all_card: true,
+    all_card_label: 'Todos',
+    all_card_position: 'start',
+    all_card_link: '/produtos',
+    limit: 16,
+    columns: 8,
+    show_all_button: true,
+    button_label: 'VER TODOS OS PRODUTOS >',
+    button_link: '/produtos',
+  },
+  subcategory_grid: {
+    selection_mode: 'all',
+    selected_ids: [],
+    include_all_card: false,
+    all_card_label: 'Todos',
+    all_card_position: 'start',
+    all_card_link: '/produtos',
+    category_id: '',
+    limit: 16,
+    columns: 8,
+    show_all_button: false,
+    button_label: 'VER TODOS OS PRODUTOS >',
+    button_link: '/produtos',
+  },
   cta_banner: { title: 'Frete grátis acima de R$ 199', subtitle: 'Em todo o Brasil', cta_label: 'Comprar agora', cta_link: '/loja', bg_color: '' },
   trust_bar: {
     use_store_settings: true,
@@ -272,8 +297,14 @@ function summary(block) {
   if (block.type === 'hero_carousel') return `${(p.slides || []).length} slide(s)`;
   if (block.type === 'product_grid') return `${p.source} · ${p.limit || 8} produtos`;
   if (block.type === 'rich_text') return p.eyebrow ? `${p.eyebrow} · ${p.subtitle || 'Título'}` : (p.html ? 'Texto formatado' : 'Título rico');
-  if (block.type === 'category_grid') return `${p.limit || 16} categorias · ${p.columns || 8} cols`;
-  if (block.type === 'subcategory_grid') return `${p.limit || 16} subcategorias · ${p.columns || 8} cols`;
+  if (block.type === 'category_grid') {
+    const mode = p.selection_mode === 'custom' ? `${(p.selected_ids || []).length} selecionadas` : (p.limit ? `${p.limit} categorias` : 'Todas');
+    return `${mode} · ${p.columns || 8} cols${p.include_all_card !== false ? ' (+ Todos)' : ''}`;
+  }
+  if (block.type === 'subcategory_grid') {
+    const mode = p.selection_mode === 'custom' ? `${(p.selected_ids || []).length} selecionadas` : (p.limit ? `${p.limit} subcategorias` : 'Todas');
+    return `${mode} · ${p.columns || 8} cols${p.include_all_card ? ' (+ Todos)' : ''}`;
+  }
   if (block.type === 'image') return p.src ? '✓ imagem' : '(sem imagem)';
   if (block.type === 'spacer') return `${p.height || 40}px`;
   if (block.type === 'trust_bar') return p.use_store_settings ? 'Itens padrões da loja' : `${(p.items || []).length} benefício(s)`;
@@ -335,40 +366,9 @@ function BlockEditor({ block, onChange }) {
     </div>
   );
 
-  if (t === 'subcategory_grid') return <SubcategoryGridBlockEditor props={p} onChange={onChange} />;
+  if (t === 'category_grid') return <CategoryGridBlockEditor props={p} onChange={onChange} />;
 
-  if (t === 'category_grid') return (
-    <div className="space-y-3">
-      <Input label="Quantidade máxima de categorias" type="number" value={p.limit ?? 16} onChange={e => onChange({ limit: parseInt(e.target.value) || 0 })} placeholder="0 para todas" />
-      <SelectInput
-        label="Colunas no Desktop"
-        value={String(p.columns || 8)}
-        onChange={v => onChange({ columns: parseInt(v) })}
-        options={[
-          { value: '4', label: '4 colunas' },
-          { value: '6', label: '6 colunas' },
-          { value: '8', label: '8 colunas (recomendado)' },
-        ]}
-      />
-      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
-        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
-          <input
-            type="checkbox"
-            checked={p.show_all_button !== false}
-            onChange={e => onChange({ show_all_button: e.target.checked })}
-            className="w-4 h-4 rounded text-brand-main"
-          />
-          Exibir botão "Ver todos os produtos"
-        </label>
-        {p.show_all_button !== false && (
-          <div className="pt-2 space-y-2 border-t border-gray-200/60">
-            <Input label="Texto do botão" value={p.button_label || 'VER TODOS OS PRODUTOS >'} onChange={e => onChange({ button_label: e.target.value })} />
-            <Input label="Link de destino" value={p.button_link || '/produtos'} onChange={e => onChange({ button_link: e.target.value })} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  if (t === 'subcategory_grid') return <SubcategoryGridBlockEditor props={p} onChange={onChange} />;
 
   if (t === 'rich_text') return <RichTextBlockEditor props={p} onChange={onChange} />;
 
@@ -885,8 +885,10 @@ function RichTextBlockEditor({ props, onChange }) {
 }
 
 
-function SubcategoryGridBlockEditor({ props, onChange }) {
+function CategoryGridBlockEditor({ props, onChange }) {
   const [categories, setCategories] = useState([]);
+  const [search, setSearch] = useState('');
+
   useEffect(() => {
     (async () => {
       try {
@@ -896,36 +898,431 @@ function SubcategoryGridBlockEditor({ props, onChange }) {
     })();
   }, []);
 
+  const isCustom = props.selection_mode === 'custom';
+  const selectedIds = Array.isArray(props.selected_ids) ? props.selected_ids : [];
+
+  const toggleCategory = (id) => {
+    const cur = new Set(selectedIds);
+    if (cur.has(id)) cur.delete(id);
+    else cur.add(id);
+    onChange({ selected_ids: [...cur], selection_mode: 'custom' });
+  };
+
+  const selectAll = () => {
+    onChange({ selected_ids: categories.map((c) => c.category_id), selection_mode: 'custom' });
+  };
+
+  const deselectAll = () => {
+    onChange({ selected_ids: [], selection_mode: 'custom' });
+  };
+
+  const filteredCategories = categories.filter((c) =>
+    (c.name || '').toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Modo de Seleção */}
       <div>
-        <label className="text-xs font-bold text-txt-secondary block mb-1">Filtrar por Categoria (Opcional)</label>
-        <select
-          value={props.category_id || ''}
-          onChange={(e) => onChange({ category_id: e.target.value })}
-          className="w-full px-2.5 py-2 border border-border rounded-lg text-xs bg-white font-medium"
-        >
-          <option value="">Todas as subcategorias</option>
-          {categories.map((c) => (
-            <option key={c.category_id} value={c.category_id}>
-              Apenas de: {c.name}
-            </option>
-          ))}
-        </select>
-        <p className="text-[11px] text-txt-secondary mt-1">
-          {props.category_id
-            ? 'Mostrando apenas subcategorias vinculadas à categoria selecionada.'
-            : 'Mostrando todas as subcategorias ativas da loja.'}
-        </p>
+        <label className="text-xs font-bold text-txt-secondary block mb-1.5">Quais categorias exibir?</label>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onChange({ selection_mode: 'all' })}
+            className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              !isCustom
+                ? 'bg-brand-main text-white border-brand-main shadow-xs'
+                : 'bg-white border-border text-txt-primary hover:border-brand-main/40'
+            }`}
+          >
+            Todas Categorias
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ selection_mode: 'custom' })}
+            className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              isCustom
+                ? 'bg-brand-main text-white border-brand-main shadow-xs'
+                : 'bg-white border-border text-txt-primary hover:border-brand-main/40'
+            }`}
+          >
+            Personalizado
+          </button>
+        </div>
       </div>
 
-      <Input
-        label="Quantidade máxima de subcategorias"
-        type="number"
-        value={props.limit ?? 16}
-        onChange={(e) => onChange({ limit: parseInt(e.target.value) || 0 })}
-        placeholder="0 para todas"
+      {/* Lista de Seleção Personalizada */}
+      {isCustom && (
+        <div className="space-y-2 p-3 bg-gray-50 border border-border rounded-xl">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-txt-primary">
+              Selecione as Categorias ({selectedIds.length}/{categories.length})
+            </span>
+            <div className="flex gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="text-brand-main hover:underline font-bold"
+              >
+                Todas
+              </button>
+              <span className="text-gray-300">|</span>
+              <button
+                type="button"
+                onClick={deselectAll}
+                className="text-gray-500 hover:text-red-500 font-bold"
+              >
+                Nenhuma
+              </button>
+            </div>
+          </div>
+
+          {categories.length > 6 && (
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar categoria..."
+              className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg bg-white"
+            />
+          )}
+
+          <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-gray-200/60 rounded-lg p-2 bg-white">
+            {filteredCategories.map((c) => {
+              const checked = selectedIds.includes(c.category_id);
+              const CatIcon = getIcon(c.icon || 'Sparkles');
+              return (
+                <label
+                  key={c.category_id}
+                  className={`flex items-center gap-2.5 p-1.5 rounded-lg text-xs cursor-pointer transition ${
+                    checked ? 'bg-orange-50/70 text-brand-main font-bold' : 'hover:bg-gray-50 text-txt-primary'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleCategory(c.category_id)}
+                    className="w-4 h-4 rounded text-brand-main focus:ring-brand-main"
+                  />
+                  <div className="w-6 h-6 rounded-md bg-white border border-gray-200 flex items-center justify-center shrink-0">
+                    {c.icon_svg ? (
+                      <img src={c.icon_svg} alt={c.name} className="w-4 h-4 object-contain" />
+                    ) : (
+                      <CatIcon className="w-3.5 h-3.5 text-brand-main" />
+                    )}
+                  </div>
+                  <span className="truncate">{c.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Card "Todos" */}
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2.5">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={props.include_all_card !== false}
+            onChange={(e) => onChange({ include_all_card: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          Colocar card "Todos" como se fosse uma categoria
+        </label>
+        <p className="text-[11px] text-txt-secondary leading-relaxed">
+          Exibe um card "Todos" estilizado que leva o visitante para a listagem completa com todos os produtos da loja.
+        </p>
+
+        {props.include_all_card !== false && (
+          <div className="pt-2 space-y-2 border-t border-gray-200/60">
+            <Input
+              label="Texto do card"
+              value={props.all_card_label || 'Todos'}
+              onChange={(e) => onChange({ all_card_label: e.target.value })}
+              placeholder="Ex: Todos"
+            />
+            <SelectInput
+              label="Posição do card 'Todos'"
+              value={props.all_card_position || 'start'}
+              onChange={(v) => onChange({ all_card_position: v })}
+              options={[
+                { value: 'start', label: 'No início (primeiro card)' },
+                { value: 'end', label: 'No final (último card)' },
+              ]}
+            />
+            <Input
+              label="Link de destino"
+              value={props.all_card_link || '/produtos'}
+              onChange={(e) => onChange({ all_card_link: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
+
+      {!isCustom && (
+        <Input
+          label="Quantidade máxima de categorias"
+          type="number"
+          value={props.limit ?? 16}
+          onChange={(e) => onChange({ limit: parseInt(e.target.value) || 0 })}
+          placeholder="0 para todas"
+        />
+      )}
+
+      <SelectInput
+        label="Colunas no Desktop"
+        value={String(props.columns || 8)}
+        onChange={(v) => onChange({ columns: parseInt(v) })}
+        options={[
+          { value: '4', label: '4 colunas' },
+          { value: '6', label: '6 colunas' },
+          { value: '8', label: '8 colunas (recomendado)' },
+        ]}
       />
+
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={props.show_all_button !== false}
+            onChange={(e) => onChange({ show_all_button: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          Exibir botão "Ver todos os produtos" abaixo da grade
+        </label>
+        {props.show_all_button !== false && (
+          <div className="pt-2 space-y-2 border-t border-gray-200/60">
+            <Input
+              label="Texto do botão"
+              value={props.button_label || 'VER TODOS OS PRODUTOS >'}
+              onChange={(e) => onChange({ button_label: e.target.value })}
+            />
+            <Input
+              label="Link de destino"
+              value={props.button_link || '/produtos'}
+              onChange={(e) => onChange({ button_link: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SubcategoryGridBlockEditor({ props, onChange }) {
+  const [categories, setCategories] = useState([]);
+  const [subcategories, setSubcategories] = useState([]);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [c, s] = await Promise.all([
+          api.get('/api/categories'),
+          api.get('/api/subcategories'),
+        ]);
+        setCategories(c.categories || c || []);
+        setSubcategories(s.subcategories || s || []);
+      } catch { /* silent */ }
+    })();
+  }, []);
+
+  const isCustom = props.selection_mode === 'custom';
+  const selectedIds = Array.isArray(props.selected_ids) ? props.selected_ids : [];
+
+  const toggleSubcategory = (id) => {
+    const cur = new Set(selectedIds);
+    if (cur.has(id)) cur.delete(id);
+    else cur.add(id);
+    onChange({ selected_ids: [...cur], selection_mode: 'custom' });
+  };
+
+  const selectAll = () => {
+    onChange({ selected_ids: subcategories.map((s) => s.subcategory_id), selection_mode: 'custom' });
+  };
+
+  const deselectAll = () => {
+    onChange({ selected_ids: [], selection_mode: 'custom' });
+  };
+
+  const filteredSubs = subcategories.filter((s) =>
+    (s.name || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Modo de Seleção */}
+      <div>
+        <label className="text-xs font-bold text-txt-secondary block mb-1.5">Quais subcategorias exibir?</label>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onChange({ selection_mode: 'all' })}
+            className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              !isCustom
+                ? 'bg-brand-main text-white border-brand-main shadow-xs'
+                : 'bg-white border-border text-txt-primary hover:border-brand-main/40'
+            }`}
+          >
+            Todas Subcategorias
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ selection_mode: 'custom' })}
+            className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              isCustom
+                ? 'bg-brand-main text-white border-brand-main shadow-xs'
+                : 'bg-white border-border text-txt-primary hover:border-brand-main/40'
+            }`}
+          >
+            Personalizado
+          </button>
+        </div>
+      </div>
+
+      {/* Lista de Seleção Personalizada */}
+      {isCustom && (
+        <div className="space-y-2 p-3 bg-gray-50 border border-border rounded-xl">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-txt-primary">
+              Selecione as Subcategorias ({selectedIds.length}/{subcategories.length})
+            </span>
+            <div className="flex gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="text-brand-main hover:underline font-bold"
+              >
+                Todas
+              </button>
+              <span className="text-gray-300">|</span>
+              <button
+                type="button"
+                onClick={deselectAll}
+                className="text-gray-500 hover:text-red-500 font-bold"
+              >
+                Nenhuma
+              </button>
+            </div>
+          </div>
+
+          {subcategories.length > 6 && (
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar subcategoria..."
+              className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg bg-white"
+            />
+          )}
+
+          <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-gray-200/60 rounded-lg p-2 bg-white">
+            {filteredSubs.map((sc) => {
+              const checked = selectedIds.includes(sc.subcategory_id);
+              const SubIcon = getIcon(sc.icon || 'Sparkles');
+              return (
+                <label
+                  key={sc.subcategory_id}
+                  className={`flex items-center gap-2.5 p-1.5 rounded-lg text-xs cursor-pointer transition ${
+                    checked ? 'bg-orange-50/70 text-brand-main font-bold' : 'hover:bg-gray-50 text-txt-primary'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSubcategory(sc.subcategory_id)}
+                    className="w-4 h-4 rounded text-brand-main focus:ring-brand-main"
+                  />
+                  <div className="w-6 h-6 rounded-md bg-white border border-gray-200 flex items-center justify-center shrink-0">
+                    {sc.icon_svg ? (
+                      <img src={sc.icon_svg} alt={sc.name} className="w-4 h-4 object-contain" />
+                    ) : (
+                      <SubIcon className="w-3.5 h-3.5 text-brand-main" />
+                    )}
+                  </div>
+                  <span className="truncate">{sc.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Se modo "Todas", filtro opcional por categoria pai */}
+      {!isCustom && (
+        <div>
+          <label className="text-xs font-bold text-txt-secondary block mb-1">Filtrar por Categoria Pai (Opcional)</label>
+          <select
+            value={props.category_id || ''}
+            onChange={(e) => onChange({ category_id: e.target.value })}
+            className="w-full px-2.5 py-2 border border-border rounded-lg text-xs bg-white font-medium"
+          >
+            <option value="">Todas as subcategorias</option>
+            {categories.map((c) => (
+              <option key={c.category_id} value={c.category_id}>
+                Apenas de: {c.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-txt-secondary mt-1">
+            {props.category_id
+              ? 'Mostrando apenas subcategorias vinculadas à categoria selecionada.'
+              : 'Mostrando todas as subcategorias ativas da loja.'}
+          </p>
+        </div>
+      )}
+
+      {/* Card "Todos" */}
+      <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2.5">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={Boolean(props.include_all_card)}
+            onChange={(e) => onChange({ include_all_card: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          Colocar card "Todos" como se fosse uma subcategoria
+        </label>
+        <p className="text-[11px] text-txt-secondary leading-relaxed">
+          Exibe um card "Todos" estilizado que leva o visitante para a listagem completa com todos os produtos da loja.
+        </p>
+
+        {Boolean(props.include_all_card) && (
+          <div className="pt-2 space-y-2 border-t border-gray-200/60">
+            <Input
+              label="Texto do card"
+              value={props.all_card_label || 'Todos'}
+              onChange={(e) => onChange({ all_card_label: e.target.value })}
+              placeholder="Ex: Todos"
+            />
+            <SelectInput
+              label="Posição do card 'Todos'"
+              value={props.all_card_position || 'start'}
+              onChange={(v) => onChange({ all_card_position: v })}
+              options={[
+                { value: 'start', label: 'No início (primeiro card)' },
+                { value: 'end', label: 'No final (último card)' },
+              ]}
+            />
+            <Input
+              label="Link de destino"
+              value={props.all_card_link || '/produtos'}
+              onChange={(e) => onChange({ all_card_link: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
+
+      {!isCustom && (
+        <Input
+          label="Quantidade máxima de subcategorias"
+          type="number"
+          value={props.limit ?? 16}
+          onChange={(e) => onChange({ limit: parseInt(e.target.value) || 0 })}
+          placeholder="0 para todas"
+        />
+      )}
 
       <SelectInput
         label="Colunas no Desktop"
@@ -948,7 +1345,7 @@ function SubcategoryGridBlockEditor({ props, onChange }) {
           />
           Exibir botão "Ver todos os produtos"
         </label>
-        {props.show_all_button && (
+        {Boolean(props.show_all_button) && (
           <div className="pt-2 space-y-2 border-t border-gray-200/60">
             <Input
               label="Texto do botão"

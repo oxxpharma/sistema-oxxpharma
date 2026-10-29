@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
 import ProductCard from './ProductCard';
 import TrustBar from './TrustBar';
 import { getIcon } from '../../lib/iconLibrary';
@@ -299,6 +299,12 @@ function ProductGridBlock({ source = 'featured', category, product_ids, limit = 
 }
 
 function CategoryGridBlock({
+  selection_mode = 'all',
+  selected_ids = [],
+  include_all_card = true,
+  all_card_label = 'Todos',
+  all_card_position = 'start',
+  all_card_link = '/produtos',
   limit = 16,
   columns = 8,
   show_all_button = true,
@@ -306,17 +312,25 @@ function CategoryGridBlock({
   button_link = '/produtos',
 }) {
   const [cats, setCats] = useState([]);
+  const selectedKey = Array.isArray(selected_ids) ? selected_ids.join(',') : '';
   useEffect(() => {
     (async () => {
       try {
         const r = await api.get('/api/categories');
         const list = r.categories || r || [];
-        setCats(limit && Number(limit) > 0 ? list.slice(0, Number(limit)) : list);
+        if (selection_mode === 'custom' && Array.isArray(selected_ids) && selected_ids.length > 0) {
+          const map = new Map(list.map((c) => [c.category_id, c]));
+          const filtered = selected_ids.map((id) => map.get(id)).filter(Boolean);
+          setCats(filtered);
+        } else {
+          setCats(limit && Number(limit) > 0 ? list.slice(0, Number(limit)) : list);
+        }
       } catch { /* silent */ }
     })();
-  }, [limit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection_mode, selectedKey, limit]);
 
-  if (!cats.length) return null;
+  if (!cats.length && !include_all_card) return null;
 
   const colsClass = {
     4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
@@ -324,9 +338,26 @@ function CategoryGridBlock({
     8: 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8',
   }[columns] || 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8';
 
+  const allCardElement = include_all_card !== false ? (
+    <Link
+      key="__all__"
+      to={all_card_link || '/produtos'}
+      className="group bg-[#FFF9F5] hover:bg-[#FFF2E8] border border-orange-100/80 hover:border-brand-main/50 rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center text-center gap-2.5 min-h-[110px] transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+      data-testid="category-card-all"
+    >
+      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white border border-orange-100/70 shadow-2xs flex items-center justify-center transition-transform group-hover:scale-110">
+        <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-brand-main stroke-[1.6]" />
+      </div>
+      <span className="text-xs sm:text-[13px] font-bold text-txt-primary group-hover:text-brand-main line-clamp-2 leading-tight transition-colors">
+        {all_card_label || 'Todos'}
+      </span>
+    </Link>
+  ) : null;
+
   return (
     <div className="py-6 sm:py-8" data-testid="category-grid-block">
       <div className={`grid ${colsClass} gap-3 sm:gap-4`}>
+        {all_card_position !== 'end' && allCardElement}
         {cats.map((c) => {
           const IconComponent = getIcon(c.icon || 'Sparkles');
           const href = c.slug ? `/categoria/${c.slug}` : `/loja?category=${encodeURIComponent(c.name)}`;
@@ -354,6 +385,7 @@ function CategoryGridBlock({
             </Link>
           );
         })}
+        {all_card_position === 'end' && allCardElement}
       </div>
 
       {show_all_button && (
@@ -403,9 +435,14 @@ function TrustBarBlock({ items, use_store_settings = true }) {
   return <TrustBar items={items} use_store_settings={use_store_settings} variant="horizontal" />;
 }
 
-
 function SubcategoryGridBlock({
   category_id = '',
+  selection_mode = 'all',
+  selected_ids = [],
+  include_all_card = false,
+  all_card_label = 'Todos',
+  all_card_position = 'start',
+  all_card_link = '/produtos',
   limit = 16,
   columns = 8,
   show_all_button = false,
@@ -413,20 +450,28 @@ function SubcategoryGridBlock({
   button_link = '/produtos',
 }) {
   const [subs, setSubs] = useState([]);
+  const selectedKey = Array.isArray(selected_ids) ? selected_ids.join(',') : '';
   useEffect(() => {
     (async () => {
       try {
-        const url = category_id
+        const url = (selection_mode !== 'custom' && category_id)
           ? `/api/subcategories?category_id=${encodeURIComponent(category_id)}`
           : '/api/subcategories';
         const r = await api.get(url);
         const list = r.subcategories || r || [];
-        setSubs(limit && Number(limit) > 0 ? list.slice(0, Number(limit)) : list);
+        if (selection_mode === 'custom' && Array.isArray(selected_ids) && selected_ids.length > 0) {
+          const map = new Map(list.map((s) => [s.subcategory_id, s]));
+          const filtered = selected_ids.map((id) => map.get(id)).filter(Boolean);
+          setSubs(filtered);
+        } else {
+          setSubs(limit && Number(limit) > 0 ? list.slice(0, Number(limit)) : list);
+        }
       } catch { /* silent */ }
     })();
-  }, [category_id, limit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category_id, selection_mode, selectedKey, limit]);
 
-  if (!subs.length) return null;
+  if (!subs.length && !include_all_card) return null;
 
   const colsClass = {
     4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
@@ -434,9 +479,26 @@ function SubcategoryGridBlock({
     8: 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8',
   }[columns] || 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8';
 
+  const allCardElement = include_all_card ? (
+    <Link
+      key="__all__"
+      to={all_card_link || '/produtos'}
+      className="group bg-[#FFF9F5] hover:bg-[#FFF2E8] border border-orange-100/80 hover:border-brand-main/50 rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center text-center gap-2.5 min-h-[110px] transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+      data-testid="subcategory-card-all"
+    >
+      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white border border-orange-100/70 shadow-2xs flex items-center justify-center transition-transform group-hover:scale-110">
+        <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-brand-main stroke-[1.6]" />
+      </div>
+      <span className="text-xs sm:text-[13px] font-bold text-txt-primary group-hover:text-brand-main line-clamp-2 leading-tight transition-colors">
+        {all_card_label || 'Todos'}
+      </span>
+    </Link>
+  ) : null;
+
   return (
     <div className="py-6 sm:py-8" data-testid="subcategory-grid-block">
       <div className={`grid ${colsClass} gap-3 sm:gap-4`}>
+        {all_card_position !== 'end' && allCardElement}
         {subs.map((sc) => {
           const IconComponent = getIcon(sc.icon || 'Sparkles');
           const href = sc.slug ? `/subcategoria/${sc.slug}` : `/loja?subcategory=${encodeURIComponent(sc.name)}`;
@@ -464,6 +526,7 @@ function SubcategoryGridBlock({
             </Link>
           );
         })}
+        {all_card_position === 'end' && allCardElement}
       </div>
 
       {show_all_button && (

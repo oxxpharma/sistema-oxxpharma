@@ -5,7 +5,7 @@ import ProductCard from '../../components/store/ProductCard';
 import HeroCarousel from '../../components/store/HeroCarousel';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
 import { getIcon } from '../../lib/iconLibrary';
-import { Loader2, ArrowRight, Pill, Baby, Heart, Sparkles, Droplets, Leaf } from 'lucide-react';
+import { Loader2, Pill, Baby, Heart, Sparkles, Droplets, Leaf, LayoutGrid } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 
 const ICONS = {
@@ -94,6 +94,18 @@ export default function StoreHome() {
           )}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3" data-testid="categories-grid">
+          {!categoryFilter && (
+            <Link
+              to="/#produtos"
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border transition-all hover:-translate-y-1 bg-[#FFF9F5] border-orange-100/80 hover:border-brand-main/50 hover:shadow-md"
+              data-testid="category-todos"
+            >
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white border border-orange-100/70 shadow-2xs">
+                <LayoutGrid className="w-5 h-5 text-brand-main" />
+              </div>
+              <span className="text-xs font-bold text-center text-txt-primary">Todos</span>
+            </Link>
+          )}
           {categories.map(cat => {
             const Icon = (cat.icon && getIcon(cat.icon)) || ICONS[cat.name] || Sparkles;
             const active = categoryFilter === cat.name;
