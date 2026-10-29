@@ -223,13 +223,13 @@ export default function StoreHeader() {
           </Link>
 
           {/* Menu Centralizado (Desktop) */}
-          <nav className="hidden lg:flex items-center justify-center gap-7 xl:gap-8 flex-1 px-4">
+          <nav className="hidden lg:flex items-center justify-center gap-7 xl:gap-8 flex-1 px-4 font-anona">
             
             {/* Item Fixo: Início */}
             <Link
               to="/"
-              className={`relative py-2 text-sm font-medium transition-colors ${
-                isItemActive('/') ? 'text-gray-900 font-semibold' : 'text-gray-700 hover:text-brand-main'
+              className={`relative py-2 text-[15px] transition-colors ${
+                isItemActive('/') ? 'text-gray-900 font-normal' : 'text-gray-700 hover:text-brand-main font-extralight'
               }`}
             >
               Início
@@ -246,8 +246,8 @@ export default function StoreHeader() {
             >
               <Link
                 to="/produtos"
-                className={`relative py-2 text-sm font-medium flex items-center gap-1.5 transition-colors ${
-                  isItemActive('/produtos') || productsHovered ? 'text-gray-900 font-semibold' : 'text-gray-700 hover:text-brand-main'
+                className={`relative py-2 text-[15px] flex items-center gap-1.5 transition-colors ${
+                  isItemActive('/produtos') || productsHovered ? 'text-gray-900 font-normal' : 'text-gray-700 hover:text-brand-main font-extralight'
                 }`}
               >
                 <span>Produtos</span>
@@ -358,8 +358,8 @@ export default function StoreHeader() {
                 <Link
                   key={idx}
                   to={item.url || '#'}
-                  className={`relative py-2 text-sm font-medium transition-colors whitespace-nowrap ${
-                    active ? 'text-gray-900 font-semibold' : 'text-gray-700 hover:text-brand-main'
+                  className={`relative py-2 text-[15px] transition-colors whitespace-nowrap ${
+                    active ? 'text-gray-900 font-normal' : 'text-gray-700 hover:text-brand-main font-extralight'
                   }`}
                 >
                   {item.label}

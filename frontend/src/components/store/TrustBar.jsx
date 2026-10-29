@@ -38,8 +38,8 @@ export default function TrustBar({ items, use_store_settings = true, variant = '
                 <Icon className="w-5 h-5 text-brand-main" />
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-bold text-txt-primary">{it.title}</div>
-                <div className="text-[11px] text-txt-secondary leading-snug">{it.desc}</div>
+                <div className="text-xs font-bold text-txt-primary font-montserrat">{it.title}</div>
+                <div className="text-[11px] text-txt-secondary leading-snug font-montserrat">{it.desc}</div>
               </div>
             </div>
           );
@@ -64,8 +64,8 @@ export default function TrustBar({ items, use_store_settings = true, variant = '
                   <Icon className="w-6 h-6 text-brand-main" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold text-txt-primary">{it.title}</div>
-                  <div className="text-xs text-txt-secondary mt-0.5">{it.desc}</div>
+                  <div className="text-sm font-bold text-txt-primary font-montserrat">{it.title}</div>
+                  <div className="text-xs text-txt-secondary mt-0.5 font-montserrat">{it.desc}</div>
                 </div>
               </div>
             );

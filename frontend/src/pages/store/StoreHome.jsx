@@ -86,7 +86,7 @@ export default function StoreHome() {
       {/* Categorias */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="font-heading font-black text-2xl text-txt-primary">
+          <h2 className="font-anona font-bold text-2xl sm:text-3xl text-txt-primary">
             {categoryFilter ? `Categoria: ${categoryFilter}` : 'Navegue por categoria'}
           </h2>
           {categoryFilter && (
@@ -133,7 +133,7 @@ export default function StoreHome() {
       {/* Destaques */}
       {!categoryFilter && featured.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <h2 className="font-heading font-black text-2xl text-txt-primary mb-6">Ofertas em destaque</h2>
+          <h2 className="font-anona font-bold text-2xl sm:text-3xl text-txt-primary mb-6">Ofertas em destaque</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="featured-grid">
             {featured.map(p => <ProductCard key={p.product_id} product={p} />)}
           </div>
@@ -142,7 +142,7 @@ export default function StoreHome() {
 
       {/* Todos produtos */}
       <section id="produtos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <h2 className="font-heading font-black text-2xl text-txt-primary mb-6">
+        <h2 className="font-anona font-bold text-2xl sm:text-3xl text-txt-primary mb-6">
           {categoryFilter ? 'Produtos' : 'Todos os produtos'}
         </h2>
         {loading ? (

@@ -108,11 +108,11 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
         <div className="max-w-2xl w-full">
-          <h1 className="font-heading font-bold text-2xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight">{cur.title}</h1>
-          {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{cur.subtitle}</p>}
+          <h1 className="font-anona font-bold text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-tight">{cur.title}</h1>
+          {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{cur.subtitle}</p>}
           {cur.cta_label && cur.cta_link && (
             <div className="mt-5 sm:mt-8">
-              <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base hover:bg-white/90 transition">
+              <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition">
                 {cur.cta_label} <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
@@ -163,14 +163,14 @@ function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, o
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
         <div className="max-w-2xl w-full">
           {tagline && (
-            <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-semibold px-3 py-1.5 rounded-full mb-3 sm:mb-4">
+            <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">
               {tagline}
             </div>
           )}
-          <h1 className="font-heading font-bold text-2xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight">{title}</h1>
-          {subtitle && <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md">{subtitle}</p>}
+          <h1 className="font-anona font-bold text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-tight">{title}</h1>
+          {subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{subtitle}</p>}
           {cta_label && cta_link && (
-            <Link to={cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base mt-5 hover:bg-white/90">
+            <Link to={cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base mt-5 hover:bg-white/90">
               {cta_label} <ArrowRight className="w-4 h-4" />
             </Link>
           )}
@@ -198,14 +198,14 @@ function SectionTitle({ title, subtitle, align = 'left', eyebrow, eyebrow_color,
     <div className={`py-4 ${align === 'center' ? 'text-center mx-auto' : ''}`}>
       {eyebrow && (
         <div
-          className="text-xs sm:text-sm uppercase font-extrabold tracking-[0.25em] mb-2"
+          className="text-xs sm:text-sm uppercase font-montserrat font-bold tracking-[0.25em] mb-2"
           style={{ color: eyebrow_color || 'var(--brand-main, #E8731A)' }}
         >
           {eyebrow}
         </div>
       )}
-      <h2 className="font-heading font-bold text-2xl sm:text-3xl text-txt-primary" dangerouslySetInnerHTML={{ __html: title || '' }} />
-      {subtitle && <p className="text-txt-secondary mt-1 text-sm sm:text-base">{subtitle}</p>}
+      <h2 className="font-anona font-bold text-2xl sm:text-3xl md:text-4xl text-txt-primary" dangerouslySetInnerHTML={{ __html: title || '' }} />
+      {subtitle && <p className="font-montserrat text-txt-secondary mt-1.5 text-sm sm:text-base">{subtitle}</p>}
     </div>
   );
 }
@@ -229,7 +229,9 @@ function RichTextBlock({
 
   const fontClass = {
     serif: 'font-serif',
-    heading: 'font-heading font-black',
+    heading: 'font-anona font-bold',
+    anona: 'font-anona font-bold',
+    montserrat: 'font-montserrat font-bold',
     sans: 'font-sans font-bold',
   }[font_family] || 'font-serif';
 
@@ -245,7 +247,7 @@ function RichTextBlock({
     <div className={`py-5 sm:py-7 ${alignClass} max-w-4xl`} data-testid="rich-text-block">
       {eyebrow && (
         <div
-          className="text-xs sm:text-sm uppercase font-extrabold tracking-[0.25em] mb-2 sm:mb-2.5"
+          className="text-xs sm:text-sm uppercase font-montserrat font-bold tracking-[0.25em] mb-2 sm:mb-2.5"
           style={{ color: eyebrow_color || 'var(--brand-main, #E8731A)' }}
         >
           {eyebrow}
@@ -260,7 +262,7 @@ function RichTextBlock({
       )}
 
       {subtitle && (
-        <p className="text-txt-secondary text-sm sm:text-base md:text-lg mt-2 sm:mt-3 leading-relaxed max-w-2xl mx-auto">
+        <p className="font-montserrat text-txt-secondary text-sm sm:text-base md:text-lg mt-2 sm:mt-3 leading-relaxed max-w-2xl mx-auto">
           {subtitle}
         </p>
       )}
@@ -392,7 +394,7 @@ function CategoryGridBlock({
         <div className="mt-8 flex justify-center">
           <Link
             to={button_link || '/produtos'}
-            className="inline-flex items-center gap-2 bg-brand-main hover:bg-brand-dark text-white font-bold text-xs sm:text-sm px-8 py-3.5 rounded-full uppercase tracking-wider shadow-sm transition hover:scale-[1.02]"
+            className="inline-flex items-center gap-2 bg-brand-main hover:bg-brand-dark text-white font-montserrat font-bold text-xs sm:text-sm px-8 py-3.5 rounded-full uppercase tracking-wider shadow-sm transition hover:scale-[1.02]"
             data-testid="category-view-all-btn"
           >
             {button_label || 'VER TODOS OS PRODUTOS >'}
@@ -421,10 +423,10 @@ function CtaBanner({ title, subtitle, cta_label, cta_link, bg_color }) {
       className="rounded-2xl p-8 text-center text-white"
       style={{ background: bg_color || 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)' }}
     >
-      <h3 className="font-heading font-bold text-2xl sm:text-3xl">{title}</h3>
-      {subtitle && <p className="text-white/90 mt-2 text-sm sm:text-base">{subtitle}</p>}
+      <h3 className="font-anona font-bold text-2xl sm:text-3xl">{title}</h3>
+      {subtitle && <p className="font-montserrat text-white/90 mt-2 text-sm sm:text-base">{subtitle}</p>}
       {cta_label && cta_link && (
-        <Link to={cta_link} className="inline-block mt-4 bg-white text-brand-main px-6 py-3 rounded-lg font-bold hover:bg-white/90">
+        <Link to={cta_link} className="inline-block mt-4 bg-white text-brand-main px-6 py-3 rounded-lg font-montserrat font-semibold hover:bg-white/90">
           {cta_label}
         </Link>
       )}
@@ -533,7 +535,7 @@ function SubcategoryGridBlock({
         <div className="mt-8 flex justify-center">
           <Link
             to={button_link || '/produtos'}
-            className="inline-flex items-center gap-2 bg-brand-main hover:bg-brand-dark text-white font-bold text-xs sm:text-sm px-8 py-3.5 rounded-full uppercase tracking-wider shadow-sm transition hover:scale-[1.02]"
+            className="inline-flex items-center gap-2 bg-brand-main hover:bg-brand-dark text-white font-montserrat font-bold text-xs sm:text-sm px-8 py-3.5 rounded-full uppercase tracking-wider shadow-sm transition hover:scale-[1.02]"
             data-testid="subcategory-view-all-btn"
           >
             {button_label || 'VER TODOS OS PRODUTOS >'}

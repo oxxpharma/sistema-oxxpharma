@@ -63,15 +63,15 @@ export default function HeroCarousel({ slides = [], settings }) {
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
         <div className="fade-in max-w-2xl w-full">
           {cfg.tagline && (
-            <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-semibold px-3 py-1.5 rounded-full mb-3 sm:mb-4">
+            <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">
               {cfg.tagline}
             </div>
           )}
-          <h1 className="font-heading font-bold text-2xl sm:text-4xl md:text-5xl lg:text-6xl leading-tight" data-testid="hero-title">
+          <h1 className="font-anona font-bold text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-tight" data-testid="hero-title">
             {slide.title || 'Saúde e bem-estar na sua porta.'}
           </h1>
           {slide.subtitle && (
-            <p className="mt-2 sm:mt-4 text-white/90 text-sm sm:text-base md:text-lg max-w-md" data-testid="hero-subtitle">
+            <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed" data-testid="hero-subtitle">
               {slide.subtitle}
             </p>
           )}
@@ -79,7 +79,7 @@ export default function HeroCarousel({ slides = [], settings }) {
             <div className="mt-5 sm:mt-8">
               <Link
                 to={slide.cta_link}
-                className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-bold text-sm sm:text-base hover:bg-white/90 transition"
+                className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
                 data-testid="hero-cta"
               >
                 {slide.cta_label} <ArrowRight className="w-4 h-4" />

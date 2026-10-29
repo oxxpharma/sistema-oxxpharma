@@ -64,7 +64,7 @@ export default function ProductCard({ product }) {
           </div>
         )}
         <h3
-          className="font-medium text-txt-primary line-clamp-2 min-h-[40px]"
+          className="font-sans font-medium text-txt-primary line-clamp-2 min-h-[40px]"
           style={{ fontSize: `${settings?.product_card_title_px || 14}px`, lineHeight: 1.25 }}
         >
           {product.name}
@@ -82,7 +82,7 @@ export default function ProductCard({ product }) {
         )}
         <div className="mt-3 flex items-baseline gap-2">
           <span
-            className="font-heading font-bold text-txt-primary"
+            className="font-sans font-bold text-txt-primary"
             style={{ fontSize: `${settings?.product_card_price_px || 18}px` }}
           >
             {formatCurrency(effective)}
