@@ -1,4 +1,184 @@
-@import url('https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;700;900&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+/* ==========================================================================
+   TIPOGRAFIA OFICIAL OXXPHARMA: Tosh A (Títulos) & Anona (Textos e Interface)
+   ========================================================================== */
+
+/* --- Tosh A (Títulos mais destacados) --- */
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Thin.otf') format('opentype');
+  font-weight: 100 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Bold.otf') format('opentype');
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tosh A';
+  src: url('./assets/fonts/ToshA-Black.otf') format('opentype');
+  font-weight: 800 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --- Anona (Textos comuns, corpo, labels e descrições) --- */
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Thin.otf') format('opentype');
+  font-weight: 100 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-ThinItalic.otf') format('opentype');
+  font-weight: 100 200;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-LightItalic.otf') format('opentype');
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Italic.otf') format('opentype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-MediumItalic.otf') format('opentype');
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-SemiBold.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-SemiBoldItalic.otf') format('opentype');
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-BoldItalic.otf') format('opentype');
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-ExtraBold.otf') format('opentype');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-ExtraBoldItalic.otf') format('opentype');
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-Black.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anona';
+  src: url('./assets/fonts/Anona-BlackItalic.otf') format('opentype');
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
 
 @tailwind base;
 @tailwind components;
@@ -11,7 +191,7 @@
 }
 
 body {
-  font-family: 'IBM Plex Sans', sans-serif;
+  font-family: 'Anona', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   background-color: #F9FAFB;
   color: #111827;
   -webkit-font-smoothing: antialiased;
@@ -19,7 +199,7 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Chivo', sans-serif;
+  font-family: 'Tosh A', sans-serif;
 }
 
 ::-webkit-scrollbar {
@@ -74,9 +254,7 @@ h1, h2, h3, h4, h5, h6 {
 .admin-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 .admin-nav-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
 
-/* Animação de flutuação do cartão na caixa do programa de indicação.
-   Usa CSS variables --tx, --ty e --rot definidas inline pelo componente,
-   para combinar com translate/rotate configuráveis do admin. */
+/* Animação de flutuação do cartão na caixa do programa de indicação */
 @keyframes referralCardFloat {
   0%, 100% {
     transform: translate(var(--tx, 12%), var(--ty, -50%)) rotate(var(--rot, -8deg));

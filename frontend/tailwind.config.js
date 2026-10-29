@@ -33,8 +33,12 @@ module.exports = {
         },
       },
       fontFamily: {
-        heading: ['Chivo', 'sans-serif'],
-        body: ['IBM Plex Sans', 'sans-serif'],
+        heading: ['"Tosh A"', 'sans-serif'],
+        tosh: ['"Tosh A"', 'sans-serif'],
+        title: ['"Tosh A"', 'sans-serif'],
+        body: ['Anona', 'sans-serif'],
+        anona: ['Anona', 'sans-serif'],
+        sans: ['Anona', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
       },
       width: {
         sidebar: '17rem',
