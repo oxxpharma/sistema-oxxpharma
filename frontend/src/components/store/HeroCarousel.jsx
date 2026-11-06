@@ -119,6 +119,30 @@ export default function HeroCarousel({ slides = [], settings }) {
   const next = useCallback(() => setIdx((i) => (i + 1) % Math.max(1, total)), [total]);
   const prev = useCallback(() => setIdx((i) => (i - 1 + total) % Math.max(1, total)), [total]);
 
+  // Suporte a gesto de deslizar com o dedo (Touch Swipe) no celular
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
+  const minSwipeDistance = 45;
+
+  const handleTouchStart = (e) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchMove = (e) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (total <= 1 || !touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    if (distance > minSwipeDistance) {
+      next();
+    } else if (distance < -minSwipeDistance) {
+      prev();
+    }
+  };
+
   useEffect(() => {
     if (total <= 1 || interval === 0) return;
     const id = setInterval(next, interval);
@@ -134,10 +158,15 @@ export default function HeroCarousel({ slides = [], settings }) {
   const ratioDesk = formatAspectRatio(sizing.ratioDesktop, '1920 / 575');
   const ratioMob = formatAspectRatio(sizing.ratioMobile, '1080 / 834');
   const maxW = sizing.maxWidth && sizing.maxWidth !== 'none' ? sizing.maxWidth : null;
+  const navMode = cfg.hero_carousel_mobile_nav || cfg.mobile_nav_mode || 'swipe_only';
 
   return (
     <section
-      className={`relative text-white overflow-hidden w-full ${carouselClass}`}
+      className={`relative text-white overflow-hidden w-full select-none ${carouselClass}`}
+      style={{ touchAction: 'pan-y' }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
@@ -339,13 +368,29 @@ export default function HeroCarousel({ slides = [], settings }) {
       </div>
 
       {/* Setas (só se >1 slide) */}
-      {total > 1 && (
+      {total > 1 && navMode !== 'hidden_all' && (
         <>
-          <button onClick={prev} className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center transition" aria-label="Slide anterior" data-testid="hero-prev">
-            <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
+          <button
+            type="button"
+            onClick={prev}
+            className={`absolute left-1.5 md:left-4 top-1/2 -translate-y-1/2 z-20 ${
+              navMode === 'swipe_only' ? 'hidden md:flex' : 'flex'
+            } w-7 h-7 sm:w-8 sm:h-8 md:w-11 md:h-11 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-sm items-center justify-center transition shadow-sm active:scale-95`}
+            aria-label="Slide anterior"
+            data-testid="hero-prev"
+          >
+            <ChevronLeft className="w-4 h-4 md:w-5 md:h-5" />
           </button>
-          <button onClick={next} className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center transition" aria-label="Próximo slide" data-testid="hero-next">
-            <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
+          <button
+            type="button"
+            onClick={next}
+            className={`absolute right-1.5 md:right-4 top-1/2 -translate-y-1/2 z-20 ${
+              navMode === 'swipe_only' ? 'hidden md:flex' : 'flex'
+            } w-7 h-7 sm:w-8 sm:h-8 md:w-11 md:h-11 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-sm items-center justify-center transition shadow-sm active:scale-95`}
+            aria-label="Próximo slide"
+            data-testid="hero-next"
+          >
+            <ChevronRight className="w-4 h-4 md:w-5 md:h-5" />
           </button>
         </>
       )}

@@ -73,6 +73,7 @@ const DEFAULT_PROPS = {
   hero_carousel: {
     autoplay_seconds: 6,
     show_dots: true,
+    mobile_nav_mode: 'swipe_only',
     banner_sizing_mode: 'aspect_ratio',
     aspect_ratio_desktop: '1920 / 575',
     aspect_ratio_mobile: '1080 / 834',
@@ -1493,6 +1494,32 @@ function CarouselEditor({ props, onChange }) {
             <span className="text-sm">Mostrar bolinhas</span>
           </label>
         </div>
+      </div>
+
+      {/* Navegação e Setas no Mobile */}
+      <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-txt-primary flex items-center gap-1.5">
+            📱 Navegação no Celular (Mobile)
+          </span>
+          <span className="text-[10px] bg-brand-main/15 text-brand-main font-semibold px-2 py-0.5 rounded-full">
+            Touch Swipe Ativo
+          </span>
+        </div>
+
+        <SelectInput
+          label="Setas no Celular (Mobile)"
+          value={props.mobile_nav_mode || 'swipe_only'}
+          onChange={(v) => onChange({ mobile_nav_mode: v })}
+          options={[
+            { value: 'swipe_only', label: '👆 Ocultar setas no celular (Apenas deslizar com o dedo · Não cobre texto)' },
+            { value: 'compact_arrows', label: '◀ ▶ Mostrar setas compactas nas laterais (+ deslizar com o dedo)' },
+            { value: 'hidden_all', label: '🚫 Ocultar setas em todos os dispositivos' },
+          ]}
+        />
+        <p className="text-[10px] text-txt-secondary leading-tight">
+          💡 O gesto de arrastar/deslizar com o dedo (swipe) funciona naturalmente em telas de toque sem cobrir o design ou textos do banner.
+        </p>
       </div>
 
       <BannerSizingControls props={props} onChange={onChange} />
