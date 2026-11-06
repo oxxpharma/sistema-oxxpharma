@@ -31,6 +31,10 @@ const BLOCK_LIBRARY = [
 
 const DEFAULT_PROPS = {
   hero: {
+    banner_sizing_mode: 'aspect_ratio',
+    aspect_ratio_desktop: '1920 / 575',
+    aspect_ratio_mobile: '1080 / 834',
+    max_container_width: 'none',
     title: 'Título',
     subtitle: 'Subtítulo',
     cta_label: 'Saiba mais',
@@ -69,6 +73,10 @@ const DEFAULT_PROPS = {
   hero_carousel: {
     autoplay_seconds: 6,
     show_dots: true,
+    banner_sizing_mode: 'aspect_ratio',
+    aspect_ratio_desktop: '1920 / 575',
+    aspect_ratio_mobile: '1080 / 834',
+    max_container_width: 'none',
     banner_height: 'normal',
     max_height_px: '',
     slides: [
@@ -574,14 +582,18 @@ function summary(block) {
   const p = block.props || {};
   if (block.type === 'hero') {
     const imgs = [p.image_url ? 'Desktop' : null, p.image_url_mobile ? 'Mobile' : null].filter(Boolean).join(' + ');
-    const maxH = p.max_height_px ? `máx ${p.max_height_px}px` : null;
-    const details = [imgs, maxH].filter(Boolean).join(' · ');
+    const sizing = p.banner_sizing_mode === 'fixed_height'
+      ? (p.max_height_px ? `máx ${p.max_height_px}px` : 'altura fixa')
+      : (p.aspect_ratio_desktop || '1920×575');
+    const details = [imgs, sizing].filter(Boolean).join(' · ');
     return `${p.title || '(sem título)'}${details ? ` · ${details}` : ''}`;
   }
   if (block.type === 'cta_banner' || block.type === 'section_title') return p.title || '(sem título)';
   if (block.type === 'hero_carousel') {
-    const maxH = p.max_height_px ? `máx ${p.max_height_px}px` : null;
-    return `${(p.slides || []).length} slide(s)${maxH ? ` · ${maxH}` : ''}`;
+    const sizing = p.banner_sizing_mode === 'fixed_height'
+      ? (p.max_height_px ? `máx ${p.max_height_px}px` : 'altura fixa')
+      : (p.aspect_ratio_desktop || '1920×575');
+    return `${(p.slides || []).length} slide(s) · ${sizing}`;
   }
   if (block.type === 'product_grid') return `${p.source} · ${p.limit || 8} produtos`;
   if (block.type === 'rich_text') return p.eyebrow ? `${p.eyebrow} · ${p.subtitle || 'Título'}` : (p.html ? 'Texto formatado' : 'Título rico');
@@ -848,6 +860,274 @@ function DimensionInput({
             <option key={u} value={u}>{u}</option>
           ))}
         </select>
+      </div>
+    </div>
+  );
+}
+
+function BannerSizingControls({ props, onChange }) {
+  const isAspect = props.banner_sizing_mode !== 'fixed_height';
+
+  return (
+    <div className="space-y-3">
+      {/* Seletor de Modo */}
+      <div className="p-3 bg-amber-50/70 border border-amber-200/90 rounded-xl space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+            📐 Modo de Escala do Banner
+          </span>
+          <span className="text-[10px] bg-amber-200/80 text-amber-900 font-semibold px-2 py-0.5 rounded-full">
+            {isAspect ? 'Aspect-Ratio (Sem Cortes)' : 'Altura Fixa'}
+          </span>
+        </div>
+
+        <SelectInput
+          label="Comportamento nas diferentes telas:"
+          value={props.banner_sizing_mode || 'aspect_ratio'}
+          onChange={(v) => onChange({ banner_sizing_mode: v })}
+          options={[
+            { value: 'aspect_ratio', label: '✨ Proporcional à Arte (Aspect-Ratio · Não corta em nenhuma tela)' },
+            { value: 'fixed_height', label: '📏 Alturas Fixas / Mínima e Máxima (Modo Clássico)' },
+          ]}
+        />
+
+        {isAspect ? (
+          <div className="space-y-3 pt-2 border-t border-amber-200/80">
+            <div className="grid grid-cols-2 gap-2">
+              <SelectInput
+                label="Proporção Desktop"
+                value={props.aspect_ratio_desktop_preset || (['1920 / 575', '1920 / 600', '1920 / 500', '16 / 9'].includes(props.aspect_ratio_desktop) ? props.aspect_ratio_desktop : (props.aspect_ratio_desktop ? 'custom' : '1920 / 575'))}
+                onChange={(v) => {
+                  if (v === 'custom') {
+                    onChange({ aspect_ratio_desktop_preset: 'custom', aspect_ratio_desktop: props.aspect_ratio_desktop || '1920 / 575' });
+                  } else {
+                    onChange({ aspect_ratio_desktop_preset: v, aspect_ratio_desktop: v });
+                  }
+                }}
+                options={[
+                  { value: '1920 / 575', label: '1920×575 (Padrão OxxPharma)' },
+                  { value: '1920 / 600', label: '1920×600 (Panorâmico)' },
+                  { value: '1920 / 500', label: '1920×500 (Compacto)' },
+                  { value: '16 / 9', label: '16:9 (Widescreen 1920×1080)' },
+                  { value: 'custom', label: 'Personalizado...' },
+                ]}
+              />
+              <SelectInput
+                label="Proporção Mobile (Celular)"
+                value={props.aspect_ratio_mobile_preset || (['1080 / 834', '1080 / 1080', '1080 / 1350', 'same'].includes(props.aspect_ratio_mobile) ? props.aspect_ratio_mobile : (props.aspect_ratio_mobile ? 'custom' : '1080 / 834'))}
+                onChange={(v) => {
+                  if (v === 'custom') {
+                    onChange({ aspect_ratio_mobile_preset: 'custom', aspect_ratio_mobile: props.aspect_ratio_mobile || '1080 / 834' });
+                  } else if (v === 'same') {
+                    onChange({ aspect_ratio_mobile_preset: 'same', aspect_ratio_mobile: 'same' });
+                  } else {
+                    onChange({ aspect_ratio_mobile_preset: v, aspect_ratio_mobile: v });
+                  }
+                }}
+                options={[
+                  { value: '1080 / 834', label: '1080×834 (Padrão Mobile)' },
+                  { value: '1080 / 1080', label: '1080×1080 (Quadrado 1:1)' },
+                  { value: '1080 / 1350', label: '1080×1350 (Vertical 4:5)' },
+                  { value: 'same', label: 'Mesma do Desktop' },
+                  { value: 'custom', label: 'Personalizado...' },
+                ]}
+              />
+            </div>
+
+            {(props.aspect_ratio_desktop_preset === 'custom' || props.aspect_ratio_mobile_preset === 'custom') && (
+              <div className="grid grid-cols-2 gap-2">
+                {props.aspect_ratio_desktop_preset === 'custom' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-txt-secondary mb-1">
+                      Proporção Desktop Custom
+                    </label>
+                    <Input
+                      value={props.aspect_ratio_desktop || '1920 / 575'}
+                      onChange={(e) => onChange({ aspect_ratio_desktop: e.target.value })}
+                      placeholder="Ex: 1920 / 575"
+                    />
+                  </div>
+                ) : <div />}
+                {props.aspect_ratio_mobile_preset === 'custom' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-txt-secondary mb-1">
+                      Proporção Mobile Custom
+                    </label>
+                    <Input
+                      value={props.aspect_ratio_mobile || '1080 / 834'}
+                      onChange={(e) => onChange({ aspect_ratio_mobile: e.target.value })}
+                      placeholder="Ex: 1080 / 834"
+                    />
+                  </div>
+                ) : <div />}
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-amber-200/80">
+              <SelectInput
+                label="Largura Máxima em Monitores Grandes / Ultrawide"
+                value={props.max_container_width || 'none'}
+                onChange={(v) => onChange({ max_container_width: v })}
+                options={[
+                  { value: 'none', label: '100% da tela (Sem limite de largura)' },
+                  { value: '2200px', label: '2200px (Recomendado para Ultrawide)' },
+                  { value: '2560px', label: '2560px (Monitores 2K / 4K)' },
+                  { value: '1920px', label: '1920px (Tamanho original 1920px)' },
+                ]}
+              />
+              <p className="text-[10px] text-amber-900/80 mt-1.5 leading-relaxed">
+                💡 <b>Solução Aspect-Ratio</b>: A altura é calculada proporcionalmente à largura. Seja em notebook (1366px), monitor de 24" (1920px) ou celular, a arte se expande e retrai sem nunca cortar a imagem acima, abaixo ou nas laterais!
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 pt-2 border-t border-amber-200/80">
+            {/* 🖥️ Dimensões Desktop */}
+            <div className="p-3 bg-white/70 border border-border rounded-xl space-y-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-txt-primary">
+                🖥️ Alturas no Desktop (Computador)
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <SelectInput
+                  label="Altura Mínima (Desktop)"
+                  value={props.banner_height || 'normal'}
+                  onChange={(v) => onChange({ banner_height: v })}
+                  options={[
+                    { value: 'compact', label: 'Compacto (360px)' },
+                    { value: 'normal', label: 'Padrão (440px)' },
+                    { value: 'large', label: 'Amplo / Grande (560px)' },
+                    { value: 'screen', label: 'Tela Cheia (72vh)' },
+                    { value: 'custom', label: 'Personalizado...' },
+                  ]}
+                />
+                <SelectInput
+                  label="Altura Máxima (Desktop)"
+                  value={props.banner_max_height_type || (props.max_height_px ? 'custom' : 'none')}
+                  onChange={(v) => {
+                    if (v === 'none') {
+                      onChange({ banner_max_height_type: 'none', max_height_px: '', banner_max_height_custom: '' });
+                    } else if (v === 'custom') {
+                      onChange({ banner_max_height_type: 'custom', banner_max_height_custom: props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px') });
+                    } else {
+                      onChange({ banner_max_height_type: v, max_height_px: v.replace('px', ''), banner_max_height_custom: v });
+                    }
+                  }}
+                  options={[
+                    { value: 'none', label: 'Sem limite (Ilimitado)' },
+                    { value: '400px', label: 'Compacto (400px)' },
+                    { value: '500px', label: 'Médio / Padrão (500px)' },
+                    { value: '600px', label: 'Grande (600px)' },
+                    { value: '750px', label: 'Amplo (750px)' },
+                    { value: 'custom', label: 'Personalizado...' },
+                  ]}
+                />
+              </div>
+              {(props.banner_height === 'custom' || props.banner_max_height_type === 'custom' || props.max_height_px) && (
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
+                  {props.banner_height === 'custom' ? (
+                    <DimensionInput
+                      label="Mínima Personalizada"
+                      value={props.banner_min_height_custom || '440px'}
+                      onChange={(v) => onChange({ banner_min_height_custom: v })}
+                      placeholder="440"
+                      defaultUnit="px"
+                    />
+                  ) : <div />}
+                  {(props.banner_max_height_type === 'custom' || props.max_height_px) ? (
+                    <DimensionInput
+                      label="Máxima Personalizada"
+                      value={props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px')}
+                      onChange={(v) => onChange({ banner_max_height_custom: v, max_height_px: v.replace(/[^0-9.]/g, '') })}
+                      placeholder="500"
+                      defaultUnit="px"
+                    />
+                  ) : <div />}
+                </div>
+              )}
+            </div>
+
+            {/* 📱 Dimensões Mobile */}
+            <div className="p-3 bg-orange-50/60 border border-orange-200/80 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
+                  📱 Alturas no Mobile (Celular)
+                </span>
+                <span className="text-[10px] bg-orange-100 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
+                  {props.banner_mobile_dimensions_enabled ? 'Exclusivo Mobile' : 'Automático'}
+                </span>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-txt-primary">
+                <input
+                  type="checkbox"
+                  checked={Boolean(props.banner_mobile_dimensions_enabled)}
+                  onChange={(e) => onChange({ banner_mobile_dimensions_enabled: e.target.checked })}
+                  className="w-4 h-4 rounded text-brand-main"
+                />
+                <span>Ativar controle de altura mínima e máxima no Celular (Mobile)</span>
+              </label>
+              {props.banner_mobile_dimensions_enabled && (
+                <div className="space-y-3 pt-2 border-t border-orange-200/80">
+                  <div className="grid grid-cols-2 gap-2">
+                    <SelectInput
+                      label="Altura Mínima (Mobile)"
+                      value={props.banner_height_mobile || 'normal'}
+                      onChange={(v) => onChange({ banner_height_mobile: v })}
+                      options={[
+                        { value: 'compact', label: 'Compacto (240px)' },
+                        { value: 'normal', label: 'Padrão (320px)' },
+                        { value: 'large', label: 'Amplo (420px)' },
+                        { value: 'screen', label: 'Tela Cheia (85vh)' },
+                        { value: 'custom', label: 'Personalizado...' },
+                      ]}
+                    />
+                    <SelectInput
+                      label="Altura Máxima (Mobile)"
+                      value={props.banner_max_height_mobile_type || (props.max_height_mobile_px ? 'custom' : 'none')}
+                      onChange={(v) => {
+                        if (v === 'none') {
+                          onChange({ banner_max_height_mobile_type: 'none', max_height_mobile_px: '', banner_max_height_mobile_custom: '' });
+                        } else if (v === 'custom') {
+                          onChange({ banner_max_height_mobile_type: 'custom', banner_max_height_mobile_custom: props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px') });
+                        } else {
+                          onChange({ banner_max_height_mobile_type: v, max_height_mobile_px: v.replace('px', ''), banner_max_height_mobile_custom: v });
+                        }
+                      }}
+                      options={[
+                        { value: 'none', label: 'Sem limite (Ilimitado)' },
+                        { value: '320px', label: 'Compacto (320px)' },
+                        { value: '420px', label: 'Médio (420px)' },
+                        { value: '520px', label: 'Grande (520px)' },
+                        { value: 'custom', label: 'Personalizado...' },
+                      ]}
+                    />
+                  </div>
+                  {(props.banner_height_mobile === 'custom' || props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) && (
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-orange-200/80">
+                      {props.banner_height_mobile === 'custom' ? (
+                        <DimensionInput
+                          label="Mínima Mobile Personalizada"
+                          value={props.banner_min_height_mobile_custom || '320px'}
+                          onChange={(v) => onChange({ banner_min_height_mobile_custom: v })}
+                          placeholder="320"
+                          defaultUnit="px"
+                        />
+                      ) : <div />}
+                      {(props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) ? (
+                        <DimensionInput
+                          label="Máxima Mobile Personalizada"
+                          value={props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px')}
+                          onChange={(v) => onChange({ banner_max_height_mobile_custom: v, max_height_mobile_px: v.replace(/[^0-9.]/g, '') })}
+                          placeholder="420"
+                          defaultUnit="px"
+                        />
+                      ) : <div />}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1162,155 +1442,7 @@ function HeroBlockEditor({ props, onChange }) {
           />
         </div>
 
-        {/* 🖥️ Dimensões Desktop */}
-        <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
-          <div className="text-xs font-bold uppercase tracking-wider text-txt-primary">
-            🖥️ Alturas no Desktop (Computador)
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <SelectInput
-              label="Altura Mínima (Desktop)"
-              value={props.banner_height || 'normal'}
-              onChange={(v) => onChange({ banner_height: v })}
-              options={[
-                { value: 'compact', label: 'Compacto (360px)' },
-                { value: 'normal', label: 'Padrão (440px)' },
-                { value: 'large', label: 'Amplo / Grande (560px)' },
-                { value: 'screen', label: 'Tela Cheia (72vh)' },
-                { value: 'custom', label: 'Personalizado...' },
-              ]}
-            />
-            <SelectInput
-              label="Altura Máxima (Desktop)"
-              value={props.banner_max_height_type || (props.max_height_px ? 'custom' : 'none')}
-              onChange={(v) => {
-                if (v === 'none') {
-                  onChange({ banner_max_height_type: 'none', max_height_px: '', banner_max_height_custom: '' });
-                } else if (v === 'custom') {
-                  onChange({ banner_max_height_type: 'custom', banner_max_height_custom: props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px') });
-                } else {
-                  onChange({ banner_max_height_type: v, max_height_px: v.replace('px', ''), banner_max_height_custom: v });
-                }
-              }}
-              options={[
-                { value: 'none', label: 'Sem limite (Ilimitado)' },
-                { value: '400px', label: 'Compacto (400px)' },
-                { value: '500px', label: 'Médio / Padrão (500px)' },
-                { value: '600px', label: 'Grande (600px)' },
-                { value: '750px', label: 'Amplo (750px)' },
-                { value: 'custom', label: 'Personalizado...' },
-              ]}
-            />
-          </div>
-
-          {(props.banner_height === 'custom' || props.banner_max_height_type === 'custom' || props.max_height_px) && (
-            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
-              {props.banner_height === 'custom' ? (
-                <DimensionInput
-                  label="Mínima Personalizada"
-                  value={props.banner_min_height_custom || '440px'}
-                  onChange={(v) => onChange({ banner_min_height_custom: v })}
-                  placeholder="440"
-                  defaultUnit="px"
-                />
-              ) : <div />}
-              {(props.banner_max_height_type === 'custom' || props.max_height_px) ? (
-                <DimensionInput
-                  label="Máxima Personalizada"
-                  value={props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px')}
-                  onChange={(v) => onChange({ banner_max_height_custom: v, max_height_px: v.replace(/[^0-9.]/g, '') })}
-                  placeholder="500"
-                  defaultUnit="px"
-                />
-              ) : <div />}
-            </div>
-          )}
-        </div>
-
-        {/* 📱 Dimensões Mobile */}
-        <div className="p-3 bg-orange-50/60 border border-orange-200/80 rounded-xl space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
-              📱 Alturas no Mobile (Celular)
-            </span>
-            <span className="text-[10px] bg-orange-100 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
-              {props.banner_mobile_dimensions_enabled ? 'Exclusivo Mobile' : 'Automático'}
-            </span>
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-txt-primary">
-            <input
-              type="checkbox"
-              checked={Boolean(props.banner_mobile_dimensions_enabled)}
-              onChange={(e) => onChange({ banner_mobile_dimensions_enabled: e.target.checked })}
-              className="w-4 h-4 rounded text-brand-main"
-            />
-            <span>Ativar controle de altura mínima e máxima no Celular (Mobile)</span>
-          </label>
-
-          {props.banner_mobile_dimensions_enabled && (
-            <div className="space-y-3 pt-2 border-t border-orange-200/80">
-              <div className="grid grid-cols-2 gap-2">
-                <SelectInput
-                  label="Altura Mínima (Mobile)"
-                  value={props.banner_height_mobile || 'normal'}
-                  onChange={(v) => onChange({ banner_height_mobile: v })}
-                  options={[
-                    { value: 'compact', label: 'Compacto (240px)' },
-                    { value: 'normal', label: 'Padrão (320px)' },
-                    { value: 'large', label: 'Amplo (420px)' },
-                    { value: 'screen', label: 'Tela Cheia (85vh)' },
-                    { value: 'custom', label: 'Personalizado...' },
-                  ]}
-                />
-                <SelectInput
-                  label="Altura Máxima (Mobile)"
-                  value={props.banner_max_height_mobile_type || (props.max_height_mobile_px ? 'custom' : 'none')}
-                  onChange={(v) => {
-                    if (v === 'none') {
-                      onChange({ banner_max_height_mobile_type: 'none', max_height_mobile_px: '', banner_max_height_mobile_custom: '' });
-                    } else if (v === 'custom') {
-                      onChange({ banner_max_height_mobile_type: 'custom', banner_max_height_mobile_custom: props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px') });
-                    } else {
-                      onChange({ banner_max_height_mobile_type: v, max_height_mobile_px: v.replace('px', ''), banner_max_height_mobile_custom: v });
-                    }
-                  }}
-                  options={[
-                    { value: 'none', label: 'Sem limite (Ilimitado)' },
-                    { value: '320px', label: 'Compacto (320px)' },
-                    { value: '420px', label: 'Médio (420px)' },
-                    { value: '520px', label: 'Grande (520px)' },
-                    { value: 'custom', label: 'Personalizado...' },
-                  ]}
-                />
-              </div>
-
-              {(props.banner_height_mobile === 'custom' || props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) && (
-                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-orange-200/80">
-                  {props.banner_height_mobile === 'custom' ? (
-                    <DimensionInput
-                      label="Mínima Mobile Personalizada"
-                      value={props.banner_min_height_mobile_custom || '320px'}
-                      onChange={(v) => onChange({ banner_min_height_mobile_custom: v })}
-                      placeholder="320"
-                      defaultUnit="px"
-                    />
-                  ) : <div />}
-                  {(props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) ? (
-                    <DimensionInput
-                      label="Máxima Mobile Personalizada"
-                      value={props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px')}
-                      onChange={(v) => onChange({ banner_max_height_mobile_custom: v, max_height_mobile_px: v.replace(/[^0-9.]/g, '') })}
-                      placeholder="420"
-                      defaultUnit="px"
-                    />
-                  ) : <div />}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <BannerSizingControls props={props} onChange={onChange} />
 
         <RangeInput
           label="Opacidade do escurecimento (Overlay)"
@@ -1363,149 +1495,7 @@ function CarouselEditor({ props, onChange }) {
         </div>
       </div>
 
-      {/* 🖥️ Dimensões Desktop Carrossel */}
-      <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
-        <div className="text-xs font-bold uppercase tracking-wider text-txt-primary">
-          🖥️ Alturas no Desktop (Carrossel)
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <SelectInput
-            label="Altura Mínima (Desktop)"
-            value={props.banner_height || 'normal'}
-            onChange={(v) => onChange({ banner_height: v })}
-            options={[
-              { value: 'compact', label: 'Compacto (360px)' },
-              { value: 'normal', label: 'Padrão (440px)' },
-              { value: 'large', label: 'Amplo / Grande (560px)' },
-              { value: 'screen', label: 'Tela Cheia (72vh)' },
-              { value: 'custom', label: 'Personalizado...' },
-            ]}
-          />
-          <SelectInput
-            label="Altura Máxima (Desktop)"
-            value={props.banner_max_height_type || (props.max_height_px ? 'custom' : 'none')}
-            onChange={(v) => {
-              if (v === 'none') {
-                onChange({ banner_max_height_type: 'none', max_height_px: '', banner_max_height_custom: '' });
-              } else if (v === 'custom') {
-                onChange({ banner_max_height_type: 'custom', banner_max_height_custom: props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px') });
-              } else {
-                onChange({ banner_max_height_type: v, max_height_px: v.replace('px', ''), banner_max_height_custom: v });
-              }
-            }}
-            options={[
-              { value: 'none', label: 'Sem limite (Ilimitado)' },
-              { value: '400px', label: 'Compacto (400px)' },
-              { value: '500px', label: 'Médio / Padrão (500px)' },
-              { value: '600px', label: 'Grande (600px)' },
-              { value: '750px', label: 'Amplo (750px)' },
-              { value: 'custom', label: 'Personalizado...' },
-            ]}
-          />
-        </div>
-        {(props.banner_height === 'custom' || props.banner_max_height_type === 'custom' || props.max_height_px) && (
-          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
-            {props.banner_height === 'custom' ? (
-              <DimensionInput
-                label="Mínima Personalizada"
-                value={props.banner_min_height_custom || '440px'}
-                onChange={(v) => onChange({ banner_min_height_custom: v })}
-                placeholder="440"
-              />
-            ) : <div />}
-            {(props.banner_max_height_type === 'custom' || props.max_height_px) ? (
-              <DimensionInput
-                label="Máxima Personalizada"
-                value={props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px')}
-                onChange={(v) => onChange({ banner_max_height_custom: v, max_height_px: v.replace(/[^0-9.]/g, '') })}
-                placeholder="500"
-              />
-            ) : <div />}
-          </div>
-        )}
-      </div>
-
-      {/* 📱 Dimensões Mobile Carrossel */}
-      <div className="p-3 bg-orange-50/60 border border-orange-200/80 rounded-xl space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
-            📱 Alturas no Mobile (Carrossel)
-          </span>
-          <span className="text-[10px] bg-orange-100 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
-            {props.banner_mobile_dimensions_enabled ? 'Exclusivo Mobile' : 'Automático'}
-          </span>
-        </div>
-
-        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-txt-primary">
-          <input
-            type="checkbox"
-            checked={Boolean(props.banner_mobile_dimensions_enabled)}
-            onChange={(e) => onChange({ banner_mobile_dimensions_enabled: e.target.checked })}
-            className="w-4 h-4 rounded text-brand-main"
-          />
-          <span>Ativar controle de altura mínima e máxima no Celular (Mobile)</span>
-        </label>
-
-        {props.banner_mobile_dimensions_enabled && (
-          <div className="space-y-3 pt-2 border-t border-orange-200/80">
-            <div className="grid grid-cols-2 gap-2">
-              <SelectInput
-                label="Altura Mínima (Mobile)"
-                value={props.banner_height_mobile || 'normal'}
-                onChange={(v) => onChange({ banner_height_mobile: v })}
-                options={[
-                  { value: 'compact', label: 'Compacto (240px)' },
-                  { value: 'normal', label: 'Padrão (320px)' },
-                  { value: 'large', label: 'Amplo (420px)' },
-                  { value: 'screen', label: 'Tela Cheia (85vh)' },
-                  { value: 'custom', label: 'Personalizado...' },
-                ]}
-              />
-              <SelectInput
-                label="Altura Máxima (Mobile)"
-                value={props.banner_max_height_mobile_type || (props.max_height_mobile_px ? 'custom' : 'none')}
-                onChange={(v) => {
-                  if (v === 'none') {
-                    onChange({ banner_max_height_mobile_type: 'none', max_height_mobile_px: '', banner_max_height_mobile_custom: '' });
-                  } else if (v === 'custom') {
-                    onChange({ banner_max_height_mobile_type: 'custom', banner_max_height_mobile_custom: props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px') });
-                  } else {
-                    onChange({ banner_max_height_mobile_type: v, max_height_mobile_px: v.replace('px', ''), banner_max_height_mobile_custom: v });
-                  }
-                }}
-                options={[
-                  { value: 'none', label: 'Sem limite (Ilimitado)' },
-                  { value: '320px', label: 'Compacto (320px)' },
-                  { value: '420px', label: 'Médio (420px)' },
-                  { value: '520px', label: 'Grande (520px)' },
-                  { value: 'custom', label: 'Personalizado...' },
-                ]}
-              />
-            </div>
-
-            {(props.banner_height_mobile === 'custom' || props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) && (
-              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-orange-200/80">
-                {props.banner_height_mobile === 'custom' ? (
-                  <DimensionInput
-                    label="Mínima Mobile Personalizada"
-                    value={props.banner_min_height_mobile_custom || '320px'}
-                    onChange={(v) => onChange({ banner_min_height_mobile_custom: v })}
-                    placeholder="320"
-                  />
-                ) : <div />}
-                {(props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) ? (
-                  <DimensionInput
-                    label="Máxima Mobile Personalizada"
-                    value={props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px')}
-                    onChange={(v) => onChange({ banner_max_height_mobile_custom: v, max_height_mobile_px: v.replace(/[^0-9.]/g, '') })}
-                    placeholder="420"
-                  />
-                ) : <div />}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <BannerSizingControls props={props} onChange={onChange} />
 
       <div className="space-y-2 pt-2 border-t border-border">
         <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Slides ({slides.length})</div>

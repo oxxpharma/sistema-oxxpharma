@@ -76,6 +76,37 @@ function resolveBannerHeights(p = {}) {
   return { deskMin, deskMax, mobMin, mobMax };
 }
 
+function formatAspectRatio(val, fallback = '1920 / 575') {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  if (str === 'same') return fallback;
+  if (str.includes('/')) return str;
+  if (str.includes(':')) return str.replace(':', ' / ');
+  if (str.includes('x') || str.includes('X')) return str.replace(/x/i, ' / ');
+  if (/^[\d.]+$/.test(str)) return str;
+  return fallback;
+}
+
+function resolveBannerSizing(p = {}) {
+  // Proporções solicitadas: Desktop 1920x575, Mobile 1080x834
+  const isAspectRatio = p.banner_sizing_mode !== 'fixed_height';
+  const ratioDesktop = formatAspectRatio(p.aspect_ratio_desktop, '1920 / 575');
+  const ratioMobile = formatAspectRatio(
+    p.aspect_ratio_mobile === 'same' ? ratioDesktop : p.aspect_ratio_mobile,
+    '1080 / 834'
+  );
+  const maxWidth = p.max_container_width && p.max_container_width !== 'none' ? p.max_container_width : null;
+
+  const heights = resolveBannerHeights(p);
+  return {
+    isAspectRatio,
+    ratioDesktop,
+    ratioMobile,
+    maxWidth,
+    ...heights,
+  };
+}
+
 export default function HeroCarousel({ slides = [], settings }) {
   const hookId = useId();
   const carouselClass = 'hc-' + hookId.replace(/[^a-zA-Z0-9_-]/g, '');
@@ -98,34 +129,65 @@ export default function HeroCarousel({ slides = [], settings }) {
   const slide = slides[idx] || {};
   const overlay = Number(slide.overlay_opacity ?? 0.4);
 
-  const heights = resolveBannerHeights({ ...cfg, ...slide });
-
+  const sizing = resolveBannerSizing({ ...cfg, ...slide });
+  const isAspect = sizing.isAspectRatio;
+  const ratioDesk = formatAspectRatio(sizing.ratioDesktop, '1920 / 575');
+  const ratioMob = formatAspectRatio(sizing.ratioMobile, '1080 / 834');
+  const maxW = sizing.maxWidth && sizing.maxWidth !== 'none' ? sizing.maxWidth : null;
 
   return (
     <section
-      className={`relative text-white overflow-hidden ${carouselClass}`}
+      className={`relative text-white overflow-hidden w-full ${carouselClass}`}
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
       <style>{`
-        .${carouselClass} {
-          min-height: ${heights.mobMin};
-          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
-        }
-        .${carouselClass} .hc-inner {
-          min-height: ${heights.mobMin};
-          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
-        }
-        @media (min-width: 768px) {
+        ${isAspect ? `
           .${carouselClass} {
-            min-height: ${heights.deskMin};
-            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+            width: 100%;
+            aspect-ratio: ${ratioMob};
+            height: auto;
+            min-height: unset;
+            max-height: none;
+            ${maxW ? `max-width: ${maxW}; margin-left: auto; margin-right: auto;` : ''}
           }
           .${carouselClass} .hc-inner {
-            min-height: ${heights.deskMin};
-            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+            height: 100%;
+            min-height: 100%;
+            box-sizing: border-box;
           }
-        }
+          @media (min-width: 768px) {
+            .${carouselClass} {
+              aspect-ratio: ${ratioDesk};
+              height: auto;
+              min-height: unset;
+              max-height: none;
+            }
+            .${carouselClass} .hc-inner {
+              height: 100%;
+              min-height: 100%;
+            }
+          }
+        ` : `
+          .${carouselClass} {
+            min-height: ${sizing.mobMin};
+            ${sizing.mobMax ? `max-height: ${sizing.mobMax};` : ''}
+          }
+          .${carouselClass} .hc-inner {
+            min-height: ${sizing.mobMin};
+            ${sizing.mobMax ? `max-height: ${sizing.mobMax};` : ''}
+          }
+          @media (min-width: 768px) {
+            .${carouselClass} {
+              min-height: ${sizing.deskMin};
+              ${sizing.deskMax ? `max-height: ${sizing.deskMax};` : ''}
+            }
+            .${carouselClass} .hc-inner {
+              min-height: ${sizing.deskMin};
+              ${sizing.deskMax ? `max-height: ${sizing.deskMax};` : ''}
+            }
+          }
+        `}
       `}</style>
 
       {/* Imagem de fundo com transicao suave */}
@@ -166,7 +228,11 @@ export default function HeroCarousel({ slides = [], settings }) {
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
 
-      <div className="hc-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 flex items-center">
+      {slide.cta_link && !slide.cta_label && (
+        <Link to={slide.cta_link} className="absolute inset-0 z-10" aria-label={slide.title || 'Slide'} />
+      )}
+
+      <div className="hc-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8 lg:py-10 flex items-center">
         <div className="fade-in max-w-2xl w-full">
           {cfg.tagline && (
             <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">

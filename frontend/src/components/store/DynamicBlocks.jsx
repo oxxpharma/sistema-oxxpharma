@@ -65,6 +65,17 @@ function toCssDim(val, fallback = undefined) {
   return str;
 }
 
+function formatAspectRatio(val, fallback = '1920 / 575') {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  if (str === 'same') return fallback;
+  if (str.includes('/')) return str;
+  if (str.includes(':')) return str.replace(':', ' / ');
+  if (str.includes('x') || str.includes('X')) return str.replace(/x/i, ' / ');
+  if (/^[\d.]+$/.test(str)) return str;
+  return fallback;
+}
+
 function resolveBannerHeights(p = {}) {
   const deskMinMap = {
     compact: '360px',
@@ -124,6 +135,26 @@ function resolveBannerHeights(p = {}) {
   return { deskMin, deskMax, mobMin, mobMax };
 }
 
+function resolveBannerSizing(p = {}) {
+  // Proporções solicitadas: Desktop 1920x575, Mobile 1080x834
+  const isAspectRatio = p.banner_sizing_mode !== 'fixed_height';
+  const ratioDesktop = formatAspectRatio(p.aspect_ratio_desktop, '1920 / 575');
+  const ratioMobile = formatAspectRatio(
+    p.aspect_ratio_mobile === 'same' ? ratioDesktop : p.aspect_ratio_mobile,
+    '1080 / 834'
+  );
+  const maxWidth = p.max_container_width && p.max_container_width !== 'none' ? p.max_container_width : null;
+
+  const heights = resolveBannerHeights(p);
+  return {
+    isAspectRatio,
+    ratioDesktop,
+    ratioMobile,
+    maxWidth,
+    ...heights,
+  };
+}
+
 function HeroCarouselBlock({
   slides = [],
   autoplay_seconds = 6,
@@ -149,8 +180,11 @@ function HeroCarouselBlock({
   const cur = slides[idx] || {};
   const overlay = Number(cur.overlay_opacity ?? 0.4);
 
-  const heights = resolveBannerHeights({ ...restProps, ...cur });
-
+  const sizing = resolveBannerSizing({ ...restProps, ...cur });
+  const isAspect = sizing.isAspectRatio;
+  const ratioDesk = formatAspectRatio(sizing.ratioDesktop, '1920 / 575');
+  const ratioMob = formatAspectRatio(sizing.ratioMobile, '1080 / 834');
+  const maxW = sizing.maxWidth && sizing.maxWidth !== 'none' ? sizing.maxWidth : null;
 
   return (
     <section
@@ -159,24 +193,52 @@ function HeroCarouselBlock({
       data-current-slide={idx}
     >
       <style>{`
-        .${carouselClass} {
-          min-height: ${heights.mobMin};
-          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
-        }
-        .${carouselClass} .hcb-inner {
-          min-height: ${heights.mobMin};
-          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
-        }
-        @media (min-width: 768px) {
+        ${isAspect ? `
           .${carouselClass} {
-            min-height: ${heights.deskMin};
-            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+            width: 100%;
+            aspect-ratio: ${ratioMob};
+            height: auto;
+            min-height: unset;
+            max-height: none;
+            ${maxW ? `max-width: ${maxW}; margin-left: auto; margin-right: auto;` : ''}
           }
           .${carouselClass} .hcb-inner {
-            min-height: ${heights.deskMin};
-            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+            height: 100%;
+            min-height: 100%;
+            box-sizing: border-box;
           }
-        }
+          @media (min-width: 768px) {
+            .${carouselClass} {
+              aspect-ratio: ${ratioDesk};
+              height: auto;
+              min-height: unset;
+              max-height: none;
+            }
+            .${carouselClass} .hcb-inner {
+              height: 100%;
+              min-height: 100%;
+            }
+          }
+        ` : `
+          .${carouselClass} {
+            min-height: ${sizing.mobMin};
+            ${sizing.mobMax ? `max-height: ${sizing.mobMax};` : ''}
+          }
+          .${carouselClass} .hcb-inner {
+            min-height: ${sizing.mobMin};
+            ${sizing.mobMax ? `max-height: ${sizing.mobMax};` : ''}
+          }
+          @media (min-width: 768px) {
+            .${carouselClass} {
+              min-height: ${sizing.deskMin};
+              ${sizing.deskMax ? `max-height: ${sizing.deskMax};` : ''}
+            }
+            .${carouselClass} .hcb-inner {
+              min-height: ${sizing.deskMin};
+              ${sizing.deskMax ? `max-height: ${sizing.deskMax};` : ''}
+            }
+          }
+        `}
       `}</style>
 
       {/* Fundos com fade entre slides */}
@@ -215,7 +277,11 @@ function HeroCarouselBlock({
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
 
-      <div className="hcb-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 flex items-center">
+      {cur.cta_link && !cur.cta_label && (
+        <Link to={cur.cta_link} className="absolute inset-0 z-10" aria-label={cur.title || 'Slide'} />
+      )}
+
+      <div className="hcb-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8 lg:py-10 flex items-center">
         <div className="max-w-2xl w-full">
           <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{cur.title}</h1>
           {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{cur.subtitle}</p>}
@@ -375,11 +441,21 @@ function HeroBlock(props) {
   const isCenter = content_align === 'center';
   const isRight = content_align === 'right';
 
-  const vAlignClass = {
+  const sizing = resolveBannerSizing(props);
+  const isAspect = sizing.isAspectRatio;
+  const ratioDesk = formatAspectRatio(sizing.ratioDesktop, '1920 / 575');
+  const ratioMob = formatAspectRatio(sizing.ratioMobile, '1080 / 834');
+  const maxW = sizing.maxWidth && sizing.maxWidth !== 'none' ? sizing.maxWidth : null;
+
+  const vAlignClass = isAspect ? {
+    top: 'items-start pt-4 sm:pt-6 md:pt-8 pb-3',
+    center: 'items-center py-3 sm:py-6 md:py-8 lg:py-10',
+    bottom: 'items-end pt-3 pb-4 sm:pb-6 md:pb-8',
+  }[vertical_align] || 'items-center py-3 sm:py-6 md:py-8 lg:py-10' : ({
     top: 'items-start pt-12 sm:pt-16 pb-10',
     center: 'items-center py-10 sm:py-14 md:py-20',
     bottom: 'items-end pt-10 pb-12 sm:pb-16',
-  }[vertical_align] || 'items-center py-10 sm:py-14 md:py-20';
+  }[vertical_align] || 'items-center py-10 sm:py-14 md:py-20');
 
   const contentAlignClass = isCenter
     ? 'text-center mx-auto items-center flex flex-col'
@@ -432,9 +508,6 @@ function HeroBlock(props) {
     marginRight: toCssDim(cta_margin_right_mobile ?? cta_margin_right_mobile_px, '0px'),
   } : ctaButtonDeskStyle;
 
-  const heights = resolveBannerHeights(props);
-
-
   const hasBg = Boolean(image_url || image_url_mobile);
 
   return (
@@ -443,24 +516,52 @@ function HeroBlock(props) {
       data-testid="hero-block"
     >
       <style>{`
-        .${heroClass} {
-          min-height: ${heights.mobMin};
-          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
-        }
-        .${heroClass} .hb-inner {
-          min-height: ${heights.mobMin};
-          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
-        }
-        @media (min-width: 768px) {
+        ${isAspect ? `
           .${heroClass} {
-            min-height: ${heights.deskMin};
-            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+            width: 100%;
+            aspect-ratio: ${ratioMob};
+            height: auto;
+            min-height: unset;
+            max-height: none;
+            ${maxW ? `max-width: ${maxW}; margin-left: auto; margin-right: auto;` : ''}
           }
           .${heroClass} .hb-inner {
-            min-height: ${heights.deskMin};
-            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+            height: 100%;
+            min-height: 100%;
+            box-sizing: border-box;
           }
-        }
+          @media (min-width: 768px) {
+            .${heroClass} {
+              aspect-ratio: ${ratioDesk};
+              height: auto;
+              min-height: unset;
+              max-height: none;
+            }
+            .${heroClass} .hb-inner {
+              height: 100%;
+              min-height: 100%;
+            }
+          }
+        ` : `
+          .${heroClass} {
+            min-height: ${sizing.mobMin};
+            ${sizing.mobMax ? `max-height: ${sizing.mobMax};` : ''}
+          }
+          .${heroClass} .hb-inner {
+            min-height: ${sizing.mobMin};
+            ${sizing.mobMax ? `max-height: ${sizing.mobMax};` : ''}
+          }
+          @media (min-width: 768px) {
+            .${heroClass} {
+              min-height: ${sizing.deskMin};
+              ${sizing.deskMax ? `max-height: ${sizing.deskMax};` : ''}
+            }
+            .${heroClass} .hb-inner {
+              min-height: ${sizing.deskMin};
+              ${sizing.deskMax ? `max-height: ${sizing.deskMax};` : ''}
+            }
+          }
+        `}
       `}</style>
 
       {/* Desktop background */}
@@ -484,6 +585,10 @@ function HeroBlock(props) {
         />
       )}
       {hasBg && <div className="absolute inset-0 bg-black" style={{ opacity: overlay_opacity }} />}
+
+      {cta_link && !cta_label && (
+        <Link to={cta_link} className="absolute inset-0 z-10" aria-label={title || 'Banner'} />
+      )}
 
       <div className={`hb-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex ${vAlignClass} ${containerJustifyClass}`}>
         <div className={`max-w-2xl w-full ${contentAlignClass}`}>
