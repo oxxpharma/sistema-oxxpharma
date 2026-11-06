@@ -946,8 +946,8 @@ function CtaBanner({ title, subtitle, cta_label, cta_link, bg_color }) {
     </div>
   );
 }
-function TrustBarBlock({ items, use_store_settings = true }) {
-  return <TrustBar items={items} use_store_settings={use_store_settings} variant="horizontal" />;
+function TrustBarBlock({ items, use_store_settings = true, layout = 'center', ...restProps }) {
+  return <TrustBar items={items} use_store_settings={use_store_settings} layout={layout} variant="horizontal" {...restProps} />;
 }
 
 function SubcategoryGridBlock({

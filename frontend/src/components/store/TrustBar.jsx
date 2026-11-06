@@ -8,7 +8,13 @@ const DEFAULT_BENEFITS = [
   { icon: 'CreditCard', title: 'Parcelamento', desc: 'em até 6x sem juros' },
 ];
 
-export default function TrustBar({ items, use_store_settings = true, variant = 'horizontal', className = '' }) {
+export default function TrustBar({
+  items,
+  use_store_settings = true,
+  variant = 'horizontal',
+  layout = 'center',
+  className = '',
+}) {
   const settings = useSiteSettings();
 
   // Se use_store_settings for true (ou items não fornecido), usa os trust_items da loja
@@ -49,23 +55,31 @@ export default function TrustBar({ items, use_store_settings = true, variant = '
   }
 
   // Variante Horizontal (PageBuilder / Seção da Home)
+  const isDistributed = layout === 'distributed';
+
   return (
     <div
-      className={`w-full bg-white border-y border-border py-8 ${className}`}
+      className={`w-full bg-white border-y border-border py-7 sm:py-8 ${className}`}
       data-testid="trust-benefits-bar"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
+        <div
+          className={`flex flex-col sm:flex-row flex-wrap items-start sm:items-center ${
+            isDistributed
+              ? 'justify-between sm:justify-around md:justify-between'
+              : 'justify-center'
+          } gap-6 sm:gap-8 md:gap-12 lg:gap-16 xl:gap-24 w-fit sm:w-full mx-auto`}
+        >
           {resolvedItems.map((it, idx) => {
             const Icon = getIcon(it.icon);
             return (
-              <div key={idx} className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
-                  <Icon className="w-6 h-6 text-brand-main" />
+              <div key={idx} className="flex items-center gap-3.5 sm:gap-4 shrink-0">
+                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
+                  <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-brand-main" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold text-txt-primary font-montserrat">{it.title}</div>
-                  <div className="text-xs text-txt-secondary mt-0.5 font-montserrat">{it.desc}</div>
+                  <div className="text-sm font-bold text-txt-primary font-montserrat leading-tight">{it.title}</div>
+                  <div className="text-xs text-txt-secondary mt-1 font-montserrat leading-tight">{it.desc}</div>
                 </div>
               </div>
             );

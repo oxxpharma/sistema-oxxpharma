@@ -178,6 +178,7 @@ const DEFAULT_PROPS = {
   cta_banner: { title: 'Frete grátis acima de R$ 199', subtitle: 'Em todo o Brasil', cta_label: 'Comprar agora', cta_link: '/loja', bg_color: '' },
   trust_bar: {
     use_store_settings: true,
+    layout: 'center',
     items: [
       { icon: 'Truck', title: 'Frete grátis', desc: 'Em compras acima de R$ 500,00' },
       { icon: 'DollarSign', title: 'Desconto no Pix', desc: '3% Off' },
@@ -1680,6 +1681,7 @@ function CarouselEditor({ props, onChange }) {
 function TrustBarBlockEditor({ props, onChange }) {
   const items = Array.isArray(props.items) ? props.items : [];
   const useStore = props.use_store_settings ?? true;
+  const layout = props.layout || 'center';
 
   const updateItem = (index, patch) => {
     const next = [...items];
@@ -1700,6 +1702,16 @@ function TrustBarBlockEditor({ props, onChange }) {
 
   return (
     <div className="space-y-4">
+      <SelectInput
+        label="Alinhamento e Distribuição"
+        value={layout}
+        onChange={(v) => onChange({ layout: v })}
+        options={[
+          { value: 'center', label: 'Centralizado (100% Simétrico na tela - Recomendado)' },
+          { value: 'distributed', label: 'Distribuído (Espaçado pelas extremidades)' },
+        ]}
+      />
+
       <div className="p-3 bg-gray-50 border border-border rounded-xl space-y-2">
         <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-txt-primary">
           <input
