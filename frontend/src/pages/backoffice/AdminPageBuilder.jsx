@@ -353,6 +353,19 @@ export default function AdminPageBuilder() {
         published: publish !== undefined ? publish : published,
       });
       if (publish !== undefined) setPublished(publish);
+      if (publish) {
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem('oxx_home_page_layout_v1', JSON.stringify({
+              tenant_id: tenantId,
+              slug: 'home',
+              blocks,
+              published: true,
+              updated_at: new Date().toISOString()
+            }));
+          }
+        } catch (e) {}
+      }
       toast.success(publish ? 'Página publicada!' : 'Rascunho salvo');
     } catch (e) {
       toast.error('Erro: ' + e.message);

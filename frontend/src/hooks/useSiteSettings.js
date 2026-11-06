@@ -1,18 +1,54 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 
-let cache = null;
+const STORAGE_KEY = 'oxx_site_settings_v1';
+
+function getInitialCache() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+let cache = getInitialCache();
 let listeners = [];
+let inflightPromise = null;
 
 function notify(s) {
+  if (!s) return;
   cache = s;
-  listeners.forEach((fn) => fn(s));
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    }
+  } catch (e) {}
+  listeners.forEach((fn) => {
+    try {
+      fn(s);
+    } catch (e) {}
+  });
 }
 
 export function refreshSiteSettings() {
-  return api.get('/api/site-settings')
-    .then((s) => { notify(s); return s; })
-    .catch(() => null);
+  inflightPromise = api.get('/api/site-settings')
+    .then((s) => {
+      notify(s);
+      inflightPromise = null;
+      return s;
+    })
+    .catch(() => {
+      inflightPromise = null;
+      return null;
+    });
+  return inflightPromise;
 }
 
 export function useSiteSettings() {
@@ -20,12 +56,20 @@ export function useSiteSettings() {
 
   useEffect(() => {
     listeners.push(setSettings);
-    if (cache === null && listeners.length === 1) {
-      api.get('/api/site-settings').then(notify).catch(() => {});
-    } else if (cache) {
+
+    // Se houver cache sincronizado após mount, atualiza
+    if (cache && settings !== cache) {
       setSettings(cache);
     }
-    return () => { listeners = listeners.filter((fn) => fn !== setSettings); };
+
+    // Busca em background para revalidar (stale-while-revalidate)
+    if (!inflightPromise) {
+      refreshSiteSettings();
+    }
+
+    return () => {
+      listeners = listeners.filter((fn) => fn !== setSettings);
+    };
   }, []);
 
   return settings;

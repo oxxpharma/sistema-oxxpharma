@@ -36,6 +36,19 @@ export default function BrandLogo({
   showIcon = true,
 }) {
   const s = useSiteSettings();
+
+  // Cold start (sem cache em localStorage ainda): esqueleto sutil para evitar flash de texto/ícone errado
+  if (s === null) {
+    const fallbackSize = getLogoSize(null, slot);
+    return (
+      <div
+        className="bg-gray-100/80 rounded-lg animate-pulse"
+        style={{ height: `${fallbackSize.height}px`, width: `${Math.min(fallbackSize.max_width, 160)}px` }}
+        data-testid="brand-logo-skeleton"
+      />
+    );
+  }
+
   const storeName = s?.store_name || 'OxxPharma';
 
   const url = variant === 'dark'

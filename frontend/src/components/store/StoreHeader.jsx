@@ -138,9 +138,8 @@ export default function StoreHeader() {
     ? settings.header_nav_items
     : [
         { label: 'Protocolo Dr.Bactéria', url: '/p/protocolo-dr-bacteria' },
-        { label: 'Óleos Ozonizados', url: '/categoria/oleos-ozonizados' },
+        { label: 'Óleos Ozonizados', url: '/produtos?categoria=oleos-ozonizados' },
         { label: 'Quem Somos', url: '/p/sobre' },
-        { label: 'Blog', url: '/p/blog' },
         { label: 'Contato', url: '/p/contato' },
       ];
 

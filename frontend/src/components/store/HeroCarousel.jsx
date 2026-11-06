@@ -268,9 +268,11 @@ export default function HeroCarousel({ slides = [], settings }) {
               {cfg.tagline}
             </div>
           )}
-          <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight" data-testid="hero-title">
-            {slide.title || 'Saúde e bem-estar na sua porta.'}
-          </h1>
+          {slide.title ? (
+            <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight" data-testid="hero-title">
+              {slide.title}
+            </h1>
+          ) : null}
           {slide.subtitle && (
             <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed" data-testid="hero-subtitle">
               {slide.subtitle}
