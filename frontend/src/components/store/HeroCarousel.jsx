@@ -89,9 +89,19 @@ export default function HeroCarousel({ slides = [], settings }) {
             </p>
           )}
           {slide.cta_label && slide.cta_link && (
-            <div className={`mt-5 sm:mt-8 flex ${slide.cta_align === 'center' ? 'justify-center' : slide.cta_align === 'right' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`w-full flex ${slide.cta_align === 'center' ? 'justify-center text-center' : slide.cta_align === 'right' ? 'justify-end text-right' : 'justify-start text-left'} ${Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom') ? '' : 'mt-5 sm:mt-8'}`}>
               <Link
                 to={slide.cta_link}
+                style={
+                  Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom')
+                    ? {
+                        marginTop: `${Number(slide.cta_margin_top_px ?? 32)}px`,
+                        marginBottom: `${Number(slide.cta_margin_bottom_px ?? 0)}px`,
+                        marginLeft: `${Number(slide.cta_margin_left_px ?? 0)}px`,
+                        marginRight: `${Number(slide.cta_margin_right_px ?? 0)}px`,
+                      }
+                    : undefined
+                }
                 className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
                 data-testid="hero-cta"
               >

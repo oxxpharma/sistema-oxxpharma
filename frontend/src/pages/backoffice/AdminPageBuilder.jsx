@@ -41,6 +41,11 @@ const DEFAULT_PROPS = {
     content_align: 'left',
     cta_align: 'left',
     cta_margin_top: 'normal',
+    cta_custom_margins: false,
+    cta_margin_top_px: 32,
+    cta_margin_bottom_px: 0,
+    cta_margin_left_px: 0,
+    cta_margin_right_px: 0,
     vertical_align: 'center',
     banner_height: 'normal',
   },
@@ -659,17 +664,113 @@ function HeroBlockEditor({ props, onChange }) {
             ]}
           />
           <SelectInput
-            label="Espaçamento do Botão (Topo)"
-            value={props.cta_margin_top || 'normal'}
-            onChange={(v) => onChange({ cta_margin_top: v })}
+            label="Espaçamento Vertical"
+            value={props.cta_custom_margins || props.cta_margin_top === 'custom' ? 'custom' : (props.cta_margin_top || 'normal')}
+            onChange={(v) => {
+              if (v === 'custom') {
+                onChange({ cta_custom_margins: true, cta_margin_top: 'custom' });
+              } else {
+                onChange({ cta_custom_margins: false, cta_margin_top: v });
+              }
+            }}
             options={[
               { value: 'small', label: 'Pequeno (16px)' },
               { value: 'normal', label: 'Padrão (32px)' },
               { value: 'large', label: 'Grande (48px)' },
               { value: 'none', label: 'Colado (8px)' },
+              { value: 'custom', label: 'Personalizado (em px)...' },
             ]}
           />
         </div>
+
+        <div className="pt-1">
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-txt-primary">
+            <input
+              type="checkbox"
+              checked={Boolean(props.cta_custom_margins || props.cta_margin_top === 'custom')}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                onChange({
+                  cta_custom_margins: checked,
+                  cta_margin_top: checked ? 'custom' : (props.cta_margin_top === 'custom' ? 'normal' : props.cta_margin_top),
+                });
+              }}
+              className="w-4 h-4 rounded text-brand-main"
+            />
+            <span>Definir valores personalizados das margens (px)</span>
+          </label>
+        </div>
+
+        {(props.cta_custom_margins || props.cta_margin_top === 'custom') && (
+          <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-txt-secondary">
+                Margens Personalizadas (Pixels)
+              </span>
+              <span className="text-[10px] text-brand-main font-semibold">Vertical & Horizontal</span>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical</span>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  label="Superior (Top) px"
+                  type="number"
+                  value={props.cta_margin_top_px ?? (props.cta_margin_top === 'small' ? 16 : props.cta_margin_top === 'large' ? 48 : props.cta_margin_top === 'none' ? 8 : 32)}
+                  onChange={(e) => onChange({
+                    cta_margin_top_px: e.target.value === '' ? '' : Number(e.target.value),
+                    cta_custom_margins: true,
+                    cta_margin_top: 'custom',
+                  })}
+                  placeholder="32"
+                />
+                <Input
+                  label="Inferior (Bottom) px"
+                  type="number"
+                  value={props.cta_margin_bottom_px ?? 0}
+                  onChange={(e) => onChange({
+                    cta_margin_bottom_px: e.target.value === '' ? '' : Number(e.target.value),
+                    cta_custom_margins: true,
+                    cta_margin_top: 'custom',
+                  })}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1 border-t border-border/60">
+              <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal</span>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  label="Esquerda (Left) px"
+                  type="number"
+                  value={props.cta_margin_left_px ?? 0}
+                  onChange={(e) => onChange({
+                    cta_margin_left_px: e.target.value === '' ? '' : Number(e.target.value),
+                    cta_custom_margins: true,
+                    cta_margin_top: 'custom',
+                  })}
+                  placeholder="0"
+                />
+                <Input
+                  label="Direita (Right) px"
+                  type="number"
+                  value={props.cta_margin_right_px ?? 0}
+                  onChange={(e) => onChange({
+                    cta_margin_right_px: e.target.value === '' ? '' : Number(e.target.value),
+                    cta_custom_margins: true,
+                    cta_margin_top: 'custom',
+                  })}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <p className="text-[10px] text-txt-secondary leading-tight">
+              💡 Ajuste os valores em pixels para posicionar o botão com precisão vertical e horizontal.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="space-y-3 pt-3 border-t border-border">
@@ -790,16 +891,67 @@ function CarouselEditor({ props, onChange }) {
               <Input label="Botão (CTA)" value={s.cta_label || ''} onChange={(e) => updateSlide(idx, { cta_label: e.target.value })} placeholder="Ex: Comprar" />
               <Input label="Link" value={s.cta_link || ''} onChange={(e) => updateSlide(idx, { cta_link: e.target.value })} placeholder="/loja" />
             </div>
-            <SelectInput
-              label="Alinhamento do Botão (CTA)"
-              value={s.cta_align || 'left'}
-              onChange={(v) => updateSlide(idx, { cta_align: v })}
-              options={[
-                { value: 'left', label: 'À Esquerda' },
-                { value: 'center', label: 'Centralizado' },
-                { value: 'right', label: 'À Direita' },
-              ]}
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <SelectInput
+                label="Alinhamento do Botão"
+                value={s.cta_align || 'left'}
+                onChange={(v) => updateSlide(idx, { cta_align: v })}
+                options={[
+                  { value: 'left', label: 'À Esquerda' },
+                  { value: 'center', label: 'Centralizado' },
+                  { value: 'right', label: 'À Direita' },
+                ]}
+              />
+              <SelectInput
+                label="Espaçamento Vertical"
+                value={s.cta_custom_margins || s.cta_margin_top === 'custom' ? 'custom' : (s.cta_margin_top || 'normal')}
+                onChange={(v) => {
+                  if (v === 'custom') {
+                    updateSlide(idx, { cta_custom_margins: true, cta_margin_top: 'custom' });
+                  } else {
+                    updateSlide(idx, { cta_custom_margins: false, cta_margin_top: v });
+                  }
+                }}
+                options={[
+                  { value: 'small', label: 'Pequeno (16px)' },
+                  { value: 'normal', label: 'Padrão (32px)' },
+                  { value: 'large', label: 'Grande (48px)' },
+                  { value: 'none', label: 'Colado (8px)' },
+                  { value: 'custom', label: 'Personalizado (px)...' },
+                ]}
+              />
+            </div>
+            {(s.cta_custom_margins || s.cta_margin_top === 'custom') && (
+              <div className="p-2.5 bg-white border border-border rounded-lg space-y-2 text-xs">
+                <div className="font-semibold text-txt-secondary text-[11px] uppercase">Margens Personalizadas (px)</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Input
+                    label="Vertical Superior (px)"
+                    type="number"
+                    value={s.cta_margin_top_px ?? 32}
+                    onChange={(e) => updateSlide(idx, { cta_margin_top_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  />
+                  <Input
+                    label="Vertical Inferior (px)"
+                    type="number"
+                    value={s.cta_margin_bottom_px ?? 0}
+                    onChange={(e) => updateSlide(idx, { cta_margin_bottom_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  />
+                  <Input
+                    label="Horizontal Esquerda (px)"
+                    type="number"
+                    value={s.cta_margin_left_px ?? 0}
+                    onChange={(e) => updateSlide(idx, { cta_margin_left_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  />
+                  <Input
+                    label="Horizontal Direita (px)"
+                    type="number"
+                    value={s.cta_margin_right_px ?? 0}
+                    onChange={(e) => updateSlide(idx, { cta_margin_right_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  />
+                </div>
+              </div>
+            )}
             <RangeInput label="Escurecimento" value={s.overlay_opacity ?? 0.4} onChange={(v) => updateSlide(idx, { overlay_opacity: v })} />
           </div>
         ))}

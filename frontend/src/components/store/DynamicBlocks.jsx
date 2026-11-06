@@ -122,8 +122,21 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
           <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{cur.title}</h1>
           {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{cur.subtitle}</p>}
           {cur.cta_label && cur.cta_link && (
-            <div className={`mt-5 sm:mt-8 flex ${cur.cta_align === 'center' ? 'justify-center' : cur.cta_align === 'right' ? 'justify-end' : 'justify-start'}`}>
-              <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm">
+            <div className={`w-full flex ${cur.cta_align === 'center' ? 'justify-center text-center' : cur.cta_align === 'right' ? 'justify-end text-right' : 'justify-start text-left'} ${Boolean(cur.cta_custom_margins || cur.cta_margin_top === 'custom') ? '' : 'mt-5 sm:mt-8'}`}>
+              <Link
+                to={cur.cta_link}
+                style={
+                  Boolean(cur.cta_custom_margins || cur.cta_margin_top === 'custom')
+                    ? {
+                        marginTop: `${Number(cur.cta_margin_top_px ?? 32)}px`,
+                        marginBottom: `${Number(cur.cta_margin_bottom_px ?? 0)}px`,
+                        marginLeft: `${Number(cur.cta_margin_left_px ?? 0)}px`,
+                        marginRight: `${Number(cur.cta_margin_right_px ?? 0)}px`,
+                      }
+                    : undefined
+                }
+                className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
+              >
                 {cur.cta_label} <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
@@ -171,6 +184,11 @@ function HeroBlock({
   content_align = 'left',
   cta_align = 'left',
   cta_margin_top = 'normal',
+  cta_custom_margins,
+  cta_margin_top_px,
+  cta_margin_bottom_px,
+  cta_margin_left_px,
+  cta_margin_right_px,
   vertical_align = 'center',
   banner_height = 'normal',
 }) {
@@ -209,12 +227,21 @@ function HeroBlock({
     right: 'justify-end text-right',
   }[effectiveCtaAlign] || 'justify-start text-left';
 
-  const ctaMarginClass = {
+  const isCustomMargins = Boolean(cta_custom_margins || cta_margin_top === 'custom');
+
+  const ctaMarginClass = isCustomMargins ? '' : ({
     none: 'mt-2',
     small: 'mt-3 sm:mt-4',
     normal: 'mt-5 sm:mt-8',
     large: 'mt-8 sm:mt-12',
-  }[cta_margin_top] || 'mt-5 sm:mt-8';
+  }[cta_margin_top] || 'mt-5 sm:mt-8');
+
+  const ctaButtonCustomStyle = isCustomMargins ? {
+    marginTop: `${Number(cta_margin_top_px ?? 32)}px`,
+    marginBottom: `${Number(cta_margin_bottom_px ?? 0)}px`,
+    marginLeft: `${Number(cta_margin_left_px ?? 0)}px`,
+    marginRight: `${Number(cta_margin_right_px ?? 0)}px`,
+  } : undefined;
 
   const hasBg = Boolean(image_url || image_url_mobile);
 
@@ -259,6 +286,7 @@ function HeroBlock({
             <div className={`w-full flex ${ctaAlignClass} ${ctaMarginClass}`}>
               <Link
                 to={cta_link}
+                style={ctaButtonCustomStyle}
                 className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
               >
                 {cta_label} <ArrowRight className="w-4 h-4" />
