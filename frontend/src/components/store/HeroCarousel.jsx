@@ -29,9 +29,23 @@ export default function HeroCarousel({ slides = [], settings }) {
   const slide = slides[idx] || {};
   const overlay = Number(slide.overlay_opacity ?? 0.4);
 
+  const effectiveMaxH = slide.max_height_px
+    ? Number(slide.max_height_px)
+    : cfg.hero_max_height_px || cfg.max_height_px
+    ? Number(cfg.hero_max_height_px || cfg.max_height_px)
+    : null;
+  const sectionStyle = effectiveMaxH ? { maxHeight: `${effectiveMaxH}px` } : undefined;
+  const innerContainerStyle = effectiveMaxH
+    ? {
+        maxHeight: `${effectiveMaxH}px`,
+        minHeight: `min(100%, ${effectiveMaxH}px)`,
+      }
+    : undefined;
+
   return (
     <section
       className="relative text-white overflow-hidden"
+      style={sectionStyle}
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
@@ -73,7 +87,10 @@ export default function HeroCarousel({ slides = [], settings }) {
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
 
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
+      <div
+        className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center"
+        style={innerContainerStyle}
+      >
         <div className="fade-in max-w-2xl w-full">
           {cfg.tagline && (
             <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">
@@ -89,25 +106,92 @@ export default function HeroCarousel({ slides = [], settings }) {
             </p>
           )}
           {slide.cta_label && slide.cta_link && (
-            <div className={`w-full flex ${slide.cta_align === 'center' ? 'justify-center text-center' : slide.cta_align === 'right' ? 'justify-end text-right' : 'justify-start text-left'} ${Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom') ? '' : 'mt-5 sm:mt-8'}`}>
-              <Link
-                to={slide.cta_link}
-                style={
-                  Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom')
-                    ? {
-                        marginTop: `${Number(slide.cta_margin_top_px ?? 32)}px`,
-                        marginBottom: `${Number(slide.cta_margin_bottom_px ?? 0)}px`,
-                        marginLeft: `${Number(slide.cta_margin_left_px ?? 0)}px`,
-                        marginRight: `${Number(slide.cta_margin_right_px ?? 0)}px`,
+            <>
+              {Boolean(slide.cta_custom_margins_mobile) ? (
+                <>
+                  {/* Desktop */}
+                  <div
+                    className={`hidden md:flex w-full ${
+                      slide.cta_align === 'center'
+                        ? 'justify-center text-center'
+                        : slide.cta_align === 'right'
+                        ? 'justify-end text-right'
+                        : 'justify-start text-left'
+                    } ${Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom') ? '' : 'mt-5 sm:mt-8'}`}
+                  >
+                    <Link
+                      to={slide.cta_link}
+                      style={
+                        Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom')
+                          ? {
+                              marginTop: `${Number(slide.cta_margin_top_px ?? 32)}px`,
+                              marginBottom: `${Number(slide.cta_margin_bottom_px ?? 0)}px`,
+                              marginLeft: `${Number(slide.cta_margin_left_px ?? 0)}px`,
+                              marginRight: `${Number(slide.cta_margin_right_px ?? 0)}px`,
+                            }
+                          : undefined
                       }
-                    : undefined
-                }
-                className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
-                data-testid="hero-cta"
-              >
-                {slide.cta_label} <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
+                      className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
+                      data-testid="hero-cta"
+                    >
+                      {slide.cta_label} <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  </div>
+                  {/* Mobile */}
+                  <div
+                    className={`flex md:hidden w-full ${
+                      (slide.cta_align_mobile || slide.cta_align) === 'center'
+                        ? 'justify-center text-center'
+                        : (slide.cta_align_mobile || slide.cta_align) === 'right'
+                        ? 'justify-end text-right'
+                        : 'justify-start text-left'
+                    }`}
+                  >
+                    <Link
+                      to={slide.cta_link}
+                      style={{
+                        marginTop: `${Number(slide.cta_margin_top_mobile_px ?? 16)}px`,
+                        marginBottom: `${Number(slide.cta_margin_bottom_mobile_px ?? 0)}px`,
+                        marginLeft: `${Number(slide.cta_margin_left_mobile_px ?? 0)}px`,
+                        marginRight: `${Number(slide.cta_margin_right_mobile_px ?? 0)}px`,
+                      }}
+                      className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 rounded-lg font-montserrat font-semibold text-sm hover:bg-white/90 transition shadow-sm"
+                      data-testid="hero-cta-mobile"
+                    >
+                      {slide.cta_label} <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <div
+                  className={`w-full flex ${
+                    slide.cta_align === 'center'
+                      ? 'justify-center text-center'
+                      : slide.cta_align === 'right'
+                      ? 'justify-end text-right'
+                      : 'justify-start text-left'
+                  } ${Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom') ? '' : 'mt-5 sm:mt-8'}`}
+                >
+                  <Link
+                    to={slide.cta_link}
+                    style={
+                      Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom')
+                        ? {
+                            marginTop: `${Number(slide.cta_margin_top_px ?? 32)}px`,
+                            marginBottom: `${Number(slide.cta_margin_bottom_px ?? 0)}px`,
+                            marginLeft: `${Number(slide.cta_margin_left_px ?? 0)}px`,
+                            marginRight: `${Number(slide.cta_margin_right_px ?? 0)}px`,
+                          }
+                        : undefined
+                    }
+                    className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
+                    data-testid="hero-cta"
+                  >
+                    {slide.cta_label} <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

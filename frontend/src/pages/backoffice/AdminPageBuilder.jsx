@@ -46,12 +46,21 @@ const DEFAULT_PROPS = {
     cta_margin_bottom_px: 0,
     cta_margin_left_px: 0,
     cta_margin_right_px: 0,
+    cta_custom_margins_mobile: false,
+    cta_align_mobile: '',
+    cta_margin_top_mobile_px: 16,
+    cta_margin_bottom_mobile_px: 0,
+    cta_margin_left_mobile_px: 0,
+    cta_margin_right_mobile_px: 0,
     vertical_align: 'center',
     banner_height: 'normal',
+    max_height_px: '',
   },
   hero_carousel: {
     autoplay_seconds: 6,
     show_dots: true,
+    banner_height: 'normal',
+    max_height_px: '',
     slides: [
       { title: 'Slide 1', subtitle: '', image_url: '', cta_label: 'Comprar', cta_link: '/loja', overlay_opacity: 0.4 },
     ],
@@ -368,10 +377,15 @@ function summary(block) {
   const p = block.props || {};
   if (block.type === 'hero') {
     const imgs = [p.image_url ? 'Desktop' : null, p.image_url_mobile ? 'Mobile' : null].filter(Boolean).join(' + ');
-    return `${p.title || '(sem título)'}${imgs ? ` · ${imgs}` : ''}`;
+    const maxH = p.max_height_px ? `máx ${p.max_height_px}px` : null;
+    const details = [imgs, maxH].filter(Boolean).join(' · ');
+    return `${p.title || '(sem título)'}${details ? ` · ${details}` : ''}`;
   }
   if (block.type === 'cta_banner' || block.type === 'section_title') return p.title || '(sem título)';
-  if (block.type === 'hero_carousel') return `${(p.slides || []).length} slide(s)`;
+  if (block.type === 'hero_carousel') {
+    const maxH = p.max_height_px ? `máx ${p.max_height_px}px` : null;
+    return `${(p.slides || []).length} slide(s)${maxH ? ` · ${maxH}` : ''}`;
+  }
   if (block.type === 'product_grid') return `${p.source} · ${p.limit || 8} produtos`;
   if (block.type === 'rich_text') return p.eyebrow ? `${p.eyebrow} · ${p.subtitle || 'Título'}` : (p.html ? 'Texto formatado' : 'Título rico');
   if (block.type === 'category_grid') {
@@ -652,39 +666,46 @@ function HeroBlockEditor({ props, onChange }) {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <SelectInput
-            label="Localização / Alinhamento do Botão"
-            value={props.cta_align || 'left'}
-            onChange={(v) => onChange({ cta_align: v })}
-            options={[
-              { value: 'left', label: 'À Esquerda (Padrão)' },
-              { value: 'center', label: 'Centralizado' },
-              { value: 'right', label: 'À Direita' },
-            ]}
-          />
-          <SelectInput
-            label="Espaçamento Vertical"
-            value={props.cta_custom_margins || props.cta_margin_top === 'custom' ? 'custom' : (props.cta_margin_top || 'normal')}
-            onChange={(v) => {
-              if (v === 'custom') {
-                onChange({ cta_custom_margins: true, cta_margin_top: 'custom' });
-              } else {
-                onChange({ cta_custom_margins: false, cta_margin_top: v });
-              }
-            }}
-            options={[
-              { value: 'small', label: 'Pequeno (16px)' },
-              { value: 'normal', label: 'Padrão (32px)' },
-              { value: 'large', label: 'Grande (48px)' },
-              { value: 'none', label: 'Colado (8px)' },
-              { value: 'custom', label: 'Personalizado (em px)...' },
-            ]}
-          />
-        </div>
+        {/* Bloco Desktop */}
+        <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt-primary flex items-center gap-1.5">
+              🖥️ Margens & Alinhamento — Desktop (Computador)
+            </span>
+          </div>
 
-        <div className="pt-1">
-          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-txt-primary">
+          <div className="grid grid-cols-2 gap-2">
+            <SelectInput
+              label="Alinhamento Desktop"
+              value={props.cta_align || 'left'}
+              onChange={(v) => onChange({ cta_align: v })}
+              options={[
+                { value: 'left', label: 'À Esquerda' },
+                { value: 'center', label: 'Centralizado' },
+                { value: 'right', label: 'À Direita' },
+              ]}
+            />
+            <SelectInput
+              label="Espaçamento Vertical"
+              value={props.cta_custom_margins || props.cta_margin_top === 'custom' ? 'custom' : (props.cta_margin_top || 'normal')}
+              onChange={(v) => {
+                if (v === 'custom') {
+                  onChange({ cta_custom_margins: true, cta_margin_top: 'custom' });
+                } else {
+                  onChange({ cta_custom_margins: false, cta_margin_top: v });
+                }
+              }}
+              options={[
+                { value: 'small', label: 'Pequeno (16px)' },
+                { value: 'normal', label: 'Padrão (32px)' },
+                { value: 'large', label: 'Grande (48px)' },
+                { value: 'none', label: 'Colado (8px)' },
+                { value: 'custom', label: 'Personalizado (px)...' },
+              ]}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-txt-primary pt-1">
             <input
               type="checkbox"
               checked={Boolean(props.cta_custom_margins || props.cta_margin_top === 'custom')}
@@ -697,80 +718,158 @@ function HeroBlockEditor({ props, onChange }) {
               }}
               className="w-4 h-4 rounded text-brand-main"
             />
-            <span>Definir valores personalizados das margens (px)</span>
+            <span>Definir margens exatas no Desktop (px)</span>
           </label>
+
+          {(props.cta_custom_margins || props.cta_margin_top === 'custom') && (
+            <div className="space-y-2 pt-2 border-t border-border/60">
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical Desktop (px)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    label="Superior (Top)"
+                    type="number"
+                    value={props.cta_margin_top_px ?? (props.cta_margin_top === 'small' ? 16 : props.cta_margin_top === 'large' ? 48 : props.cta_margin_top === 'none' ? 8 : 32)}
+                    onChange={(e) => onChange({
+                      cta_margin_top_px: e.target.value === '' ? '' : Number(e.target.value),
+                      cta_custom_margins: true,
+                      cta_margin_top: 'custom',
+                    })}
+                    placeholder="32"
+                  />
+                  <Input
+                    label="Inferior (Bottom)"
+                    type="number"
+                    value={props.cta_margin_bottom_px ?? 0}
+                    onChange={(e) => onChange({
+                      cta_margin_bottom_px: e.target.value === '' ? '' : Number(e.target.value),
+                      cta_custom_margins: true,
+                      cta_margin_top: 'custom',
+                    })}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1 pt-1">
+                <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal Desktop (px)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    label="Esquerda (Left)"
+                    type="number"
+                    value={props.cta_margin_left_px ?? 0}
+                    onChange={(e) => onChange({
+                      cta_margin_left_px: e.target.value === '' ? '' : Number(e.target.value),
+                      cta_custom_margins: true,
+                      cta_margin_top: 'custom',
+                    })}
+                    placeholder="0"
+                  />
+                  <Input
+                    label="Direita (Right)"
+                    type="number"
+                    value={props.cta_margin_right_px ?? 0}
+                    onChange={(e) => onChange({
+                      cta_margin_right_px: e.target.value === '' ? '' : Number(e.target.value),
+                      cta_custom_margins: true,
+                      cta_margin_top: 'custom',
+                    })}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {(props.cta_custom_margins || props.cta_margin_top === 'custom') && (
-          <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-txt-secondary">
-                Margens Personalizadas (Pixels)
-              </span>
-              <span className="text-[10px] text-brand-main font-semibold">Vertical & Horizontal</span>
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical</span>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  label="Superior (Top) px"
-                  type="number"
-                  value={props.cta_margin_top_px ?? (props.cta_margin_top === 'small' ? 16 : props.cta_margin_top === 'large' ? 48 : props.cta_margin_top === 'none' ? 8 : 32)}
-                  onChange={(e) => onChange({
-                    cta_margin_top_px: e.target.value === '' ? '' : Number(e.target.value),
-                    cta_custom_margins: true,
-                    cta_margin_top: 'custom',
-                  })}
-                  placeholder="32"
-                />
-                <Input
-                  label="Inferior (Bottom) px"
-                  type="number"
-                  value={props.cta_margin_bottom_px ?? 0}
-                  onChange={(e) => onChange({
-                    cta_margin_bottom_px: e.target.value === '' ? '' : Number(e.target.value),
-                    cta_custom_margins: true,
-                    cta_margin_top: 'custom',
-                  })}
-                  placeholder="0"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-1 border-t border-border/60">
-              <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal</span>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  label="Esquerda (Left) px"
-                  type="number"
-                  value={props.cta_margin_left_px ?? 0}
-                  onChange={(e) => onChange({
-                    cta_margin_left_px: e.target.value === '' ? '' : Number(e.target.value),
-                    cta_custom_margins: true,
-                    cta_margin_top: 'custom',
-                  })}
-                  placeholder="0"
-                />
-                <Input
-                  label="Direita (Right) px"
-                  type="number"
-                  value={props.cta_margin_right_px ?? 0}
-                  onChange={(e) => onChange({
-                    cta_margin_right_px: e.target.value === '' ? '' : Number(e.target.value),
-                    cta_custom_margins: true,
-                    cta_margin_top: 'custom',
-                  })}
-                  placeholder="0"
-                />
-              </div>
-            </div>
-
-            <p className="text-[10px] text-txt-secondary leading-tight">
-              💡 Ajuste os valores em pixels para posicionar o botão com precisão vertical e horizontal.
-            </p>
+        {/* Bloco Mobile */}
+        <div className="p-3 bg-orange-50/60 border border-orange-200/80 rounded-xl space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
+              📱 Margens & Alinhamento — Mobile (Celular)
+            </span>
+            <span className="text-[10px] bg-orange-100 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
+              {props.cta_custom_margins_mobile ? 'Personalizado' : 'Mesmo do Desktop'}
+            </span>
           </div>
-        )}
+
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-txt-primary">
+            <input
+              type="checkbox"
+              checked={Boolean(props.cta_custom_margins_mobile)}
+              onChange={(e) => onChange({ cta_custom_margins_mobile: e.target.checked })}
+              className="w-4 h-4 rounded text-brand-main"
+            />
+            <span>Ativar margens e alinhamento exclusivos para Celular (Mobile)</span>
+          </label>
+
+          {props.cta_custom_margins_mobile && (
+            <div className="space-y-3 pt-2 border-t border-orange-200/80">
+              <SelectInput
+                label="Alinhamento no Celular"
+                value={props.cta_align_mobile || props.cta_align || 'left'}
+                onChange={(v) => onChange({ cta_align_mobile: v })}
+                options={[
+                  { value: 'left', label: 'À Esquerda' },
+                  { value: 'center', label: 'Centralizado' },
+                  { value: 'right', label: 'À Direita' },
+                ]}
+              />
+
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical Mobile (px)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    label="Superior (Top)"
+                    type="number"
+                    value={props.cta_margin_top_mobile_px ?? 16}
+                    onChange={(e) => onChange({
+                      cta_margin_top_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    })}
+                    placeholder="16"
+                  />
+                  <Input
+                    label="Inferior (Bottom)"
+                    type="number"
+                    value={props.cta_margin_bottom_mobile_px ?? 0}
+                    onChange={(e) => onChange({
+                      cta_margin_bottom_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    })}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1 pt-1">
+                <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal Mobile (px)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    label="Esquerda (Left)"
+                    type="number"
+                    value={props.cta_margin_left_mobile_px ?? 0}
+                    onChange={(e) => onChange({
+                      cta_margin_left_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    })}
+                    placeholder="0"
+                  />
+                  <Input
+                    label="Direita (Right)"
+                    type="number"
+                    value={props.cta_margin_right_mobile_px ?? 0}
+                    onChange={(e) => onChange({
+                      cta_margin_right_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    })}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-txt-secondary leading-tight">
+                💡 Ajuste para posicionar o botão perfeitamente na vertical e horizontal sem cobrir frascos ou textos da foto mobile.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="space-y-3 pt-3 border-t border-border">
@@ -798,17 +897,29 @@ function HeroBlockEditor({ props, onChange }) {
           />
         </div>
 
-        <SelectInput
-          label="Altura Mínima do Banner"
-          value={props.banner_height || 'normal'}
-          onChange={(v) => onChange({ banner_height: v })}
-          options={[
-            { value: 'compact', label: 'Compacto (360px)' },
-            { value: 'normal', label: 'Padrão (440px)' },
-            { value: 'large', label: 'Amplo / Grande (560px)' },
-            { value: 'screen', label: 'Tela Cheia (72vh)' },
-          ]}
-        />
+        <div className="grid grid-cols-2 gap-2">
+          <SelectInput
+            label="Altura Mínima"
+            value={props.banner_height || 'normal'}
+            onChange={(v) => onChange({ banner_height: v })}
+            options={[
+              { value: 'compact', label: 'Compacto (360px)' },
+              { value: 'normal', label: 'Padrão (440px)' },
+              { value: 'large', label: 'Amplo / Grande (560px)' },
+              { value: 'screen', label: 'Tela Cheia (72vh)' },
+            ]}
+          />
+          <Input
+            label="Altura Máxima (px)"
+            type="number"
+            value={props.max_height_px ?? ''}
+            onChange={(e) => onChange({ max_height_px: e.target.value === '' ? '' : Number(e.target.value) })}
+            placeholder="Ex: 500 (ou vazio)"
+          />
+        </div>
+        <p className="text-[10px] text-txt-secondary leading-tight">
+          💡 <strong>Altura Máxima:</strong> Evita que a imagem seja cortada no topo/base em monitores maiores ou ultrawide (ex: 480, 520, 600). Deixe vazio para ilimitado.
+        </p>
 
         <RangeInput
           label="Opacidade do escurecimento (Overlay)"
@@ -859,6 +970,33 @@ function CarouselEditor({ props, onChange }) {
             <span className="text-sm">Mostrar bolinhas</span>
           </label>
         </div>
+      </div>
+
+      <div className="space-y-2 pt-2 border-t border-border">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Dimensões do Carrossel</div>
+        <div className="grid grid-cols-2 gap-2">
+          <SelectInput
+            label="Altura Mínima"
+            value={props.banner_height || 'normal'}
+            onChange={(v) => onChange({ banner_height: v })}
+            options={[
+              { value: 'compact', label: 'Compacto (360px)' },
+              { value: 'normal', label: 'Padrão (440px)' },
+              { value: 'large', label: 'Amplo / Grande (560px)' },
+              { value: 'screen', label: 'Tela Cheia (72vh)' },
+            ]}
+          />
+          <Input
+            label="Altura Máxima (px)"
+            type="number"
+            value={props.max_height_px ?? ''}
+            onChange={(e) => onChange({ max_height_px: e.target.value === '' ? '' : Number(e.target.value) })}
+            placeholder="Ex: 500 (ou vazio)"
+          />
+        </div>
+        <p className="text-[10px] text-txt-secondary leading-tight">
+          💡 <strong>Altura Máxima:</strong> Evita que os slides sejam cortados em monitores maiores ou telas ultrawide (ex: 480, 520, 600). Deixe vazio para ilimitado.
+        </p>
       </div>
 
       <div className="space-y-2 pt-2 border-t border-border">
@@ -923,7 +1061,7 @@ function CarouselEditor({ props, onChange }) {
             </div>
             {(s.cta_custom_margins || s.cta_margin_top === 'custom') && (
               <div className="p-2.5 bg-white border border-border rounded-lg space-y-2 text-xs">
-                <div className="font-semibold text-txt-secondary text-[11px] uppercase">Margens Personalizadas (px)</div>
+                <div className="font-semibold text-txt-secondary text-[11px] uppercase">Margens Desktop (px)</div>
                 <div className="grid grid-cols-2 gap-1.5">
                   <Input
                     label="Vertical Superior (px)"
@@ -952,7 +1090,68 @@ function CarouselEditor({ props, onChange }) {
                 </div>
               </div>
             )}
-            <RangeInput label="Escurecimento" value={s.overlay_opacity ?? 0.4} onChange={(v) => updateSlide(idx, { overlay_opacity: v })} />
+            <div className="pt-1">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-orange-950">
+                <input
+                  type="checkbox"
+                  checked={Boolean(s.cta_custom_margins_mobile)}
+                  onChange={(e) => updateSlide(idx, { cta_custom_margins_mobile: e.target.checked })}
+                  className="w-4 h-4 rounded text-brand-main"
+                />
+                <span>📱 Margens e alinhamento exclusivos para Celular (Mobile)</span>
+              </label>
+            </div>
+            {s.cta_custom_margins_mobile && (
+              <div className="p-2.5 bg-orange-50/60 border border-orange-200 rounded-lg space-y-2 text-xs">
+                <div className="font-semibold text-orange-950 text-[11px] uppercase">Mobile — Celular (px)</div>
+                <SelectInput
+                  label="Alinhamento no Celular"
+                  value={s.cta_align_mobile || s.cta_align || 'left'}
+                  onChange={(v) => updateSlide(idx, { cta_align_mobile: v })}
+                  options={[
+                    { value: 'left', label: 'À Esquerda' },
+                    { value: 'center', label: 'Centralizado' },
+                    { value: 'right', label: 'À Direita' },
+                  ]}
+                />
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Input
+                    label="Superior Mobile (px)"
+                    type="number"
+                    value={s.cta_margin_top_mobile_px ?? 16}
+                    onChange={(e) => updateSlide(idx, { cta_margin_top_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  />
+                  <Input
+                    label="Inferior Mobile (px)"
+                    type="number"
+                    value={s.cta_margin_bottom_mobile_px ?? 0}
+                    onChange={(e) => updateSlide(idx, { cta_margin_bottom_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  />
+                  <Input
+                    label="Esquerda Mobile (px)"
+                    type="number"
+                    value={s.cta_margin_left_mobile_px ?? 0}
+                    onChange={(e) => updateSlide(idx, { cta_margin_left_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  />
+                  <Input
+                    label="Direita Mobile (px)"
+                    type="number"
+                    value={s.cta_margin_right_mobile_px ?? 0}
+                    onChange={(e) => updateSlide(idx, { cta_margin_right_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2 items-center">
+              <Input
+                label="Altura Máx. do Slide (px - opcional)"
+                type="number"
+                value={s.max_height_px ?? ''}
+                onChange={(e) => updateSlide(idx, { max_height_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                placeholder="Ex: 500"
+              />
+              <RangeInput label="Escurecimento" value={s.overlay_opacity ?? 0.4} onChange={(v) => updateSlide(idx, { overlay_opacity: v })} />
+            </div>
           </div>
         ))}
         <Button variant="outline" size="sm" onClick={addSlide} data-testid="carousel-add-slide">
