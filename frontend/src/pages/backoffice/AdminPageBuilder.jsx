@@ -42,19 +42,28 @@ const DEFAULT_PROPS = {
     cta_align: 'left',
     cta_margin_top: 'normal',
     cta_custom_margins: false,
-    cta_margin_top_px: 32,
-    cta_margin_bottom_px: 0,
-    cta_margin_left_px: 0,
-    cta_margin_right_px: 0,
+    cta_margin_top_desktop: '32px',
+    cta_margin_bottom_desktop: '0px',
+    cta_margin_left_desktop: '0px',
+    cta_margin_right_desktop: '0px',
     cta_custom_margins_mobile: false,
     cta_align_mobile: '',
-    cta_margin_top_mobile_px: 16,
-    cta_margin_bottom_mobile_px: 0,
-    cta_margin_left_mobile_px: 0,
-    cta_margin_right_mobile_px: 0,
+    cta_margin_top_mobile: '16px',
+    cta_margin_bottom_mobile: '0px',
+    cta_margin_left_mobile: '0px',
+    cta_margin_right_mobile: '0px',
     vertical_align: 'center',
     banner_height: 'normal',
+    banner_min_height_custom: '',
+    banner_max_height_type: 'none',
+    banner_max_height_custom: '',
+    banner_mobile_dimensions_enabled: false,
+    banner_height_mobile: 'normal',
+    banner_min_height_mobile_custom: '',
+    banner_max_height_mobile_type: 'none',
+    banner_max_height_mobile_custom: '',
     max_height_px: '',
+    max_height_mobile_px: '',
   },
   hero_carousel: {
     autoplay_seconds: 6,
@@ -592,6 +601,71 @@ function ImageUploadField({ label, value, onChange, testIdPrefix = 'img' }) {
  */
 
 /**
+ * Componente de entrada para dimensões e margens com seletor de unidade (px, rem, %, vh, vw, em)
+ */
+function DimensionInput({
+  label,
+  value,
+  onChange,
+  placeholder = '0',
+  defaultUnit = 'px',
+  units = ['px', 'rem', '%', 'vh', 'vw', 'em'],
+}) {
+  const parse = (val) => {
+    if (val === undefined || val === null || val === '') return { num: '', unit: defaultUnit };
+    if (typeof val === 'number') return { num: String(val), unit: defaultUnit };
+    const str = String(val).trim();
+    const match = str.match(/^(-?[\d.]+)\s*([a-zA-Z%]*)$/);
+    if (match) {
+      return { num: match[1], unit: match[2] || defaultUnit };
+    }
+    return { num: str, unit: defaultUnit };
+  };
+
+  const current = parse(value);
+
+  const handleNumChange = (e) => {
+    const nextNum = e.target.value;
+    if (nextNum === '') {
+      onChange('');
+    } else {
+      onChange(`${nextNum}${current.unit || defaultUnit}`);
+    }
+  };
+
+  const handleUnitChange = (e) => {
+    const nextUnit = e.target.value;
+    const num = current.num !== '' ? current.num : '0';
+    onChange(`${num}${nextUnit}`);
+  };
+
+  return (
+    <div>
+      {label && <label className="text-xs font-bold text-txt-secondary block mb-1">{label}</label>}
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          step="any"
+          value={current.num}
+          onChange={handleNumChange}
+          placeholder={placeholder}
+          className="flex-1 min-w-0 h-9 px-2.5 bg-bg-secondary border border-border rounded-lg text-xs text-txt-primary focus:outline-none focus:border-brand-main"
+        />
+        <select
+          value={current.unit || defaultUnit}
+          onChange={handleUnitChange}
+          className="h-9 px-2 bg-bg-secondary border border-border rounded-lg text-xs font-bold text-brand-main focus:outline-none focus:border-brand-main shrink-0 cursor-pointer"
+        >
+          {units.map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Editor do bloco hero:
  * - Textos (título, subtítulo, tagline)
  * - Imagens responsivas: Desktop e Mobile
@@ -649,6 +723,7 @@ function HeroBlockEditor({ props, onChange }) {
         </div>
       </div>
 
+      {/* Botão de Ação CTA */}
       <div className="space-y-3 pt-3 border-t border-border">
         <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Botão de Ação (CTA)</div>
         <div className="grid grid-cols-2 gap-2">
@@ -700,7 +775,7 @@ function HeroBlockEditor({ props, onChange }) {
                 { value: 'normal', label: 'Padrão (32px)' },
                 { value: 'large', label: 'Grande (48px)' },
                 { value: 'none', label: 'Colado (8px)' },
-                { value: 'custom', label: 'Personalizado (px)...' },
+                { value: 'custom', label: 'Personalizado (definir)...' },
               ]}
             />
           </div>
@@ -718,31 +793,31 @@ function HeroBlockEditor({ props, onChange }) {
               }}
               className="w-4 h-4 rounded text-brand-main"
             />
-            <span>Definir margens exatas no Desktop (px)</span>
+            <span>Definir margens exatas no Desktop (com unidades: px, rem, %, vh, etc.)</span>
           </label>
 
           {(props.cta_custom_margins || props.cta_margin_top === 'custom') && (
             <div className="space-y-2 pt-2 border-t border-border/60">
               <div className="space-y-1">
-                <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical Desktop (px)</span>
+                <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical Desktop</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <Input
+                  <DimensionInput
                     label="Superior (Top)"
-                    type="number"
-                    value={props.cta_margin_top_px ?? (props.cta_margin_top === 'small' ? 16 : props.cta_margin_top === 'large' ? 48 : props.cta_margin_top === 'none' ? 8 : 32)}
-                    onChange={(e) => onChange({
-                      cta_margin_top_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_top_desktop ?? props.cta_margin_top_px ?? (props.cta_margin_top === 'small' ? '16px' : props.cta_margin_top === 'large' ? '48px' : props.cta_margin_top === 'none' ? '8px' : '32px')}
+                    onChange={(v) => onChange({
+                      cta_margin_top_desktop: v,
+                      cta_margin_top_px: v,
                       cta_custom_margins: true,
                       cta_margin_top: 'custom',
                     })}
                     placeholder="32"
                   />
-                  <Input
+                  <DimensionInput
                     label="Inferior (Bottom)"
-                    type="number"
-                    value={props.cta_margin_bottom_px ?? 0}
-                    onChange={(e) => onChange({
-                      cta_margin_bottom_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_bottom_desktop ?? props.cta_margin_bottom_px ?? '0px'}
+                    onChange={(v) => onChange({
+                      cta_margin_bottom_desktop: v,
+                      cta_margin_bottom_px: v,
                       cta_custom_margins: true,
                       cta_margin_top: 'custom',
                     })}
@@ -752,25 +827,25 @@ function HeroBlockEditor({ props, onChange }) {
               </div>
 
               <div className="space-y-1 pt-1">
-                <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal Desktop (px)</span>
+                <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal Desktop</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <Input
+                  <DimensionInput
                     label="Esquerda (Left)"
-                    type="number"
-                    value={props.cta_margin_left_px ?? 0}
-                    onChange={(e) => onChange({
-                      cta_margin_left_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_left_desktop ?? props.cta_margin_left_px ?? '0px'}
+                    onChange={(v) => onChange({
+                      cta_margin_left_desktop: v,
+                      cta_margin_left_px: v,
                       cta_custom_margins: true,
                       cta_margin_top: 'custom',
                     })}
                     placeholder="0"
                   />
-                  <Input
+                  <DimensionInput
                     label="Direita (Right)"
-                    type="number"
-                    value={props.cta_margin_right_px ?? 0}
-                    onChange={(e) => onChange({
-                      cta_margin_right_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_right_desktop ?? props.cta_margin_right_px ?? '0px'}
+                    onChange={(v) => onChange({
+                      cta_margin_right_desktop: v,
+                      cta_margin_right_px: v,
                       cta_custom_margins: true,
                       cta_margin_top: 'custom',
                     })}
@@ -817,23 +892,23 @@ function HeroBlockEditor({ props, onChange }) {
               />
 
               <div className="space-y-1">
-                <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical Mobile (px)</span>
+                <span className="text-[11px] font-semibold text-txt-primary block">↕ Margem Vertical Mobile</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <Input
+                  <DimensionInput
                     label="Superior (Top)"
-                    type="number"
-                    value={props.cta_margin_top_mobile_px ?? 16}
-                    onChange={(e) => onChange({
-                      cta_margin_top_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_top_mobile ?? props.cta_margin_top_mobile_px ?? '16px'}
+                    onChange={(v) => onChange({
+                      cta_margin_top_mobile: v,
+                      cta_margin_top_mobile_px: v,
                     })}
                     placeholder="16"
                   />
-                  <Input
+                  <DimensionInput
                     label="Inferior (Bottom)"
-                    type="number"
-                    value={props.cta_margin_bottom_mobile_px ?? 0}
-                    onChange={(e) => onChange({
-                      cta_margin_bottom_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_bottom_mobile ?? props.cta_margin_bottom_mobile_px ?? '0px'}
+                    onChange={(v) => onChange({
+                      cta_margin_bottom_mobile: v,
+                      cta_margin_bottom_mobile_px: v,
                     })}
                     placeholder="0"
                   />
@@ -841,23 +916,23 @@ function HeroBlockEditor({ props, onChange }) {
               </div>
 
               <div className="space-y-1 pt-1">
-                <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal Mobile (px)</span>
+                <span className="text-[11px] font-semibold text-txt-primary block">↔ Margem Horizontal Mobile</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <Input
+                  <DimensionInput
                     label="Esquerda (Left)"
-                    type="number"
-                    value={props.cta_margin_left_mobile_px ?? 0}
-                    onChange={(e) => onChange({
-                      cta_margin_left_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_left_mobile ?? props.cta_margin_left_mobile_px ?? '0px'}
+                    onChange={(v) => onChange({
+                      cta_margin_left_mobile: v,
+                      cta_margin_left_mobile_px: v,
                     })}
                     placeholder="0"
                   />
-                  <Input
+                  <DimensionInput
                     label="Direita (Right)"
-                    type="number"
-                    value={props.cta_margin_right_mobile_px ?? 0}
-                    onChange={(e) => onChange({
-                      cta_margin_right_mobile_px: e.target.value === '' ? '' : Number(e.target.value),
+                    value={props.cta_margin_right_mobile ?? props.cta_margin_right_mobile_px ?? '0px'}
+                    onChange={(v) => onChange({
+                      cta_margin_right_mobile: v,
+                      cta_margin_right_mobile_px: v,
                     })}
                     placeholder="0"
                   />
@@ -872,8 +947,10 @@ function HeroBlockEditor({ props, onChange }) {
         </div>
       </div>
 
-      <div className="space-y-3 pt-3 border-t border-border">
-        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Alinhamento & Dimensões</div>
+      {/* Alinhamento e Dimensões do Banner */}
+      <div className="space-y-4 pt-3 border-t border-border">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Alinhamento & Dimensões do Banner</div>
+
         <div className="grid grid-cols-2 gap-2">
           <SelectInput
             label="Alinhamento do Texto"
@@ -897,29 +974,155 @@ function HeroBlockEditor({ props, onChange }) {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <SelectInput
-            label="Altura Mínima"
-            value={props.banner_height || 'normal'}
-            onChange={(v) => onChange({ banner_height: v })}
-            options={[
-              { value: 'compact', label: 'Compacto (360px)' },
-              { value: 'normal', label: 'Padrão (440px)' },
-              { value: 'large', label: 'Amplo / Grande (560px)' },
-              { value: 'screen', label: 'Tela Cheia (72vh)' },
-            ]}
-          />
-          <Input
-            label="Altura Máxima (px)"
-            type="number"
-            value={props.max_height_px ?? ''}
-            onChange={(e) => onChange({ max_height_px: e.target.value === '' ? '' : Number(e.target.value) })}
-            placeholder="Ex: 500 (ou vazio)"
-          />
+        {/* 🖥️ Dimensões Desktop */}
+        <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
+          <div className="text-xs font-bold uppercase tracking-wider text-txt-primary">
+            🖥️ Alturas no Desktop (Computador)
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <SelectInput
+              label="Altura Mínima (Desktop)"
+              value={props.banner_height || 'normal'}
+              onChange={(v) => onChange({ banner_height: v })}
+              options={[
+                { value: 'compact', label: 'Compacto (360px)' },
+                { value: 'normal', label: 'Padrão (440px)' },
+                { value: 'large', label: 'Amplo / Grande (560px)' },
+                { value: 'screen', label: 'Tela Cheia (72vh)' },
+                { value: 'custom', label: 'Personalizado...' },
+              ]}
+            />
+            <SelectInput
+              label="Altura Máxima (Desktop)"
+              value={props.banner_max_height_type || (props.max_height_px ? 'custom' : 'none')}
+              onChange={(v) => {
+                if (v === 'none') {
+                  onChange({ banner_max_height_type: 'none', max_height_px: '', banner_max_height_custom: '' });
+                } else if (v === 'custom') {
+                  onChange({ banner_max_height_type: 'custom', banner_max_height_custom: props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px') });
+                } else {
+                  onChange({ banner_max_height_type: v, max_height_px: v.replace('px', ''), banner_max_height_custom: v });
+                }
+              }}
+              options={[
+                { value: 'none', label: 'Sem limite (Ilimitado)' },
+                { value: '400px', label: 'Compacto (400px)' },
+                { value: '500px', label: 'Médio / Padrão (500px)' },
+                { value: '600px', label: 'Grande (600px)' },
+                { value: '750px', label: 'Amplo (750px)' },
+                { value: 'custom', label: 'Personalizado...' },
+              ]}
+            />
+          </div>
+
+          {(props.banner_height === 'custom' || props.banner_max_height_type === 'custom' || props.max_height_px) && (
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
+              {props.banner_height === 'custom' ? (
+                <DimensionInput
+                  label="Mínima Personalizada"
+                  value={props.banner_min_height_custom || '440px'}
+                  onChange={(v) => onChange({ banner_min_height_custom: v })}
+                  placeholder="440"
+                  defaultUnit="px"
+                />
+              ) : <div />}
+              {(props.banner_max_height_type === 'custom' || props.max_height_px) ? (
+                <DimensionInput
+                  label="Máxima Personalizada"
+                  value={props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px')}
+                  onChange={(v) => onChange({ banner_max_height_custom: v, max_height_px: v.replace(/[^0-9.]/g, '') })}
+                  placeholder="500"
+                  defaultUnit="px"
+                />
+              ) : <div />}
+            </div>
+          )}
         </div>
-        <p className="text-[10px] text-txt-secondary leading-tight">
-          💡 <strong>Altura Máxima:</strong> Evita que a imagem seja cortada no topo/base em monitores maiores ou ultrawide (ex: 480, 520, 600). Deixe vazio para ilimitado.
-        </p>
+
+        {/* 📱 Dimensões Mobile */}
+        <div className="p-3 bg-orange-50/60 border border-orange-200/80 rounded-xl space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
+              📱 Alturas no Mobile (Celular)
+            </span>
+            <span className="text-[10px] bg-orange-100 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
+              {props.banner_mobile_dimensions_enabled ? 'Exclusivo Mobile' : 'Automático'}
+            </span>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-txt-primary">
+            <input
+              type="checkbox"
+              checked={Boolean(props.banner_mobile_dimensions_enabled)}
+              onChange={(e) => onChange({ banner_mobile_dimensions_enabled: e.target.checked })}
+              className="w-4 h-4 rounded text-brand-main"
+            />
+            <span>Ativar controle de altura mínima e máxima no Celular (Mobile)</span>
+          </label>
+
+          {props.banner_mobile_dimensions_enabled && (
+            <div className="space-y-3 pt-2 border-t border-orange-200/80">
+              <div className="grid grid-cols-2 gap-2">
+                <SelectInput
+                  label="Altura Mínima (Mobile)"
+                  value={props.banner_height_mobile || 'normal'}
+                  onChange={(v) => onChange({ banner_height_mobile: v })}
+                  options={[
+                    { value: 'compact', label: 'Compacto (240px)' },
+                    { value: 'normal', label: 'Padrão (320px)' },
+                    { value: 'large', label: 'Amplo (420px)' },
+                    { value: 'screen', label: 'Tela Cheia (85vh)' },
+                    { value: 'custom', label: 'Personalizado...' },
+                  ]}
+                />
+                <SelectInput
+                  label="Altura Máxima (Mobile)"
+                  value={props.banner_max_height_mobile_type || (props.max_height_mobile_px ? 'custom' : 'none')}
+                  onChange={(v) => {
+                    if (v === 'none') {
+                      onChange({ banner_max_height_mobile_type: 'none', max_height_mobile_px: '', banner_max_height_mobile_custom: '' });
+                    } else if (v === 'custom') {
+                      onChange({ banner_max_height_mobile_type: 'custom', banner_max_height_mobile_custom: props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px') });
+                    } else {
+                      onChange({ banner_max_height_mobile_type: v, max_height_mobile_px: v.replace('px', ''), banner_max_height_mobile_custom: v });
+                    }
+                  }}
+                  options={[
+                    { value: 'none', label: 'Sem limite (Ilimitado)' },
+                    { value: '320px', label: 'Compacto (320px)' },
+                    { value: '420px', label: 'Médio (420px)' },
+                    { value: '520px', label: 'Grande (520px)' },
+                    { value: 'custom', label: 'Personalizado...' },
+                  ]}
+                />
+              </div>
+
+              {(props.banner_height_mobile === 'custom' || props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) && (
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-orange-200/80">
+                  {props.banner_height_mobile === 'custom' ? (
+                    <DimensionInput
+                      label="Mínima Mobile Personalizada"
+                      value={props.banner_min_height_mobile_custom || '320px'}
+                      onChange={(v) => onChange({ banner_min_height_mobile_custom: v })}
+                      placeholder="320"
+                      defaultUnit="px"
+                    />
+                  ) : <div />}
+                  {(props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) ? (
+                    <DimensionInput
+                      label="Máxima Mobile Personalizada"
+                      value={props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px')}
+                      onChange={(v) => onChange({ banner_max_height_mobile_custom: v, max_height_mobile_px: v.replace(/[^0-9.]/g, '') })}
+                      placeholder="420"
+                      defaultUnit="px"
+                    />
+                  ) : <div />}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <RangeInput
           label="Opacidade do escurecimento (Overlay)"
@@ -950,7 +1153,7 @@ function CarouselEditor({ props, onChange }) {
   });
 
   return (
-    <div className="space-y-3" data-testid="carousel-editor">
+    <div className="space-y-4" data-testid="carousel-editor">
       <div className="grid grid-cols-2 gap-2">
         <Input
           label="Autoplay (s)"
@@ -972,11 +1175,14 @@ function CarouselEditor({ props, onChange }) {
         </div>
       </div>
 
-      <div className="space-y-2 pt-2 border-t border-border">
-        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Dimensões do Carrossel</div>
+      {/* 🖥️ Dimensões Desktop Carrossel */}
+      <div className="p-3 bg-bg-secondary/40 border border-border rounded-xl space-y-3">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-primary">
+          🖥️ Alturas no Desktop (Carrossel)
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <SelectInput
-            label="Altura Mínima"
+            label="Altura Mínima (Desktop)"
             value={props.banner_height || 'normal'}
             onChange={(v) => onChange({ banner_height: v })}
             options={[
@@ -984,19 +1190,133 @@ function CarouselEditor({ props, onChange }) {
               { value: 'normal', label: 'Padrão (440px)' },
               { value: 'large', label: 'Amplo / Grande (560px)' },
               { value: 'screen', label: 'Tela Cheia (72vh)' },
+              { value: 'custom', label: 'Personalizado...' },
             ]}
           />
-          <Input
-            label="Altura Máxima (px)"
-            type="number"
-            value={props.max_height_px ?? ''}
-            onChange={(e) => onChange({ max_height_px: e.target.value === '' ? '' : Number(e.target.value) })}
-            placeholder="Ex: 500 (ou vazio)"
+          <SelectInput
+            label="Altura Máxima (Desktop)"
+            value={props.banner_max_height_type || (props.max_height_px ? 'custom' : 'none')}
+            onChange={(v) => {
+              if (v === 'none') {
+                onChange({ banner_max_height_type: 'none', max_height_px: '', banner_max_height_custom: '' });
+              } else if (v === 'custom') {
+                onChange({ banner_max_height_type: 'custom', banner_max_height_custom: props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px') });
+              } else {
+                onChange({ banner_max_height_type: v, max_height_px: v.replace('px', ''), banner_max_height_custom: v });
+              }
+            }}
+            options={[
+              { value: 'none', label: 'Sem limite (Ilimitado)' },
+              { value: '400px', label: 'Compacto (400px)' },
+              { value: '500px', label: 'Médio / Padrão (500px)' },
+              { value: '600px', label: 'Grande (600px)' },
+              { value: '750px', label: 'Amplo (750px)' },
+              { value: 'custom', label: 'Personalizado...' },
+            ]}
           />
         </div>
-        <p className="text-[10px] text-txt-secondary leading-tight">
-          💡 <strong>Altura Máxima:</strong> Evita que os slides sejam cortados em monitores maiores ou telas ultrawide (ex: 480, 520, 600). Deixe vazio para ilimitado.
-        </p>
+        {(props.banner_height === 'custom' || props.banner_max_height_type === 'custom' || props.max_height_px) && (
+          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
+            {props.banner_height === 'custom' ? (
+              <DimensionInput
+                label="Mínima Personalizada"
+                value={props.banner_min_height_custom || '440px'}
+                onChange={(v) => onChange({ banner_min_height_custom: v })}
+                placeholder="440"
+              />
+            ) : <div />}
+            {(props.banner_max_height_type === 'custom' || props.max_height_px) ? (
+              <DimensionInput
+                label="Máxima Personalizada"
+                value={props.banner_max_height_custom || (props.max_height_px ? `${props.max_height_px}px` : '500px')}
+                onChange={(v) => onChange({ banner_max_height_custom: v, max_height_px: v.replace(/[^0-9.]/g, '') })}
+                placeholder="500"
+              />
+            ) : <div />}
+          </div>
+        )}
+      </div>
+
+      {/* 📱 Dimensões Mobile Carrossel */}
+      <div className="p-3 bg-orange-50/60 border border-orange-200/80 rounded-xl space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
+            📱 Alturas no Mobile (Carrossel)
+          </span>
+          <span className="text-[10px] bg-orange-100 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
+            {props.banner_mobile_dimensions_enabled ? 'Exclusivo Mobile' : 'Automático'}
+          </span>
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-txt-primary">
+          <input
+            type="checkbox"
+            checked={Boolean(props.banner_mobile_dimensions_enabled)}
+            onChange={(e) => onChange({ banner_mobile_dimensions_enabled: e.target.checked })}
+            className="w-4 h-4 rounded text-brand-main"
+          />
+          <span>Ativar controle de altura mínima e máxima no Celular (Mobile)</span>
+        </label>
+
+        {props.banner_mobile_dimensions_enabled && (
+          <div className="space-y-3 pt-2 border-t border-orange-200/80">
+            <div className="grid grid-cols-2 gap-2">
+              <SelectInput
+                label="Altura Mínima (Mobile)"
+                value={props.banner_height_mobile || 'normal'}
+                onChange={(v) => onChange({ banner_height_mobile: v })}
+                options={[
+                  { value: 'compact', label: 'Compacto (240px)' },
+                  { value: 'normal', label: 'Padrão (320px)' },
+                  { value: 'large', label: 'Amplo (420px)' },
+                  { value: 'screen', label: 'Tela Cheia (85vh)' },
+                  { value: 'custom', label: 'Personalizado...' },
+                ]}
+              />
+              <SelectInput
+                label="Altura Máxima (Mobile)"
+                value={props.banner_max_height_mobile_type || (props.max_height_mobile_px ? 'custom' : 'none')}
+                onChange={(v) => {
+                  if (v === 'none') {
+                    onChange({ banner_max_height_mobile_type: 'none', max_height_mobile_px: '', banner_max_height_mobile_custom: '' });
+                  } else if (v === 'custom') {
+                    onChange({ banner_max_height_mobile_type: 'custom', banner_max_height_mobile_custom: props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px') });
+                  } else {
+                    onChange({ banner_max_height_mobile_type: v, max_height_mobile_px: v.replace('px', ''), banner_max_height_mobile_custom: v });
+                  }
+                }}
+                options={[
+                  { value: 'none', label: 'Sem limite (Ilimitado)' },
+                  { value: '320px', label: 'Compacto (320px)' },
+                  { value: '420px', label: 'Médio (420px)' },
+                  { value: '520px', label: 'Grande (520px)' },
+                  { value: 'custom', label: 'Personalizado...' },
+                ]}
+              />
+            </div>
+
+            {(props.banner_height_mobile === 'custom' || props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) && (
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-orange-200/80">
+                {props.banner_height_mobile === 'custom' ? (
+                  <DimensionInput
+                    label="Mínima Mobile Personalizada"
+                    value={props.banner_min_height_mobile_custom || '320px'}
+                    onChange={(v) => onChange({ banner_min_height_mobile_custom: v })}
+                    placeholder="320"
+                  />
+                ) : <div />}
+                {(props.banner_max_height_mobile_type === 'custom' || props.max_height_mobile_px) ? (
+                  <DimensionInput
+                    label="Máxima Mobile Personalizada"
+                    value={props.banner_max_height_mobile_custom || (props.max_height_mobile_px ? `${props.max_height_mobile_px}px` : '420px')}
+                    onChange={(v) => onChange({ banner_max_height_mobile_custom: v, max_height_mobile_px: v.replace(/[^0-9.]/g, '') })}
+                    placeholder="420"
+                  />
+                ) : <div />}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="space-y-2 pt-2 border-t border-border">
@@ -1029,9 +1349,11 @@ function CarouselEditor({ props, onChange }) {
               <Input label="Botão (CTA)" value={s.cta_label || ''} onChange={(e) => updateSlide(idx, { cta_label: e.target.value })} placeholder="Ex: Comprar" />
               <Input label="Link" value={s.cta_link || ''} onChange={(e) => updateSlide(idx, { cta_link: e.target.value })} placeholder="/loja" />
             </div>
+
+            {/* Desktop Slide CTA Settings */}
             <div className="grid grid-cols-2 gap-2">
               <SelectInput
-                label="Alinhamento do Botão"
+                label="Alinhamento Desktop"
                 value={s.cta_align || 'left'}
                 onChange={(v) => updateSlide(idx, { cta_align: v })}
                 options={[
@@ -1055,41 +1377,39 @@ function CarouselEditor({ props, onChange }) {
                   { value: 'normal', label: 'Padrão (32px)' },
                   { value: 'large', label: 'Grande (48px)' },
                   { value: 'none', label: 'Colado (8px)' },
-                  { value: 'custom', label: 'Personalizado (px)...' },
+                  { value: 'custom', label: 'Personalizado...' },
                 ]}
               />
             </div>
             {(s.cta_custom_margins || s.cta_margin_top === 'custom') && (
               <div className="p-2.5 bg-white border border-border rounded-lg space-y-2 text-xs">
-                <div className="font-semibold text-txt-secondary text-[11px] uppercase">Margens Desktop (px)</div>
+                <div className="font-semibold text-txt-secondary text-[11px] uppercase">Margens Desktop</div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <Input
-                    label="Vertical Superior (px)"
-                    type="number"
-                    value={s.cta_margin_top_px ?? 32}
-                    onChange={(e) => updateSlide(idx, { cta_margin_top_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  <DimensionInput
+                    label="Superior (Top)"
+                    value={s.cta_margin_top_desktop ?? s.cta_margin_top_px ?? '32px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_top_desktop: v, cta_margin_top_px: v, cta_custom_margins: true, cta_margin_top: 'custom' })}
                   />
-                  <Input
-                    label="Vertical Inferior (px)"
-                    type="number"
-                    value={s.cta_margin_bottom_px ?? 0}
-                    onChange={(e) => updateSlide(idx, { cta_margin_bottom_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  <DimensionInput
+                    label="Inferior (Bottom)"
+                    value={s.cta_margin_bottom_desktop ?? s.cta_margin_bottom_px ?? '0px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_bottom_desktop: v, cta_margin_bottom_px: v, cta_custom_margins: true, cta_margin_top: 'custom' })}
                   />
-                  <Input
-                    label="Horizontal Esquerda (px)"
-                    type="number"
-                    value={s.cta_margin_left_px ?? 0}
-                    onChange={(e) => updateSlide(idx, { cta_margin_left_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  <DimensionInput
+                    label="Esquerda (Left)"
+                    value={s.cta_margin_left_desktop ?? s.cta_margin_left_px ?? '0px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_left_desktop: v, cta_margin_left_px: v, cta_custom_margins: true, cta_margin_top: 'custom' })}
                   />
-                  <Input
-                    label="Horizontal Direita (px)"
-                    type="number"
-                    value={s.cta_margin_right_px ?? 0}
-                    onChange={(e) => updateSlide(idx, { cta_margin_right_px: e.target.value === '' ? '' : Number(e.target.value), cta_custom_margins: true, cta_margin_top: 'custom' })}
+                  <DimensionInput
+                    label="Direita (Right)"
+                    value={s.cta_margin_right_desktop ?? s.cta_margin_right_px ?? '0px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_right_desktop: v, cta_margin_right_px: v, cta_custom_margins: true, cta_margin_top: 'custom' })}
                   />
                 </div>
               </div>
             )}
+
+            {/* Mobile Slide CTA Settings */}
             <div className="pt-1">
               <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-orange-950">
                 <input
@@ -1103,7 +1423,7 @@ function CarouselEditor({ props, onChange }) {
             </div>
             {s.cta_custom_margins_mobile && (
               <div className="p-2.5 bg-orange-50/60 border border-orange-200 rounded-lg space-y-2 text-xs">
-                <div className="font-semibold text-orange-950 text-[11px] uppercase">Mobile — Celular (px)</div>
+                <div className="font-semibold text-orange-950 text-[11px] uppercase">Mobile — Celular</div>
                 <SelectInput
                   label="Alinhamento no Celular"
                   value={s.cta_align_mobile || s.cta_align || 'left'}
@@ -1115,42 +1435,32 @@ function CarouselEditor({ props, onChange }) {
                   ]}
                 />
                 <div className="grid grid-cols-2 gap-1.5">
-                  <Input
-                    label="Superior Mobile (px)"
-                    type="number"
-                    value={s.cta_margin_top_mobile_px ?? 16}
-                    onChange={(e) => updateSlide(idx, { cta_margin_top_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  <DimensionInput
+                    label="Superior Mobile"
+                    value={s.cta_margin_top_mobile ?? s.cta_margin_top_mobile_px ?? '16px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_top_mobile: v, cta_margin_top_mobile_px: v })}
                   />
-                  <Input
-                    label="Inferior Mobile (px)"
-                    type="number"
-                    value={s.cta_margin_bottom_mobile_px ?? 0}
-                    onChange={(e) => updateSlide(idx, { cta_margin_bottom_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  <DimensionInput
+                    label="Inferior Mobile"
+                    value={s.cta_margin_bottom_mobile ?? s.cta_margin_bottom_mobile_px ?? '0px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_bottom_mobile: v, cta_margin_bottom_mobile_px: v })}
                   />
-                  <Input
-                    label="Esquerda Mobile (px)"
-                    type="number"
-                    value={s.cta_margin_left_mobile_px ?? 0}
-                    onChange={(e) => updateSlide(idx, { cta_margin_left_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  <DimensionInput
+                    label="Esquerda Mobile"
+                    value={s.cta_margin_left_mobile ?? s.cta_margin_left_mobile_px ?? '0px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_left_mobile: v, cta_margin_left_mobile_px: v })}
                   />
-                  <Input
-                    label="Direita Mobile (px)"
-                    type="number"
-                    value={s.cta_margin_right_mobile_px ?? 0}
-                    onChange={(e) => updateSlide(idx, { cta_margin_right_mobile_px: e.target.value === '' ? '' : Number(e.target.value) })}
+                  <DimensionInput
+                    label="Direita Mobile"
+                    value={s.cta_margin_right_mobile ?? s.cta_margin_right_mobile_px ?? '0px'}
+                    onChange={(v) => updateSlide(idx, { cta_margin_right_mobile: v, cta_margin_right_mobile_px: v })}
                   />
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2 items-center">
-              <Input
-                label="Altura Máx. do Slide (px - opcional)"
-                type="number"
-                value={s.max_height_px ?? ''}
-                onChange={(e) => updateSlide(idx, { max_height_px: e.target.value === '' ? '' : Number(e.target.value) })}
-                placeholder="Ex: 500"
-              />
-              <RangeInput label="Escurecimento" value={s.overlay_opacity ?? 0.4} onChange={(v) => updateSlide(idx, { overlay_opacity: v })} />
+
+            <div className="pt-1">
+              <RangeInput label="Escurecimento (Overlay)" value={s.overlay_opacity ?? 0.4} onChange={(v) => updateSlide(idx, { overlay_opacity: v })} />
             </div>
           </div>
         ))}
@@ -1161,6 +1471,7 @@ function CarouselEditor({ props, onChange }) {
     </div>
   );
 }
+
 function TrustBarBlockEditor({ props, onChange }) {
   const items = Array.isArray(props.items) ? props.items : [];
   const useStore = props.use_store_settings ?? true;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useId } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -9,7 +9,76 @@ import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
  *  - slides: [{title, subtitle, image_url, cta_label, cta_link, overlay_opacity}]
  *  - settings: site settings (autoplay_seconds, show_dots, tagline)
  */
+function toCssDim(val, fallback = undefined) {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (typeof val === 'number') return `${val}px`;
+  const str = String(val).trim();
+  if (/^-?[\d.]+$/.test(str)) return `${str}px`;
+  return str;
+}
+
+function resolveBannerHeights(p = {}) {
+  const deskMinMap = {
+    compact: '360px',
+    normal: '440px',
+    large: '560px',
+    screen: '72vh',
+  };
+  const deskMin = p.banner_height === 'custom'
+    ? toCssDim(p.banner_min_height_custom, '440px')
+    : deskMinMap[p.banner_height] || '440px';
+
+  let deskMax = null;
+  if (p.banner_max_height_type === 'custom' || p.banner_max_height_custom) {
+    deskMax = toCssDim(p.banner_max_height_custom || p.max_height_px);
+  } else if (p.banner_max_height_type && p.banner_max_height_type !== 'none') {
+    deskMax = p.banner_max_height_type;
+  } else if (p.max_height_px || p.hero_max_height_px) {
+    deskMax = `${p.max_height_px || p.hero_max_height_px}px`;
+  }
+
+  const mobMinMap = {
+    compact: '240px',
+    normal: '320px',
+    large: '420px',
+    screen: '85vh',
+  };
+  let mobMin;
+  if (p.banner_mobile_dimensions_enabled) {
+    mobMin = p.banner_height_mobile === 'custom'
+      ? toCssDim(p.banner_min_height_mobile_custom, '320px')
+      : mobMinMap[p.banner_height_mobile] || '320px';
+  } else {
+    const fallbackMobMap = {
+      compact: '240px',
+      normal: '280px',
+      large: '340px',
+      screen: '400px',
+    };
+    mobMin = p.banner_height === 'custom'
+      ? toCssDim(p.banner_min_height_custom, '280px')
+      : fallbackMobMap[p.banner_height] || '280px';
+  }
+
+  let mobMax = null;
+  if (p.banner_mobile_dimensions_enabled) {
+    if (p.banner_max_height_mobile_type === 'custom' || p.banner_max_height_mobile_custom) {
+      mobMax = toCssDim(p.banner_max_height_mobile_custom || p.max_height_mobile_px);
+    } else if (p.banner_max_height_mobile_type && p.banner_max_height_mobile_type !== 'none') {
+      mobMax = p.banner_max_height_mobile_type;
+    } else if (p.max_height_mobile_px) {
+      mobMax = `${p.max_height_mobile_px}px`;
+    }
+  } else {
+    mobMax = deskMax;
+  }
+
+  return { deskMin, deskMax, mobMin, mobMax };
+}
+
 export default function HeroCarousel({ slides = [], settings }) {
+  const hookId = useId();
+  const carouselClass = 'hc-' + hookId.replace(/[^a-zA-Z0-9_-]/g, '');
   const cfg = settings || {};
   const [idx, setIdx] = useState(0);
   const total = slides.length;
@@ -29,26 +98,36 @@ export default function HeroCarousel({ slides = [], settings }) {
   const slide = slides[idx] || {};
   const overlay = Number(slide.overlay_opacity ?? 0.4);
 
-  const effectiveMaxH = slide.max_height_px
-    ? Number(slide.max_height_px)
-    : cfg.hero_max_height_px || cfg.max_height_px
-    ? Number(cfg.hero_max_height_px || cfg.max_height_px)
-    : null;
-  const sectionStyle = effectiveMaxH ? { maxHeight: `${effectiveMaxH}px` } : undefined;
-  const innerContainerStyle = effectiveMaxH
-    ? {
-        maxHeight: `${effectiveMaxH}px`,
-        minHeight: `min(100%, ${effectiveMaxH}px)`,
-      }
-    : undefined;
+  const heights = resolveBannerHeights({ ...cfg, ...slide });
+
 
   return (
     <section
-      className="relative text-white overflow-hidden"
-      style={sectionStyle}
+      className={`relative text-white overflow-hidden ${carouselClass}`}
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
+      <style>{`
+        .${carouselClass} {
+          min-height: ${heights.mobMin};
+          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
+        }
+        .${carouselClass} .hc-inner {
+          min-height: ${heights.mobMin};
+          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
+        }
+        @media (min-width: 768px) {
+          .${carouselClass} {
+            min-height: ${heights.deskMin};
+            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+          }
+          .${carouselClass} .hc-inner {
+            min-height: ${heights.deskMin};
+            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+          }
+        }
+      `}</style>
+
       {/* Imagem de fundo com transicao suave */}
       <div className="absolute inset-0">
         {slides.map((sl, i) => (
@@ -87,10 +166,7 @@ export default function HeroCarousel({ slides = [], settings }) {
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
 
-      <div
-        className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center"
-        style={innerContainerStyle}
-      >
+      <div className="hc-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 flex items-center">
         <div className="fade-in max-w-2xl w-full">
           {cfg.tagline && (
             <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">
@@ -124,10 +200,10 @@ export default function HeroCarousel({ slides = [], settings }) {
                       style={
                         Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom')
                           ? {
-                              marginTop: `${Number(slide.cta_margin_top_px ?? 32)}px`,
-                              marginBottom: `${Number(slide.cta_margin_bottom_px ?? 0)}px`,
-                              marginLeft: `${Number(slide.cta_margin_left_px ?? 0)}px`,
-                              marginRight: `${Number(slide.cta_margin_right_px ?? 0)}px`,
+                              marginTop: toCssDim(slide.cta_margin_top_desktop ?? slide.cta_margin_top_px, '32px'),
+                              marginBottom: toCssDim(slide.cta_margin_bottom_desktop ?? slide.cta_margin_bottom_px, '0px'),
+                              marginLeft: toCssDim(slide.cta_margin_left_desktop ?? slide.cta_margin_left_px, '0px'),
+                              marginRight: toCssDim(slide.cta_margin_right_desktop ?? slide.cta_margin_right_px, '0px'),
                             }
                           : undefined
                       }
@@ -150,10 +226,10 @@ export default function HeroCarousel({ slides = [], settings }) {
                     <Link
                       to={slide.cta_link}
                       style={{
-                        marginTop: `${Number(slide.cta_margin_top_mobile_px ?? 16)}px`,
-                        marginBottom: `${Number(slide.cta_margin_bottom_mobile_px ?? 0)}px`,
-                        marginLeft: `${Number(slide.cta_margin_left_mobile_px ?? 0)}px`,
-                        marginRight: `${Number(slide.cta_margin_right_mobile_px ?? 0)}px`,
+                        marginTop: toCssDim(slide.cta_margin_top_mobile ?? slide.cta_margin_top_mobile_px, '16px'),
+                        marginBottom: toCssDim(slide.cta_margin_bottom_mobile ?? slide.cta_margin_bottom_mobile_px, '0px'),
+                        marginLeft: toCssDim(slide.cta_margin_left_mobile ?? slide.cta_margin_left_mobile_px, '0px'),
+                        marginRight: toCssDim(slide.cta_margin_right_mobile ?? slide.cta_margin_right_mobile_px, '0px'),
                       }}
                       className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 rounded-lg font-montserrat font-semibold text-sm hover:bg-white/90 transition shadow-sm"
                       data-testid="hero-cta-mobile"
@@ -177,10 +253,10 @@ export default function HeroCarousel({ slides = [], settings }) {
                     style={
                       Boolean(slide.cta_custom_margins || slide.cta_margin_top === 'custom')
                         ? {
-                            marginTop: `${Number(slide.cta_margin_top_px ?? 32)}px`,
-                            marginBottom: `${Number(slide.cta_margin_bottom_px ?? 0)}px`,
-                            marginLeft: `${Number(slide.cta_margin_left_px ?? 0)}px`,
-                            marginRight: `${Number(slide.cta_margin_right_px ?? 0)}px`,
+                            marginTop: toCssDim(slide.cta_margin_top_desktop ?? slide.cta_margin_top_px, '32px'),
+                            marginBottom: toCssDim(slide.cta_margin_bottom_desktop ?? slide.cta_margin_bottom_px, '0px'),
+                            marginLeft: toCssDim(slide.cta_margin_left_desktop ?? slide.cta_margin_left_px, '0px'),
+                            marginRight: toCssDim(slide.cta_margin_right_desktop ?? slide.cta_margin_right_px, '0px'),
                           }
                         : undefined
                     }
@@ -208,16 +284,15 @@ export default function HeroCarousel({ slides = [], settings }) {
         </>
       )}
 
-      {/* Indicadores */}
       {total > 1 && showDots && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2" data-testid="hero-dots">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2" data-testid="hero-carousel-dots">
           {slides.map((_, i) => (
             <button
               key={i}
+              type="button"
               onClick={() => setIdx(i)}
+              aria-label={`Ir para slide ${i + 1}`}
               className={`h-2 rounded-full transition-all ${i === idx ? 'bg-white w-8' : 'bg-white/40 w-2 hover:bg-white/60'}`}
-              aria-label={`Slide ${i + 1}`}
-              data-testid={`hero-dot-${i}`}
             />
           ))}
         </div>

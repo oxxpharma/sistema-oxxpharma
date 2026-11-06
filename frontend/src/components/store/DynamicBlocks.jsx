@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useId } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid, Image as ImageIcon } from 'lucide-react';
@@ -57,13 +57,81 @@ function BlockRouter({ block }) {
   );
 }
 
+function toCssDim(val, fallback = undefined) {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (typeof val === 'number') return `${val}px`;
+  const str = String(val).trim();
+  if (/^-?[\d.]+$/.test(str)) return `${str}px`;
+  return str;
+}
+
+function resolveBannerHeights(p = {}) {
+  const deskMinMap = {
+    compact: '360px',
+    normal: '440px',
+    large: '560px',
+    screen: '72vh',
+  };
+  const deskMin = p.banner_height === 'custom'
+    ? toCssDim(p.banner_min_height_custom, '440px')
+    : deskMinMap[p.banner_height] || '440px';
+
+  let deskMax = null;
+  if (p.banner_max_height_type === 'custom' || p.banner_max_height_custom) {
+    deskMax = toCssDim(p.banner_max_height_custom || p.max_height_px);
+  } else if (p.banner_max_height_type && p.banner_max_height_type !== 'none') {
+    deskMax = p.banner_max_height_type;
+  } else if (p.max_height_px) {
+    deskMax = `${p.max_height_px}px`;
+  }
+
+  const mobMinMap = {
+    compact: '240px',
+    normal: '320px',
+    large: '420px',
+    screen: '85vh',
+  };
+  let mobMin;
+  if (p.banner_mobile_dimensions_enabled) {
+    mobMin = p.banner_height_mobile === 'custom'
+      ? toCssDim(p.banner_min_height_mobile_custom, '320px')
+      : mobMinMap[p.banner_height_mobile] || '320px';
+  } else {
+    const fallbackMobMap = {
+      compact: '240px',
+      normal: '280px',
+      large: '340px',
+      screen: '400px',
+    };
+    mobMin = p.banner_height === 'custom'
+      ? toCssDim(p.banner_min_height_custom, '280px')
+      : fallbackMobMap[p.banner_height] || '280px';
+  }
+
+  let mobMax = null;
+  if (p.banner_mobile_dimensions_enabled) {
+    if (p.banner_max_height_mobile_type === 'custom' || p.banner_max_height_mobile_custom) {
+      mobMax = toCssDim(p.banner_max_height_mobile_custom || p.max_height_mobile_px);
+    } else if (p.banner_max_height_mobile_type && p.banner_max_height_mobile_type !== 'none') {
+      mobMax = p.banner_max_height_mobile_type;
+    } else if (p.max_height_mobile_px) {
+      mobMax = `${p.max_height_mobile_px}px`;
+    }
+  } else {
+    mobMax = deskMax;
+  }
+
+  return { deskMin, deskMax, mobMin, mobMax };
+}
+
 function HeroCarouselBlock({
   slides = [],
   autoplay_seconds = 6,
   show_dots = true,
-  banner_height = 'normal',
-  max_height_px,
+  ...restProps
 }) {
+  const hookId = useId();
+  const carouselClass = 'hcb-' + hookId.replace(/[^a-zA-Z0-9_-]/g, '');
   const [idx, setIdx] = useState(0);
   const total = slides.length;
   const interval = Math.max(0, Number(autoplay_seconds || 6)) * 1000;
@@ -81,30 +149,36 @@ function HeroCarouselBlock({
   const cur = slides[idx] || {};
   const overlay = Number(cur.overlay_opacity ?? 0.4);
 
-  const effectiveBannerHeight = cur.banner_height || banner_height || 'normal';
-  const heightClass = {
-    compact: 'min-h-[240px] sm:min-h-[300px] md:min-h-[360px]',
-    normal: 'min-h-[280px] sm:min-h-[360px] md:min-h-[440px]',
-    large: 'min-h-[340px] sm:min-h-[440px] md:min-h-[560px]',
-    screen: 'min-h-[400px] sm:min-h-[500px] md:min-h-[72vh]',
-  }[effectiveBannerHeight] || 'min-h-[280px] sm:min-h-[360px] md:min-h-[440px]';
+  const heights = resolveBannerHeights({ ...restProps, ...cur });
 
-  const effectiveMaxH = cur.max_height_px ? Number(cur.max_height_px) : (max_height_px ? Number(max_height_px) : null);
-  const sectionStyle = effectiveMaxH ? { maxHeight: `${effectiveMaxH}px` } : undefined;
-  const innerContainerStyle = effectiveMaxH
-    ? {
-        maxHeight: `${effectiveMaxH}px`,
-        minHeight: `min(100%, ${effectiveMaxH}px)`,
-      }
-    : undefined;
 
   return (
     <section
-      className="relative text-white overflow-hidden w-full"
-      style={sectionStyle}
+      className={`relative text-white overflow-hidden w-full ${carouselClass}`}
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
+      <style>{`
+        .${carouselClass} {
+          min-height: ${heights.mobMin};
+          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
+        }
+        .${carouselClass} .hcb-inner {
+          min-height: ${heights.mobMin};
+          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
+        }
+        @media (min-width: 768px) {
+          .${carouselClass} {
+            min-height: ${heights.deskMin};
+            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+          }
+          .${carouselClass} .hcb-inner {
+            min-height: ${heights.deskMin};
+            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+          }
+        }
+      `}</style>
+
       {/* Fundos com fade entre slides */}
       <div className="absolute inset-0">
         {slides.map((sl, i) => (
@@ -141,10 +215,7 @@ function HeroCarouselBlock({
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
 
-      <div
-        className={`relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 ${heightClass} flex items-center`}
-        style={innerContainerStyle}
-      >
+      <div className="hcb-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 flex items-center">
         <div className="max-w-2xl w-full">
           <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{cur.title}</h1>
           {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{cur.subtitle}</p>}
@@ -152,7 +223,7 @@ function HeroCarouselBlock({
             <>
               {Boolean(cur.cta_custom_margins_mobile) ? (
                 <>
-                  {/* Desktop */}
+                  {/* Desktop CTA */}
                   <div
                     className={`hidden md:flex w-full ${
                       cur.cta_align === 'center'
@@ -167,10 +238,10 @@ function HeroCarouselBlock({
                       style={
                         Boolean(cur.cta_custom_margins || cur.cta_margin_top === 'custom')
                           ? {
-                              marginTop: `${Number(cur.cta_margin_top_px ?? 32)}px`,
-                              marginBottom: `${Number(cur.cta_margin_bottom_px ?? 0)}px`,
-                              marginLeft: `${Number(cur.cta_margin_left_px ?? 0)}px`,
-                              marginRight: `${Number(cur.cta_margin_right_px ?? 0)}px`,
+                              marginTop: toCssDim(cur.cta_margin_top_desktop ?? cur.cta_margin_top_px, '32px'),
+                              marginBottom: toCssDim(cur.cta_margin_bottom_desktop ?? cur.cta_margin_bottom_px, '0px'),
+                              marginLeft: toCssDim(cur.cta_margin_left_desktop ?? cur.cta_margin_left_px, '0px'),
+                              marginRight: toCssDim(cur.cta_margin_right_desktop ?? cur.cta_margin_right_px, '0px'),
                             }
                           : undefined
                       }
@@ -179,7 +250,7 @@ function HeroCarouselBlock({
                       {cur.cta_label} <ArrowRight className="w-4 h-4" />
                     </Link>
                   </div>
-                  {/* Mobile */}
+                  {/* Mobile CTA */}
                   <div
                     className={`flex md:hidden w-full ${
                       (cur.cta_align_mobile || cur.cta_align) === 'center'
@@ -192,10 +263,10 @@ function HeroCarouselBlock({
                     <Link
                       to={cur.cta_link}
                       style={{
-                        marginTop: `${Number(cur.cta_margin_top_mobile_px ?? 16)}px`,
-                        marginBottom: `${Number(cur.cta_margin_bottom_mobile_px ?? 0)}px`,
-                        marginLeft: `${Number(cur.cta_margin_left_mobile_px ?? 0)}px`,
-                        marginRight: `${Number(cur.cta_margin_right_mobile_px ?? 0)}px`,
+                        marginTop: toCssDim(cur.cta_margin_top_mobile ?? cur.cta_margin_top_mobile_px, '16px'),
+                        marginBottom: toCssDim(cur.cta_margin_bottom_mobile ?? cur.cta_margin_bottom_mobile_px, '0px'),
+                        marginLeft: toCssDim(cur.cta_margin_left_mobile ?? cur.cta_margin_left_mobile_px, '0px'),
+                        marginRight: toCssDim(cur.cta_margin_right_mobile ?? cur.cta_margin_right_mobile_px, '0px'),
                       }}
                       className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 rounded-lg font-montserrat font-semibold text-sm hover:bg-white/90 transition shadow-sm"
                     >
@@ -218,10 +289,10 @@ function HeroCarouselBlock({
                     style={
                       Boolean(cur.cta_custom_margins || cur.cta_margin_top === 'custom')
                         ? {
-                            marginTop: `${Number(cur.cta_margin_top_px ?? 32)}px`,
-                            marginBottom: `${Number(cur.cta_margin_bottom_px ?? 0)}px`,
-                            marginLeft: `${Number(cur.cta_margin_left_px ?? 0)}px`,
-                            marginRight: `${Number(cur.cta_margin_right_px ?? 0)}px`,
+                            marginTop: toCssDim(cur.cta_margin_top_desktop ?? cur.cta_margin_top_px, '32px'),
+                            marginBottom: toCssDim(cur.cta_margin_bottom_desktop ?? cur.cta_margin_bottom_px, '0px'),
+                            marginLeft: toCssDim(cur.cta_margin_left_desktop ?? cur.cta_margin_left_px, '0px'),
+                            marginRight: toCssDim(cur.cta_margin_right_desktop ?? cur.cta_margin_right_px, '0px'),
                           }
                         : undefined
                     }
@@ -264,33 +335,43 @@ function HeroCarouselBlock({
   );
 }
 
-function HeroBlock({
-  title,
-  subtitle,
-  cta_label,
-  cta_link,
-  image_url,
-  image_url_mobile,
-  tagline,
-  overlay_opacity = 0.4,
-  content_align = 'left',
-  cta_align = 'left',
-  cta_align_mobile,
-  cta_margin_top = 'normal',
-  cta_custom_margins,
-  cta_margin_top_px,
-  cta_margin_bottom_px,
-  cta_margin_left_px,
-  cta_margin_right_px,
-  cta_custom_margins_mobile,
-  cta_margin_top_mobile_px,
-  cta_margin_bottom_mobile_px,
-  cta_margin_left_mobile_px,
-  cta_margin_right_mobile_px,
-  vertical_align = 'center',
-  banner_height = 'normal',
-  max_height_px,
-}) {
+function HeroBlock(props) {
+  const hookId = useId();
+  const heroClass = 'hb-' + hookId.replace(/[^a-zA-Z0-9_-]/g, '');
+  const {
+    title,
+    subtitle,
+    cta_label,
+    cta_link,
+    image_url,
+    image_url_mobile,
+    tagline,
+    overlay_opacity = 0.4,
+    content_align = 'left',
+    cta_align = 'left',
+    cta_align_mobile,
+    cta_margin_top = 'normal',
+    cta_custom_margins,
+    cta_margin_top_desktop,
+    cta_margin_top_px,
+    cta_margin_bottom_desktop,
+    cta_margin_bottom_px,
+    cta_margin_left_desktop,
+    cta_margin_left_px,
+    cta_margin_right_desktop,
+    cta_margin_right_px,
+    cta_custom_margins_mobile,
+    cta_margin_top_mobile,
+    cta_margin_top_mobile_px,
+    cta_margin_bottom_mobile,
+    cta_margin_bottom_mobile_px,
+    cta_margin_left_mobile,
+    cta_margin_left_mobile_px,
+    cta_margin_right_mobile,
+    cta_margin_right_mobile_px,
+    vertical_align = 'center',
+  } = props;
+
   const isCenter = content_align === 'center';
   const isRight = content_align === 'right';
 
@@ -299,13 +380,6 @@ function HeroBlock({
     center: 'items-center py-10 sm:py-14 md:py-20',
     bottom: 'items-end pt-10 pb-12 sm:pb-16',
   }[vertical_align] || 'items-center py-10 sm:py-14 md:py-20';
-
-  const heightClass = {
-    compact: 'min-h-[240px] sm:min-h-[300px] md:min-h-[360px]',
-    normal: 'min-h-[280px] sm:min-h-[360px] md:min-h-[440px]',
-    large: 'min-h-[340px] sm:min-h-[440px] md:min-h-[560px]',
-    screen: 'min-h-[400px] sm:min-h-[500px] md:min-h-[72vh]',
-  }[banner_height] || 'min-h-[280px] sm:min-h-[360px] md:min-h-[440px]';
 
   const contentAlignClass = isCenter
     ? 'text-center mx-auto items-center flex flex-col'
@@ -336,10 +410,10 @@ function HeroBlock({
   }[cta_margin_top] || 'mt-5 sm:mt-8');
 
   const ctaButtonDeskStyle = isCustomMarginsDesk ? {
-    marginTop: `${Number(cta_margin_top_px ?? 32)}px`,
-    marginBottom: `${Number(cta_margin_bottom_px ?? 0)}px`,
-    marginLeft: `${Number(cta_margin_left_px ?? 0)}px`,
-    marginRight: `${Number(cta_margin_right_px ?? 0)}px`,
+    marginTop: toCssDim(cta_margin_top_desktop ?? cta_margin_top_px, '32px'),
+    marginBottom: toCssDim(cta_margin_bottom_desktop ?? cta_margin_bottom_px, '0px'),
+    marginLeft: toCssDim(cta_margin_left_desktop ?? cta_margin_left_px, '0px'),
+    marginRight: toCssDim(cta_margin_right_desktop ?? cta_margin_right_px, '0px'),
   } : undefined;
 
   // Mobile alignment & margins
@@ -352,29 +426,43 @@ function HeroBlock({
   }[effectiveCtaAlignMobile] || 'justify-start text-left';
 
   const ctaButtonMobileStyle = hasSeparateMobile ? {
-    marginTop: `${Number(cta_margin_top_mobile_px ?? 16)}px`,
-    marginBottom: `${Number(cta_margin_bottom_mobile_px ?? 0)}px`,
-    marginLeft: `${Number(cta_margin_left_mobile_px ?? 0)}px`,
-    marginRight: `${Number(cta_margin_right_mobile_px ?? 0)}px`,
+    marginTop: toCssDim(cta_margin_top_mobile ?? cta_margin_top_mobile_px, '16px'),
+    marginBottom: toCssDim(cta_margin_bottom_mobile ?? cta_margin_bottom_mobile_px, '0px'),
+    marginLeft: toCssDim(cta_margin_left_mobile ?? cta_margin_left_mobile_px, '0px'),
+    marginRight: toCssDim(cta_margin_right_mobile ?? cta_margin_right_mobile_px, '0px'),
   } : ctaButtonDeskStyle;
 
-  const effectiveMaxH = max_height_px ? Number(max_height_px) : null;
-  const sectionStyle = effectiveMaxH ? { maxHeight: `${effectiveMaxH}px` } : undefined;
-  const innerContainerStyle = effectiveMaxH
-    ? {
-        maxHeight: `${effectiveMaxH}px`,
-        minHeight: `min(100%, ${effectiveMaxH}px)`,
-      }
-    : undefined;
+  const heights = resolveBannerHeights(props);
+
 
   const hasBg = Boolean(image_url || image_url_mobile);
 
   return (
     <section
-      className="relative text-white overflow-hidden w-full"
-      style={sectionStyle}
+      className={`relative text-white overflow-hidden w-full ${heroClass}`}
       data-testid="hero-block"
     >
+      <style>{`
+        .${heroClass} {
+          min-height: ${heights.mobMin};
+          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
+        }
+        .${heroClass} .hb-inner {
+          min-height: ${heights.mobMin};
+          ${heights.mobMax ? `max-height: ${heights.mobMax};` : ''}
+        }
+        @media (min-width: 768px) {
+          .${heroClass} {
+            min-height: ${heights.deskMin};
+            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+          }
+          .${heroClass} .hb-inner {
+            min-height: ${heights.deskMin};
+            ${heights.deskMax ? `max-height: ${heights.deskMax};` : ''}
+          }
+        }
+      `}</style>
+
       {/* Desktop background */}
       <div
         className={`absolute inset-0 ${image_url_mobile ? 'hidden md:block' : ''}`}
@@ -397,10 +485,7 @@ function HeroBlock({
       )}
       {hasBg && <div className="absolute inset-0 bg-black" style={{ opacity: overlay_opacity }} />}
 
-      <div
-        className={`relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${heightClass} flex ${vAlignClass} ${containerJustifyClass}`}
-        style={innerContainerStyle}
-      >
+      <div className={`hb-inner relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex ${vAlignClass} ${containerJustifyClass}`}>
         <div className={`max-w-2xl w-full ${contentAlignClass}`}>
           {tagline && (
             <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">
