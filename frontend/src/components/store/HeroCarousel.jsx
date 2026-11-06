@@ -38,24 +38,37 @@ export default function HeroCarousel({ slides = [], settings }) {
       {/* Imagem de fundo com transicao suave */}
       <div className="absolute inset-0">
         {slides.map((sl, i) => (
-          <div
-            key={i}
-            className="absolute inset-0 transition-opacity duration-700"
-            style={
-              sl.image_url
-                ? {
-                    opacity: i === idx ? 1 : 0,
-                    backgroundImage: `url("${sl.image_url}")`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                  }
-                : {
-                    opacity: i === idx ? 1 : 0,
-                    background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
-                  }
-            }
-          />
+          <React.Fragment key={i}>
+            <div
+              className={`absolute inset-0 transition-opacity duration-700 ${sl.image_url_mobile ? 'hidden md:block' : ''}`}
+              style={
+                sl.image_url
+                  ? {
+                      opacity: i === idx ? 1 : 0,
+                      backgroundImage: `url("${sl.image_url}")`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      backgroundRepeat: 'no-repeat',
+                    }
+                  : {
+                      opacity: i === idx ? 1 : 0,
+                      background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
+                    }
+              }
+            />
+            {sl.image_url_mobile && (
+              <div
+                className="absolute inset-0 transition-opacity duration-700 md:hidden"
+                style={{
+                  opacity: i === idx ? 1 : 0,
+                  backgroundImage: `url("${sl.image_url_mobile}")`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                }}
+              />
+            )}
+          </React.Fragment>
         ))}
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
@@ -76,7 +89,7 @@ export default function HeroCarousel({ slides = [], settings }) {
             </p>
           )}
           {slide.cta_label && slide.cta_link && (
-            <div className="mt-5 sm:mt-8">
+            <div className={`mt-5 sm:mt-8 flex ${slide.cta_align === 'center' ? 'justify-center' : slide.cta_align === 'right' ? 'justify-end' : 'justify-start'}`}>
               <Link
                 to={slide.cta_link}
                 className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"

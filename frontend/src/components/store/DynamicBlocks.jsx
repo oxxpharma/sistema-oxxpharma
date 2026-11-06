@@ -60,49 +60,59 @@ function BlockRouter({ block }) {
 function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true }) {
   const [idx, setIdx] = useState(0);
   const total = slides.length;
-  const interval = Math.max(0, Number(autoplay_seconds ?? 6)) * 1000;
+  const interval = Math.max(0, Number(autoplay_seconds || 6)) * 1000;
 
   const next = useCallback(() => setIdx((i) => (i + 1) % Math.max(1, total)), [total]);
   const prev = useCallback(() => setIdx((i) => (i - 1 + total) % Math.max(1, total)), [total]);
 
   useEffect(() => {
     if (total <= 1 || interval === 0) return;
-    const t = setInterval(next, interval);
-    return () => clearInterval(t);
+    const id = setInterval(next, interval);
+    return () => clearInterval(id);
   }, [total, interval, next]);
 
-  if (!total) return null;
-  const cur = slides[Math.min(idx, total - 1)] || {};
+  if (total === 0) return null;
+  const cur = slides[idx] || {};
   const overlay = Number(cur.overlay_opacity ?? 0.4);
-
 
   return (
     <section
       className="relative text-white overflow-hidden w-full"
-      
       data-testid="hero-carousel"
       data-current-slide={idx}
     >
       {/* Fundos com fade entre slides */}
       <div className="absolute inset-0">
         {slides.map((sl, i) => (
-          <div
-            key={i}
-            className="absolute inset-0 transition-opacity duration-700"
-            style={
-              sl.image_url
-                ? {
-                    opacity: i === idx ? 1 : 0,
-                    backgroundImage: `url("${sl.image_url}")`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                  }
-                : {
-                    opacity: i === idx ? 1 : 0,
-                    background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
-                  }
-            }
-          />
+          <React.Fragment key={i}>
+            <div
+              className={`absolute inset-0 transition-opacity duration-700 ${sl.image_url_mobile ? 'hidden md:block' : ''}`}
+              style={
+                sl.image_url
+                  ? {
+                      opacity: i === idx ? 1 : 0,
+                      backgroundImage: `url("${sl.image_url}")`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }
+                  : {
+                      opacity: i === idx ? 1 : 0,
+                      background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)',
+                    }
+              }
+            />
+            {sl.image_url_mobile && (
+              <div
+                className="absolute inset-0 transition-opacity duration-700 md:hidden"
+                style={{
+                  opacity: i === idx ? 1 : 0,
+                  backgroundImage: `url("${sl.image_url_mobile}")`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+              />
+            )}
+          </React.Fragment>
         ))}
         <div className="absolute inset-0 bg-black" style={{ opacity: overlay }} />
       </div>
@@ -112,8 +122,8 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
           <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{cur.title}</h1>
           {cur.subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{cur.subtitle}</p>}
           {cur.cta_label && cur.cta_link && (
-            <div className="mt-5 sm:mt-8">
-              <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition">
+            <div className={`mt-5 sm:mt-8 flex ${cur.cta_align === 'center' ? 'justify-center' : cur.cta_align === 'right' ? 'justify-end' : 'justify-start'}`}>
+              <Link to={cur.cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm">
                 {cur.cta_label} <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
@@ -149,31 +159,111 @@ function HeroCarouselBlock({ slides = [], autoplay_seconds = 6, show_dots = true
   );
 }
 
-function HeroBlock({ title, subtitle, cta_label, cta_link, image_url, tagline, overlay_opacity = 0.4 }) {
+function HeroBlock({
+  title,
+  subtitle,
+  cta_label,
+  cta_link,
+  image_url,
+  image_url_mobile,
+  tagline,
+  overlay_opacity = 0.4,
+  content_align = 'left',
+  cta_align = 'left',
+  cta_margin_top = 'normal',
+  vertical_align = 'center',
+  banner_height = 'normal',
+}) {
+  const isCenter = content_align === 'center';
+  const isRight = content_align === 'right';
+
+  const vAlignClass = {
+    top: 'items-start pt-12 sm:pt-16 pb-10',
+    center: 'items-center py-10 sm:py-14 md:py-20',
+    bottom: 'items-end pt-10 pb-12 sm:pb-16',
+  }[vertical_align] || 'items-center py-10 sm:py-14 md:py-20';
+
+  const heightClass = {
+    compact: 'min-h-[240px] sm:min-h-[300px] md:min-h-[360px]',
+    normal: 'min-h-[280px] sm:min-h-[360px] md:min-h-[440px]',
+    large: 'min-h-[340px] sm:min-h-[440px] md:min-h-[560px]',
+    screen: 'min-h-[400px] sm:min-h-[500px] md:min-h-[72vh]',
+  }[banner_height] || 'min-h-[280px] sm:min-h-[360px] md:min-h-[440px]';
+
+  const contentAlignClass = isCenter
+    ? 'text-center mx-auto items-center flex flex-col'
+    : isRight
+    ? 'text-right ml-auto items-end flex flex-col'
+    : 'text-left mr-auto';
+
+  const containerJustifyClass = isCenter
+    ? 'justify-center'
+    : isRight
+    ? 'justify-end'
+    : 'justify-start';
+
+  const effectiveCtaAlign = cta_align || (isCenter ? 'center' : isRight ? 'right' : 'left');
+  const ctaAlignClass = {
+    left: 'justify-start text-left',
+    center: 'justify-center text-center',
+    right: 'justify-end text-right',
+  }[effectiveCtaAlign] || 'justify-start text-left';
+
+  const ctaMarginClass = {
+    none: 'mt-2',
+    small: 'mt-3 sm:mt-4',
+    normal: 'mt-5 sm:mt-8',
+    large: 'mt-8 sm:mt-12',
+  }[cta_margin_top] || 'mt-5 sm:mt-8';
+
+  const hasBg = Boolean(image_url || image_url_mobile);
+
   return (
-    <section className="relative text-white overflow-hidden w-full"  data-testid="hero-block">
+    <section className="relative text-white overflow-hidden w-full" data-testid="hero-block">
+      {/* Desktop background */}
       <div
-        className="absolute inset-0"
+        className={`absolute inset-0 ${image_url_mobile ? 'hidden md:block' : ''}`}
         style={
           image_url
             ? { backgroundImage: `url("${image_url}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
             : { background: 'linear-gradient(135deg, var(--brand-main, #E8731A), #C25500)' }
         }
       />
-      {image_url && <div className="absolute inset-0 bg-black" style={{ opacity: overlay_opacity }} />}
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 md:py-20 min-h-[280px] sm:min-h-[360px] md:min-h-[440px] flex items-center">
-        <div className="max-w-2xl w-full">
+      {/* Mobile background */}
+      {image_url_mobile && (
+        <div
+          className="absolute inset-0 md:hidden"
+          style={{
+            backgroundImage: `url("${image_url_mobile}")`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        />
+      )}
+      {hasBg && <div className="absolute inset-0 bg-black" style={{ opacity: overlay_opacity }} />}
+
+      <div className={`relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${heightClass} flex ${vAlignClass} ${containerJustifyClass}`}>
+        <div className={`max-w-2xl w-full ${contentAlignClass}`}>
           {tagline && (
             <div className="inline-block bg-white/15 backdrop-blur text-[11px] sm:text-xs font-montserrat font-medium px-3.5 py-1.5 rounded-full mb-3 sm:mb-4">
               {tagline}
             </div>
           )}
           <h1 className="font-anona font-bold text-3xl md:text-[2.5rem] leading-tight">{title}</h1>
-          {subtitle && <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">{subtitle}</p>}
+          {subtitle && (
+            <p className="mt-2 sm:mt-4 text-white/95 text-sm sm:text-base md:text-lg max-w-md font-montserrat font-normal leading-relaxed">
+              {subtitle}
+            </p>
+          )}
           {cta_label && cta_link && (
-            <Link to={cta_link} className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base mt-5 hover:bg-white/90">
-              {cta_label} <ArrowRight className="w-4 h-4" />
-            </Link>
+            <div className={`w-full flex ${ctaAlignClass} ${ctaMarginClass}`}>
+              <Link
+                to={cta_link}
+                className="inline-flex items-center gap-2 bg-white text-brand-main px-5 py-2.5 sm:px-6 sm:py-3 rounded-lg font-montserrat font-semibold text-sm sm:text-base hover:bg-white/90 transition shadow-sm"
+              >
+                {cta_label} <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
           )}
         </div>
       </div>

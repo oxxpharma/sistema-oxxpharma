@@ -29,7 +29,21 @@ const BLOCK_LIBRARY = [
 ];
 
 const DEFAULT_PROPS = {
-  hero: { title: 'Título', subtitle: 'Subtítulo', cta_label: 'Saiba mais', cta_link: '/loja', image_url: '', tagline: '', overlay_opacity: 0.4 },
+  hero: {
+    title: 'Título',
+    subtitle: 'Subtítulo',
+    cta_label: 'Saiba mais',
+    cta_link: '/loja',
+    image_url: '',
+    image_url_mobile: '',
+    tagline: '',
+    overlay_opacity: 0.4,
+    content_align: 'left',
+    cta_align: 'left',
+    cta_margin_top: 'normal',
+    vertical_align: 'center',
+    banner_height: 'normal',
+  },
   hero_carousel: {
     autoplay_seconds: 6,
     show_dots: true,
@@ -347,7 +361,11 @@ export default function AdminPageBuilder() {
 
 function summary(block) {
   const p = block.props || {};
-  if (block.type === 'hero' || block.type === 'cta_banner' || block.type === 'section_title') return p.title || '(sem título)';
+  if (block.type === 'hero') {
+    const imgs = [p.image_url ? 'Desktop' : null, p.image_url_mobile ? 'Mobile' : null].filter(Boolean).join(' + ');
+    return `${p.title || '(sem título)'}${imgs ? ` · ${imgs}` : ''}`;
+  }
+  if (block.type === 'cta_banner' || block.type === 'section_title') return p.title || '(sem título)';
   if (block.type === 'hero_carousel') return `${(p.slides || []).length} slide(s)`;
   if (block.type === 'product_grid') return `${p.source} · ${p.limit || 8} produtos`;
   if (block.type === 'rich_text') return p.eyebrow ? `${p.eyebrow} · ${p.subtitle || 'Título'}` : (p.html ? 'Texto formatado' : 'Título rico');
@@ -373,18 +391,7 @@ function BlockEditor({ block, onChange }) {
   const p = block.props || {};
   const t = block.type;
 
-  if (t === 'hero') return (
-    <div className="space-y-3">
-      <Input label="Título" value={p.title || ''} onChange={e => onChange({ title: e.target.value })} />
-      <Input label="Subtítulo" value={p.subtitle || ''} onChange={e => onChange({ subtitle: e.target.value })} />
-      <Input label="Tagline (cima)" value={p.tagline || ''} onChange={e => onChange({ tagline: e.target.value })} />
-      <ImageUploadField label="Imagem de fundo" value={p.image_url || ''} onChange={v => onChange({ image_url: v })} testIdPrefix="hero-bg" />
-      <Input label="Rótulo do botão CTA" value={p.cta_label || ''} onChange={e => onChange({ cta_label: e.target.value })} />
-      <Input label="Link do botão" value={p.cta_link || ''} onChange={e => onChange({ cta_link: e.target.value })} placeholder="/loja" />
-      <RangeInput label="Opacidade do escurecimento" value={p.overlay_opacity ?? 0.4} onChange={(v) => onChange({ overlay_opacity: v })} />
-    </div>
-  );
-
+  if (t === 'hero') return <HeroBlockEditor props={p} onChange={onChange} />;
   if (t === 'hero_carousel') return <CarouselEditor props={p} onChange={onChange} />;
 
   if (t === 'section_title') return (
@@ -564,6 +571,154 @@ function ImageUploadField({ label, value, onChange, testIdPrefix = 'img' }) {
  * Editor do bloco hero_carousel: lista de slides (titulo, subtitulo, imagem,
  * CTA, overlay) + autoplay e indicadores.
  */
+
+/**
+ * Editor do bloco hero:
+ * - Textos (título, subtítulo, tagline)
+ * - Imagens responsivas: Desktop e Mobile
+ * - Localização e alinhamento do botão CTA (Esquerda, Centro, Direita) + espaçamento
+ * - Alinhamento do conteúdo e posicionamento vertical
+ * - Altura mínima do banner e overlay
+ */
+function HeroBlockEditor({ props, onChange }) {
+  return (
+    <div className="space-y-4" data-testid="hero-editor">
+      <div className="space-y-3">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Textos do Banner</div>
+        <Input
+          label="Título"
+          value={props.title || ''}
+          onChange={(e) => onChange({ title: e.target.value })}
+          placeholder="Ex: Saúde e bem-estar na sua porta."
+        />
+        <Input
+          label="Subtítulo"
+          value={props.subtitle || ''}
+          onChange={(e) => onChange({ subtitle: e.target.value })}
+          placeholder="Ex: Os melhores suplementos..."
+        />
+        <Input
+          label="Tagline Superior (Badge)"
+          value={props.tagline || ''}
+          onChange={(e) => onChange({ tagline: e.target.value })}
+          placeholder="Ex: Frete grátis acima de R$ 500"
+        />
+      </div>
+
+      <div className="space-y-3 pt-3 border-t border-border">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary flex items-center justify-between">
+          <span>Imagens de Fundo</span>
+          <span className="text-[10px] text-brand-main font-semibold">Responsivo</span>
+        </div>
+
+        <ImageUploadField
+          label="Imagem de Fundo — Versão Desktop (Computador / Telas Grandes)"
+          value={props.image_url || ''}
+          onChange={(v) => onChange({ image_url: v })}
+          testIdPrefix="hero-bg-desktop"
+        />
+
+        <ImageUploadField
+          label="Imagem de Fundo — Versão Mobile (Celulares / Telas Menores)"
+          value={props.image_url_mobile || ''}
+          onChange={(v) => onChange({ image_url_mobile: v })}
+          testIdPrefix="hero-bg-mobile"
+        />
+
+        <div className="p-2.5 rounded-lg bg-orange-50/60 border border-orange-100 text-[11px] text-txt-secondary leading-relaxed">
+          📱 <strong>Dica:</strong> Em celulares (largura menor que 768px), o banner exibirá automaticamente a imagem mobile. Se a versão mobile não for enviada, a versão desktop será utilizada em todos os aparelhos.
+        </div>
+      </div>
+
+      <div className="space-y-3 pt-3 border-t border-border">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Botão de Ação (CTA)</div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            label="Rótulo do Botão"
+            value={props.cta_label || ''}
+            onChange={(e) => onChange({ cta_label: e.target.value })}
+            placeholder="Ex: Ver produtos"
+          />
+          <Input
+            label="Link de Destino"
+            value={props.cta_link || ''}
+            onChange={(e) => onChange({ cta_link: e.target.value })}
+            placeholder="/loja"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <SelectInput
+            label="Localização / Alinhamento do Botão"
+            value={props.cta_align || 'left'}
+            onChange={(v) => onChange({ cta_align: v })}
+            options={[
+              { value: 'left', label: 'À Esquerda (Padrão)' },
+              { value: 'center', label: 'Centralizado' },
+              { value: 'right', label: 'À Direita' },
+            ]}
+          />
+          <SelectInput
+            label="Espaçamento do Botão (Topo)"
+            value={props.cta_margin_top || 'normal'}
+            onChange={(v) => onChange({ cta_margin_top: v })}
+            options={[
+              { value: 'small', label: 'Pequeno (16px)' },
+              { value: 'normal', label: 'Padrão (32px)' },
+              { value: 'large', label: 'Grande (48px)' },
+              { value: 'none', label: 'Colado (8px)' },
+            ]}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-3 pt-3 border-t border-border">
+        <div className="text-xs font-bold uppercase tracking-wider text-txt-secondary">Alinhamento & Dimensões</div>
+        <div className="grid grid-cols-2 gap-2">
+          <SelectInput
+            label="Alinhamento do Texto"
+            value={props.content_align || 'left'}
+            onChange={(v) => onChange({ content_align: v })}
+            options={[
+              { value: 'left', label: 'À Esquerda (Padrão)' },
+              { value: 'center', label: 'Centralizado' },
+              { value: 'right', label: 'À Direita' },
+            ]}
+          />
+          <SelectInput
+            label="Posição Vertical"
+            value={props.vertical_align || 'center'}
+            onChange={(v) => onChange({ vertical_align: v })}
+            options={[
+              { value: 'center', label: 'Ao Centro (Padrão)' },
+              { value: 'top', label: 'No Topo' },
+              { value: 'bottom', label: 'Na Base / Inferior' },
+            ]}
+          />
+        </div>
+
+        <SelectInput
+          label="Altura Mínima do Banner"
+          value={props.banner_height || 'normal'}
+          onChange={(v) => onChange({ banner_height: v })}
+          options={[
+            { value: 'compact', label: 'Compacto (360px)' },
+            { value: 'normal', label: 'Padrão (440px)' },
+            { value: 'large', label: 'Amplo / Grande (560px)' },
+            { value: 'screen', label: 'Tela Cheia (72vh)' },
+          ]}
+        />
+
+        <RangeInput
+          label="Opacidade do escurecimento (Overlay)"
+          value={props.overlay_opacity ?? 0.4}
+          onChange={(v) => onChange({ overlay_opacity: v })}
+        />
+      </div>
+    </div>
+  );
+}
+
 function CarouselEditor({ props, onChange }) {
   const slides = props.slides || [];
   const updateSlide = (idx, patch) => {
@@ -620,15 +775,31 @@ function CarouselEditor({ props, onChange }) {
             <Input label="Título" value={s.title || ''} onChange={(e) => updateSlide(idx, { title: e.target.value })} />
             <Input label="Subtítulo" value={s.subtitle || ''} onChange={(e) => updateSlide(idx, { subtitle: e.target.value })} />
             <ImageUploadField
-              label="Imagem do slide"
+              label="Imagem do slide (Desktop)"
               value={s.image_url || ''}
               onChange={(v) => updateSlide(idx, { image_url: v })}
               testIdPrefix={`carousel-slide-${idx}-img`}
+            />
+            <ImageUploadField
+              label="Imagem do slide (Mobile - opcional)"
+              value={s.image_url_mobile || ''}
+              onChange={(v) => updateSlide(idx, { image_url_mobile: v })}
+              testIdPrefix={`carousel-slide-${idx}-img-mob`}
             />
             <div className="grid grid-cols-2 gap-2">
               <Input label="Botão (CTA)" value={s.cta_label || ''} onChange={(e) => updateSlide(idx, { cta_label: e.target.value })} placeholder="Ex: Comprar" />
               <Input label="Link" value={s.cta_link || ''} onChange={(e) => updateSlide(idx, { cta_link: e.target.value })} placeholder="/loja" />
             </div>
+            <SelectInput
+              label="Alinhamento do Botão (CTA)"
+              value={s.cta_align || 'left'}
+              onChange={(v) => updateSlide(idx, { cta_align: v })}
+              options={[
+                { value: 'left', label: 'À Esquerda' },
+                { value: 'center', label: 'Centralizado' },
+                { value: 'right', label: 'À Direita' },
+              ]}
+            />
             <RangeInput label="Escurecimento" value={s.overlay_opacity ?? 0.4} onChange={(v) => updateSlide(idx, { overlay_opacity: v })} />
           </div>
         ))}
