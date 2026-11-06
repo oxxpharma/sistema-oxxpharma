@@ -4,12 +4,13 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { toast } from 'sonner';
 import {
-  Plus, Trash2, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
+  Plus, Trash2, Zap, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
   Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck, Layers, Columns,
   PanelLeftClose, PanelLeftOpen, GripVertical,
 } from 'lucide-react';
 import { ICON_KEYS, ICON_LABELS, getIcon } from '../../lib/iconLibrary';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
+import { optimizeImageFile } from '../../lib/imageOptimizer';
 
 const BLOCK_LIBRARY = [
   { type: 'hero', label: 'Banner Hero', icon: ImageIcon, desc: 'Banner principal com título + CTA' },
@@ -198,6 +199,36 @@ export default function AdminPageBuilder() {
   const [blocks, setBlocks] = useState([]);
   const [published, setPublished] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [optimizing, setOptimizing] = useState(false);
+
+  const optimizeExistingImages = async () => {
+    setOptimizing(true);
+    try {
+      const res = await api.post(`/api/admin/optimize-page-images/home?tenant=${tenantId}`);
+      if (res.ok && res.count > 0) {
+        if (Array.isArray(res.blocks)) {
+          setBlocks(res.blocks);
+        }
+        try {
+          const key = 'oxx_home_page_layout_' + (typeof window !== 'undefined' ? window.location.host : 'default');
+          localStorage.setItem(key, JSON.stringify({
+            tenant_id: tenantId,
+            slug: 'home',
+            blocks: res.blocks || blocks,
+            published: published,
+            updated_at: new Date().toISOString()
+          }));
+        } catch (e) {}
+        toast.success(`⚡ ${res.count} imagem(ns) otimizada(s)! Redução de ${res.before_kb} KB para ${res.after_kb} KB (-${res.saved_percent}%).`);
+      } else {
+        toast.info('Todas as imagens desta página já estão no formato WebP ultraleve!');
+      }
+    } catch (err) {
+      toast.error('Erro ao otimizar imagens: ' + (err?.message || err));
+    } finally {
+      setOptimizing(false);
+    }
+  };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -393,6 +424,16 @@ export default function AdminPageBuilder() {
           >
             {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
           </select>
+          <Button
+            variant="outline"
+            onClick={optimizeExistingImages}
+            disabled={optimizing || saving}
+            className="gap-1.5 text-xs h-9 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+            title="Converte todas as imagens existentes na página para WebP ultraleve"
+          >
+            <Zap className="w-4 h-4 text-emerald-600" />
+            {optimizing ? 'Otimizando...' : '⚡ Otimizar Imagens'}
+          </Button>
           <Button
             variant="outline"
             onClick={() => window.open(`/?as_tenant=${tenantId}`, '_blank')}
@@ -755,18 +796,18 @@ function ImageUploadField({ label, value, onChange, testIdPrefix = 'img' }) {
     inp.type = 'file'; inp.accept = 'image/*';
     inp.onchange = async () => {
       const file = inp.files?.[0]; if (!file) return;
-      if (file.size > 4 * 1024 * 1024) { toast.error('Imagem muito grande (max 4MB)'); return; }
+      if (file.size > 10 * 1024 * 1024) { toast.error('Imagem muito grande (max 10MB)'); return; }
       setBusy(true);
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const r = await api.post('/api/admin/upload-image', { data: reader.result, name: file.name });
-          onChange(r.url);
-          toast.success('Imagem enviada');
-        } catch (e) { toast.error(e?.message || 'Falha no upload'); }
-        finally { setBusy(false); }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const opt = await optimizeImageFile(file, { maxWidth: 1920, maxHeight: 1200, quality: 0.82 });
+        const r = await api.post('/api/admin/upload-image', { data: opt.dataUrl, name: file.name });
+        onChange(r.url);
+        toast.success(`Imagem otimizada em ${opt.savedPercent}% (WebP: ${opt.readableOptimized})`);
+      } catch (e) {
+        toast.error(e?.message || 'Falha no upload');
+      } finally {
+        setBusy(false);
+      }
     };
     inp.click();
   };

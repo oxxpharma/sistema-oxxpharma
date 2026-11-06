@@ -7,6 +7,7 @@ import { Plus, Trash2, Upload, Loader2, ArrowLeft, Save, GripVertical, PlusCircl
 import { toast } from 'sonner';
 import RichTextEditor from '../../components/admin/RichTextEditor';
 import SEOFormFields from '../../components/admin/SEOFormFields';
+import { optimizeImageFile } from '../../lib/imageOptimizer';
 
 const emptyForm = {
   name: '', description: '', description_html: '', price: 0, discount_price: null,
@@ -110,20 +111,21 @@ export default function AdminProductForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
-  const uploadImage = (e) => {
+  const uploadImage = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) { toast.error('Imagem deve ter no máx 3MB'); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error('Imagem deve ter no máx 10MB'); return; }
     setUploading(true);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setForm(f => ({ ...f, images: [...(f.images || []), reader.result] }));
+    try {
+      const opt = await optimizeImageFile(file, { maxWidth: 1200, maxHeight: 1200, quality: 0.84 });
+      setForm(f => ({ ...f, images: [...(f.images || []), opt.dataUrl] }));
+      toast.success(`Foto adicionada e otimizada em ${opt.savedPercent}% (WebP: ${opt.readableOptimized})`);
+    } catch (err) {
+      toast.error('Falha ao processar imagem');
+    } finally {
       setUploading(false);
-      toast.success('Imagem adicionada');
-    };
-    reader.onerror = () => { setUploading(false); toast.error('Falha ao carregar'); };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+      e.target.value = '';
+    }
   };
 
   const removeImage = (i) => setForm(f => ({ ...f, images: f.images.filter((_, idx) => idx !== i) }));

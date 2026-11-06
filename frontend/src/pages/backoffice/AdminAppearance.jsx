@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
+import { optimizeImageFile } from '../../lib/imageOptimizer';
 import { Button } from '../../components/ui/Button';
 import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink, Monitor, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
@@ -109,21 +110,25 @@ export default function AdminAppearance() {
       inp.type = 'file'; inp.accept = 'image/*';
       inp.onchange = async () => {
         const file = inp.files?.[0]; if (!file) return resolve(null);
-        if (file.size > 2 * 1024 * 1024) { toast.error('Imagem muito grande (max 2MB)'); return resolve(null); }
-        const reader = new FileReader();
-        reader.onload = async () => {
-          try {
-            let dataUrl = reader.result;
-            if (key === 'favicon_url') {
-              dataUrl = await resizeToSquare(dataUrl, 64);
-            }
-            const r = await api.post('/api/admin/upload-image', { data: dataUrl, name: file.name });
-            if (!returnUrl && key) set(key, r.url);
-            toast.success(key === 'favicon_url' ? 'Favicon enviado (redimensionado para 64×64).' : 'Imagem enviada');
-            resolve(r.url);
-          } catch (e) { toast.error(e?.message); resolve(null); }
-        };
-        reader.readAsDataURL(file);
+        if (file.size > 10 * 1024 * 1024) { toast.error('Imagem muito grande (max 10MB)'); return resolve(null); }
+        try {
+          let dataUrl;
+          if (key === 'favicon_url') {
+            const reader = new FileReader();
+            dataUrl = await new Promise((res) => {
+              reader.onload = () => res(reader.result);
+              reader.readAsDataURL(file);
+            });
+            dataUrl = await resizeToSquare(dataUrl, 64);
+          } else {
+            const opt = await optimizeImageFile(file, { maxWidth: 1920, maxHeight: 1200, quality: 0.82 });
+            dataUrl = opt.dataUrl;
+          }
+          const r = await api.post('/api/admin/upload-image', { data: dataUrl, name: file.name });
+          if (!returnUrl && key) set(key, r.url);
+          toast.success(key === 'favicon_url' ? 'Favicon enviado (redimensionado para 64×64).' : 'Imagem enviada e otimizada (WebP)');
+          resolve(r.url);
+        } catch (e) { toast.error(e?.message); resolve(null); }
       };
       inp.click();
     });

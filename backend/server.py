@@ -43,6 +43,7 @@ import opery_service
 import opery_routes
 import audit_service
 import pg_catalog_sync
+import image_optimizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -9263,22 +9264,141 @@ async def admin_site_settings(request: Request, user: dict = Depends(require_sup
 
 @app.post("/api/admin/upload-image")
 async def admin_upload_image(request: Request, user: dict = Depends(require_admin())):
-    """Upload simples de imagem (base64). Retorna URL data:."""
+    """Upload de imagem (base64) com otimização automática para WebP de alta performance."""
     body = await request.json() or {}
     data_url = body.get("data") or ""
     if not data_url.startswith("data:"):
         raise HTTPException(status_code=400, detail="Formato invalido (use data URL)")
-    # Persiste em coleção uploads para poder referenciar depois (opcional)
+
+    max_w = int(body.get("max_width") or 1920)
+    max_h = int(body.get("max_height") or 1200)
+    quality = int(body.get("quality") or 82)
+
+    try:
+        optimized_url, stats = image_optimizer.optimize_image_data_url(
+            data_url,
+            max_width=max_w,
+            max_height=max_h,
+            quality=quality,
+            output_format="WEBP"
+        )
+    except Exception as e:
+        logger.warning(f"[upload-image] falha ao otimizar imagem: {e}")
+        optimized_url, stats = data_url, {}
+
     db = request.app.db
     upload_id = "img_" + os.urandom(8).hex()
     await db.uploads.insert_one({
         "upload_id": upload_id,
-        "data": data_url,
+        "data": optimized_url,
         "name": body.get("name") or upload_id,
         "uploaded_by": user["user_id"],
+        "stats": stats,
         "created_at": now_iso(),
     })
-    return {"upload_id": upload_id, "url": data_url}
+    return {"upload_id": upload_id, "url": optimized_url, "stats": stats}
+
+
+@app.post("/api/admin/optimize-page-images/{slug}")
+async def admin_optimize_page_images(request: Request, slug: str, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
+    """Varre os blocos da página (ex: home) e converte todas as imagens base64 pesadas para WebP leve."""
+    db = request.app.db
+    tid = (tenant or request.headers.get("x-tenant") or tenant_service.DEFAULT_TENANT).strip().lower()
+    doc = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug})
+    if not doc or not doc.get("blocks"):
+        return {"ok": False, "message": "Nenhum bloco encontrado", "count": 0}
+
+    blocks = doc["blocks"]
+    optimized_count = 0
+    total_before = 0
+    total_after = 0
+
+    def optimize_val(val: str, max_w: int = 1920) -> str:
+        nonlocal optimized_count, total_before, total_after
+        if isinstance(val, str) and val.startswith("data:image/") and "image/svg" not in val:
+            b_len = len(val)
+            opt, stats = image_optimizer.optimize_image_data_url(val, max_width=max_w, quality=82)
+            a_len = len(opt)
+            if a_len < b_len:
+                optimized_count += 1
+                total_before += b_len
+                total_after += a_len
+                return opt
+        return val
+
+    for b in blocks:
+        props = b.get("props") or {}
+        # Slides de carrossel
+        if "slides" in props and isinstance(props["slides"], list):
+            for s in props["slides"]:
+                if s.get("image_url"):
+                    s["image_url"] = optimize_val(s["image_url"], 1920)
+                if s.get("image_url_mobile"):
+                    s["image_url_mobile"] = optimize_val(s["image_url_mobile"], 1080)
+        # Banners simples e imagens
+        for k in ("image_url", "image_url_mobile", "bg_image", "image", "src", "banner_url"):
+            if props.get(k):
+                props[k] = optimize_val(props[k], 1920)
+        # Colunas com imagem
+        if "columns" in props and isinstance(props["columns"], list):
+            for col in props["columns"]:
+                if col.get("image_url"):
+                    col["image_url"] = optimize_val(col["image_url"], 800)
+
+    saved_pct = round((1 - total_after / total_before) * 100, 1) if total_before > 0 else 0
+    await db.page_layouts.update_one(
+        {"tenant_id": tid, "slug": slug},
+        {"$set": {"blocks": blocks, "updated_at": now_iso()}}
+    )
+
+    return {
+        "ok": True,
+        "count": optimized_count,
+        "before_kb": round(total_before / 1024, 1),
+        "after_kb": round(total_after / 1024, 1),
+        "saved_percent": saved_pct,
+        "blocks": blocks,
+    }
+
+
+@app.post("/api/admin/optimize-product-images")
+async def admin_optimize_product_images(request: Request, user: dict = Depends(require_admin())):
+    """Varre o catálogo de produtos e converte fotos em base64 pesadas para WebP leve."""
+    db = request.app.db
+    tid = tenant_service.get_tenant(request)
+    cursor = db.products.find({"tenant_id": tid})
+    count = 0
+    total_before = 0
+    total_after = 0
+    async for prod in cursor:
+        imgs = prod.get("images") or []
+        updated = False
+        new_imgs = []
+        for img in imgs:
+            if isinstance(img, str) and img.startswith("data:image/") and "image/svg" not in img:
+                b_len = len(img)
+                opt, stats = image_optimizer.optimize_image_data_url(img, max_width=1200, max_height=1200, quality=84)
+                a_len = len(opt)
+                if a_len < b_len:
+                    total_before += b_len
+                    total_after += a_len
+                    count += 1
+                    updated = True
+                    new_imgs.append(opt)
+                else:
+                    new_imgs.append(img)
+            else:
+                new_imgs.append(img)
+        if updated:
+            await db.products.update_one({"product_id": prod["product_id"]}, {"$set": {"images": new_imgs}})
+    saved_pct = round((1 - total_after / total_before) * 100, 1) if total_before > 0 else 0
+    return {
+        "ok": True,
+        "count": count,
+        "before_kb": round(total_before / 1024, 1),
+        "after_kb": round(total_after / 1024, 1),
+        "saved_percent": saved_pct
+    }
 
 
 # ==================== CMS PAGES (Editor visual - legacy) ====================
