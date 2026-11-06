@@ -5,6 +5,7 @@ import {
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
   GitMerge, Calculator, LayoutGrid, Shield, ShoppingCart, Zap, ShieldAlert, Database,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -103,6 +104,23 @@ export default function BackofficeLayout() {
   const { user, logout, can, role } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('admin_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('admin_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Filtra itens que dependem de permissao (comercial, financial, integrations, editProducts)
   const visibleGroups = NAV_GROUPS.map(g => ({
@@ -130,24 +148,81 @@ export default function BackofficeLayout() {
     <div className="min-h-screen bg-bg-secondary flex" data-testid="backoffice-layout">
       {/* Sidebar */}
       <aside
-        className={`fixed lg:sticky top-0 left-0 z-40 h-screen w-64 bg-txt-primary text-white flex flex-col transition-transform ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`fixed lg:sticky top-0 left-0 z-40 h-screen ${
+          sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'
+        } w-64 bg-txt-primary text-white flex flex-col transition-all duration-200 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
       >
         {/* Header (logo) - fixo no topo */}
-        <div className="p-5 border-b border-white/10 flex-shrink-0">
-          <Link to="/backoffice" className="flex items-center gap-2">
-            <BrandLogo
-              slot="admin_sidebar"
-              variant="dark"
-              textClassName="font-heading font-black text-base leading-none text-white"
-            />
-          </Link>
-          <div className="text-[11px] text-white/60 mt-1 ml-1">Painel Admin</div>
+        <div className={`p-4 border-b border-white/10 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} flex-shrink-0`}>
+          {!sidebarCollapsed ? (
+            <div className="min-w-0 overflow-hidden">
+              <Link to="/backoffice" className="flex items-center gap-2">
+                <BrandLogo
+                  slot="admin_sidebar"
+                  variant="dark"
+                  textClassName="font-heading font-black text-base leading-none text-white truncate"
+                />
+              </Link>
+              <div className="text-[11px] text-white/60 mt-1 ml-1 truncate">Painel Admin</div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={toggleSidebarCollapsed}
+              className="hidden lg:flex p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition"
+              title="Expandir menu lateral"
+              data-testid="expand-sidebar-btn"
+            >
+              <PanelLeftOpen className="w-5 h-5 text-brand-main" />
+            </button>
+          )}
+
+          {!sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={toggleSidebarCollapsed}
+              className="hidden lg:flex p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition shrink-0 ml-2"
+              title="Recolher menu lateral"
+              data-testid="collapse-sidebar-btn"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Nav - SCROLLÁVEL */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 space-y-1 admin-nav-scroll">
-          {visibleGroups.map(group => {
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-3 space-y-1 admin-nav-scroll">
+          {visibleGroups.map((group, gIdx) => {
             const isCollapsed = !!collapsed[group.key];
+            if (sidebarCollapsed) {
+              return (
+                <div key={group.key} className="space-y-1">
+                  {gIdx > 0 && <div className="my-2 border-t border-white/10 mx-2" title={group.label} />}
+                  {group.items.map(item => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.end}
+                      onClick={() => setMobileOpen(false)}
+                      data-testid={item.testId}
+                      title={item.label}
+                      className={({ isActive }) =>
+                        `flex items-center justify-center p-2.5 rounded-lg text-[13px] font-medium transition ${
+                          isActive
+                            ? 'bg-brand-main text-white shadow-sm'
+                            : 'text-white/70 hover:bg-white/10 hover:text-white'
+                        }`
+                      }
+                    >
+                      <item.icon className="w-4 h-4 flex-shrink-0" />
+                    </NavLink>
+                  ))}
+                </div>
+              );
+            }
+
             return (
               <div key={group.key} className="pb-1">
                 <button
@@ -188,29 +263,33 @@ export default function BackofficeLayout() {
         </nav>
 
         {/* Footer - fixo no rodapé */}
-        <div className="p-3 border-t border-white/10 space-y-1 flex-shrink-0">
+        <div className="p-2 border-t border-white/10 space-y-1 flex-shrink-0">
           <Link
             to="/"
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-white/70 hover:bg-white/10 hover:text-white transition"
+            title={sidebarCollapsed ? "Ver loja" : undefined}
+            className={`flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2'} rounded-lg text-[13px] text-white/70 hover:bg-white/10 hover:text-white transition`}
             data-testid="go-to-store"
           >
-            <Store className="w-4 h-4" /> Ver loja
+            <Store className="w-4 h-4 shrink-0" /> {!sidebarCollapsed && <span>Ver loja</span>}
           </Link>
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-white/70 hover:bg-white/10 hover:text-white transition"
+            title={sidebarCollapsed ? "Sair" : undefined}
+            className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2'} rounded-lg text-[13px] text-white/70 hover:bg-white/10 hover:text-white transition`}
             data-testid="admin-logout"
           >
-            <LogOut className="w-4 h-4" /> Sair
+            <LogOut className="w-4 h-4 shrink-0" /> {!sidebarCollapsed && <span>Sair</span>}
           </button>
-          <div className="pt-1 px-3 text-[10px] text-white/40 truncate">
-            {user?.email}
-            {role && role !== 'customer' && (
-              <span className="ml-1 px-1.5 py-0.5 rounded bg-brand-main/30 text-white/90 uppercase tracking-wider">
-                {role === 'super_admin' ? 'Super' : role.charAt(0).toUpperCase() + role.slice(1)}
-              </span>
-            )}
-          </div>
+          {!sidebarCollapsed && (
+            <div className="pt-1 px-3 text-[10px] text-white/40 truncate">
+              {user?.email}
+              {role && role !== 'customer' && (
+                <span className="ml-1 px-1.5 py-0.5 rounded bg-brand-main/30 text-white/90 uppercase tracking-wider">
+                  {role === 'super_admin' ? 'Super' : role.charAt(0).toUpperCase() + role.slice(1)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -218,13 +297,27 @@ export default function BackofficeLayout() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white border-b border-border px-4 h-14 flex items-center justify-between gap-2">
+        <header className="bg-white border-b border-border px-4 h-14 flex items-center justify-between gap-3">
           <button onClick={() => setMobileOpen(true)} className="p-2 hover:bg-bg-secondary rounded-lg lg:hidden" data-testid="mobile-menu-btn">
             <Menu className="w-5 h-5" />
           </button>
           <div className="lg:hidden">
             <BrandLogo slot="admin_topbar" variant="light" textClassName="font-heading font-black" />
           </div>
+
+          {/* Toggle sidebar no desktop header */}
+          <div className="hidden lg:flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleSidebarCollapsed}
+              className="p-2 text-txt-secondary hover:text-txt-primary hover:bg-bg-secondary rounded-lg transition"
+              title={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+              data-testid="topbar-toggle-sidebar"
+            >
+              {sidebarCollapsed ? <PanelLeftOpen className="w-5 h-5 text-brand-main" /> : <PanelLeftClose className="w-5 h-5" />}
+            </button>
+          </div>
+
           {/* Espaco flex no desktop */}
           <div className="hidden lg:block flex-1" />
           {/* Iter 43: seletor de tenant (visivel sempre no header do admin) */}

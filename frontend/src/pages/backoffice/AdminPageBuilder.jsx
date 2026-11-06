@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   Plus, Trash2, ChevronUp, ChevronDown, Save, Eye, Image as ImageIcon,
   Type, LayoutGrid, Tag, Megaphone, Minus, FileText, Box, Code, Upload, X, GalleryHorizontal, ShieldCheck, Layers, Columns,
+  PanelLeftClose, PanelLeftOpen, GripVertical,
 } from 'lucide-react';
 import { ICON_KEYS, ICON_LABELS, getIcon } from '../../lib/iconLibrary';
 import DynamicBlocks from '../../components/store/DynamicBlocks';
@@ -190,6 +191,101 @@ export default function AdminPageBuilder() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Larguras das colunas customizáveis (persistidas no localStorage)
+  const [col1Width, setCol1Width] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('admin_pb_col1_width'));
+      return saved && saved >= 180 && saved <= 450 ? saved : 260;
+    } catch {
+      return 260;
+    }
+  });
+
+  const [col3Width, setCol3Width] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('admin_pb_col3_width'));
+      return saved && saved >= 320 && saved <= 850 ? saved : 440;
+    } catch {
+      return 440;
+    }
+  });
+
+  const [col1Collapsed, setCol1Collapsed] = useState(() => {
+    try {
+      return localStorage.getItem('admin_pb_col1_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('admin_pb_col1_width', String(col1Width));
+    } catch {}
+  }, [col1Width]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('admin_pb_col3_width', String(col3Width));
+    } catch {}
+  }, [col3Width]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('admin_pb_col1_collapsed', String(col1Collapsed));
+    } catch {}
+  }, [col1Collapsed]);
+
+  // Handlers de redimensionamento via mouse drag
+  const startResizeCol1 = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = col1Width;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    const onMouseMove = (moveEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(Math.max(startWidth + delta, 180), 450);
+      setCol1Width(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const startResizeCol3 = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = col3Width;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    const onMouseMove = (moveEvent) => {
+      // Arrastar para a esquerda expande a coluna da direita
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(Math.max(startWidth - delta, 320), 850);
+      setCol3Width(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
   const load = async (tid) => {
     setLoading(true);
     try {
@@ -293,34 +389,95 @@ export default function AdminPageBuilder() {
       {loading ? (
         <div className="p-10 text-center text-txt-secondary">Carregando...</div>
       ) : (
-        <div className="grid grid-cols-12 gap-4">
-          {/* Biblioteca de blocos */}
-          <div className="col-span-12 lg:col-span-3 bg-white rounded-2xl border border-border p-3 lg:max-h-[80vh] lg:overflow-y-auto">
-            <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-txt-secondary mb-3 px-1">Adicionar bloco</h3>
-            <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
-              {BLOCK_LIBRARY.map(bt => {
-                const Icon = bt.icon;
-                return (
-                  <button
-                    key={bt.type}
-                    onClick={() => addBlock(bt.type)}
-                    className="text-left bg-bg-secondary hover:bg-bg-secondary/60 border border-border rounded-lg p-3 transition"
-                    data-testid={`add-block-${bt.type}`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <Icon className="w-4 h-4 text-brand-main" />
-                      <div className="font-bold text-sm">{bt.label}</div>
-                    </div>
-                    <div className="text-[11px] text-txt-secondary">{bt.desc}</div>
-                  </button>
-                );
-              })}
+        <div className="flex flex-col lg:flex-row items-stretch gap-3 lg:gap-0 w-full">
+          {/* Coluna 1: Biblioteca de blocos */}
+          {col1Collapsed ? (
+            <div
+              onClick={() => setCol1Collapsed(false)}
+              className="hidden lg:flex flex-col items-center py-4 px-2 bg-white rounded-2xl border border-border hover:border-brand-main cursor-pointer transition select-none flex-shrink-0 w-12 group"
+              title="Expandir painel de blocos"
+            >
+              <Plus className="w-5 h-5 text-brand-main mb-3 group-hover:scale-110 transition" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-txt-secondary [writing-mode:vertical-rl] rotate-180">
+                Adicionar Bloco
+              </span>
             </div>
-          </div>
+          ) : (
+            <div
+              style={{ width: `${col1Width}px` }}
+              className="w-full lg:w-auto flex-shrink-0 bg-white rounded-2xl border border-border p-3 lg:max-h-[82vh] lg:overflow-y-auto"
+            >
+              <div className="flex items-center justify-between mb-3 px-1">
+                <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-txt-secondary">
+                  Adicionar bloco
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setCol1Collapsed(true)}
+                  className="hidden lg:flex p-1 text-txt-secondary hover:text-txt-primary hover:bg-bg-secondary rounded transition"
+                  title="Recolher painel de blocos"
+                >
+                  <PanelLeftClose className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
+                {BLOCK_LIBRARY.map(bt => {
+                  const Icon = bt.icon;
+                  return (
+                    <button
+                      key={bt.type}
+                      onClick={() => addBlock(bt.type)}
+                      className="text-left bg-bg-secondary hover:bg-bg-secondary/60 border border-border rounded-lg p-3 transition"
+                      data-testid={`add-block-${bt.type}`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Icon className="w-4 h-4 text-brand-main" />
+                        <div className="font-bold text-sm">{bt.label}</div>
+                      </div>
+                      <div className="text-[11px] text-txt-secondary">{bt.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-          {/* Canvas (lista de blocos) */}
-          <div className="col-span-12 lg:col-span-6 bg-white rounded-2xl border border-border p-3 lg:max-h-[80vh] lg:overflow-y-auto">
-            <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-txt-secondary mb-3 px-1">Blocos da página</h3>
+          {/* Divisor 1 (redimensionamento entre Col 1 e Col 2) */}
+          {!col1Collapsed && (
+            <div
+              onMouseDown={startResizeCol1}
+              className="hidden lg:flex items-center justify-center w-3 cursor-col-resize select-none group relative z-10 -mx-0.5 py-4 hover:w-3 transition-colors shrink-0"
+              title="Arraste para ajustar a largura da coluna"
+            >
+              <div className="w-1 h-12 rounded-full bg-border group-hover:bg-brand-main group-active:bg-brand-main transition-colors flex items-center justify-center">
+                <GripVertical className="w-2.5 h-2.5 text-txt-secondary/40 group-hover:text-white" />
+              </div>
+            </div>
+          )}
+
+          {/* Coluna 2: Canvas (lista de blocos) */}
+          <div className="flex-1 min-w-0 bg-white rounded-2xl border border-border p-3 lg:max-h-[82vh] lg:overflow-y-auto">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <div className="flex items-center gap-2">
+                {col1Collapsed && (
+                  <button
+                    type="button"
+                    onClick={() => setCol1Collapsed(false)}
+                    className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-brand-main/10 text-brand-main hover:bg-brand-main/20 rounded-lg transition"
+                    title="Mostrar catálogo de blocos"
+                  >
+                    <PanelLeftOpen className="w-3.5 h-3.5" /> Adicionar Bloco
+                  </button>
+                )}
+                <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-txt-secondary">
+                  Blocos da página
+                </h3>
+              </div>
+              <span className="text-xs text-txt-secondary font-medium">
+                {blocks.length} {blocks.length === 1 ? 'bloco' : 'blocos'}
+              </span>
+            </div>
+
             {blocks.length === 0 ? (
               <div className="text-center py-12 text-txt-secondary text-sm border-2 border-dashed border-border rounded-lg">
                 Página vazia. Adicione blocos no painel da esquerda.
@@ -367,9 +524,40 @@ export default function AdminPageBuilder() {
             )}
           </div>
 
-          {/* Editor do bloco selecionado */}
-          <div className="col-span-12 lg:col-span-3 bg-white rounded-2xl border border-border p-3 lg:max-h-[80vh] lg:overflow-y-auto">
-            <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-txt-secondary mb-3 px-1">Propriedades</h3>
+          {/* Divisor 2 (redimensionamento entre Col 2 e Col 3) */}
+          <div
+            onMouseDown={startResizeCol3}
+            className="hidden lg:flex items-center justify-center w-3 cursor-col-resize select-none group relative z-10 -mx-0.5 py-4 hover:w-3 transition-colors shrink-0"
+            title="Arraste para ajustar a largura do painel de propriedades"
+          >
+            <div className="w-1 h-12 rounded-full bg-border group-hover:bg-brand-main group-active:bg-brand-main transition-colors flex items-center justify-center">
+              <GripVertical className="w-2.5 h-2.5 text-txt-secondary/40 group-hover:text-white" />
+            </div>
+          </div>
+
+          {/* Coluna 3: Editor do bloco selecionado */}
+          <div
+            style={{ width: `${col3Width}px` }}
+            className="w-full lg:w-auto flex-shrink-0 bg-white rounded-2xl border border-border p-3 lg:max-h-[82vh] lg:overflow-y-auto"
+          >
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-txt-secondary">
+                Propriedades
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCol3Width(440)}
+                  className="hidden lg:inline-block text-[10px] text-txt-secondary/70 hover:text-brand-main transition"
+                  title="Restaurar largura padrão (440px)"
+                >
+                  Padrão
+                </button>
+                <span className="text-[10px] text-txt-secondary font-mono bg-bg-secondary px-1.5 py-0.5 rounded hidden lg:inline-block">
+                  {col3Width}px
+                </span>
+              </div>
+            </div>
             {!selected ? (
               <div className="text-center py-12 text-txt-secondary text-sm">Selecione um bloco para editar.</div>
             ) : (
