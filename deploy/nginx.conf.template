@@ -40,7 +40,7 @@ server {
     }
 
     # Cache agressivo para assets do build
-    location ~* \.(js|css|png|jpg|jpeg|gif|svg|woff2?|ttf|ico)$ {
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|otf|eot|ico)$ {
         expires 30d;
         add_header Cache-Control "public, immutable";
         try_files $uri =404;

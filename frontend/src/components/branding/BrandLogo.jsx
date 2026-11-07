@@ -69,6 +69,8 @@ export default function BrandLogo({
             src={url}
             alt={storeName}
             className="object-contain hidden md:block"
+            width={desk.max_width}
+            height={desk.height}
             style={{ height: `${desk.height}px`, maxWidth: `${desk.max_width}px` }}
             data-testid="brand-logo-store_header-desktop"
           />
@@ -76,6 +78,8 @@ export default function BrandLogo({
             src={url}
             alt={storeName}
             className="object-contain block md:hidden"
+            width={mob.max_width}
+            height={mob.height}
             style={{ height: `${mob.height}px`, maxWidth: `${mob.max_width}px` }}
             data-testid="brand-logo-store_header-mobile"
           />
@@ -133,6 +137,8 @@ export default function BrandLogo({
         src={url}
         alt={storeName}
         className="object-contain"
+        width={max_width}
+        height={height}
         style={{ height: `${height}px`, maxWidth: `${max_width}px` }}
         data-testid={`brand-logo-${slot}`}
       />

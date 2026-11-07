@@ -6,4 +6,5 @@ Disallow: /checkout
 Disallow: /minha-conta
 Disallow: /minha-rede
 
-Sitemap: /api/sitemap.xml
+Sitemap: https://oxxpharma.com.br/sitemap.xml
+Sitemap: https://oxxpharma.com.br/api/sitemap.xml

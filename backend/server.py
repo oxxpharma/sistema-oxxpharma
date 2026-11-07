@@ -695,6 +695,103 @@ async def lifespan(app: FastAPI):
             logger.info(f"Iter 68: networks array backfill aplicado ({updated} usuarios)")
         except Exception as e:
             logger.warning(f"networks array backfill falhou: {e}")
+    # PageSpeed / LCP: Converte imagens base64 pesadas existentes no banco (layouts e settings) para WebP leve
+    img_migration = await app.db.migrations.find_one({"_id": "optimize_stored_images_webp_v1"})
+    if not img_migration:
+        try:
+            total_before = 0
+            total_after = 0
+            converted = 0
+
+            def _opt(val, max_w=1920, max_h=1200, q=82):
+                nonlocal total_before, total_after, converted
+                if isinstance(val, str) and val.startswith("data:image/") and "image/svg" not in val:
+                    b_len = len(val)
+                    try:
+                        opt_val, _ = image_optimizer.optimize_image_data_url(val, max_width=max_w, max_height=max_h, quality=q)
+                        if len(opt_val) < b_len:
+                            total_before += b_len
+                            total_after += len(opt_val)
+                            converted += 1
+                            return opt_val
+                    except Exception as err:
+                        logger.warning(f"Falha ao otimizar imagem no startup: {err}")
+                return val
+
+            # 1. Otimizar layouts (carrossel, banners da home)
+            async for lay in app.db.page_layouts.find({"blocks": {"$exists": True}}):
+                blocks = lay.get("blocks") or []
+                changed = False
+                for b in blocks:
+                    props = b.get("props") or {}
+                    if "slides" in props and isinstance(props["slides"], list):
+                        for s in props["slides"]:
+                            if s.get("image_url"):
+                                n = _opt(s["image_url"], 1920, 1200, 82)
+                                if n != s["image_url"]:
+                                    s["image_url"] = n
+                                    changed = True
+                            if s.get("image_url_mobile"):
+                                n = _opt(s["image_url_mobile"], 1080, 1080, 82)
+                                if n != s["image_url_mobile"]:
+                                    s["image_url_mobile"] = n
+                                    changed = True
+                    for k in ("image_url", "image_url_mobile", "bg_image", "image", "src", "banner_url"):
+                        if props.get(k):
+                            n = _opt(props[k], 1920, 1200, 82)
+                            if n != props[k]:
+                                props[k] = n
+                                changed = True
+                    if "columns" in props and isinstance(props["columns"], list):
+                        for col in props["columns"]:
+                            if col.get("image_url"):
+                                n = _opt(col["image_url"], 800, 800, 82)
+                                if n != col["image_url"]:
+                                    col["image_url"] = n
+                                    changed = True
+                if changed:
+                    await app.db.page_layouts.update_one({"_id": lay["_id"]}, {"$set": {"blocks": blocks, "updated_at": now_iso()}})
+
+            # 2. Otimizar settings (hero_slides, hero_image_url, referral_box_image_url, etc.)
+            async for st in app.db.settings.find({}):
+                st_changed = False
+                st_update = {}
+                for k in ("hero_image_url", "referral_box_image_url", "footer_logo_url"):
+                    if st.get(k):
+                        n = _opt(st[k], 1920, 1200, 82)
+                        if n != st[k]:
+                            st_update[k] = n
+                            st_changed = True
+                if "hero_slides" in st and isinstance(st["hero_slides"], list):
+                    new_slides = []
+                    slides_changed = False
+                    for s in st["hero_slides"]:
+                        if isinstance(s, dict):
+                            s_copy = dict(s)
+                            if s_copy.get("image_url"):
+                                n = _opt(s_copy["image_url"], 1920, 1200, 82)
+                                if n != s_copy["image_url"]:
+                                    s_copy["image_url"] = n
+                                    slides_changed = True
+                            new_slides.append(s_copy)
+                        else:
+                            new_slides.append(s)
+                    if slides_changed:
+                        st_update["hero_slides"] = new_slides
+                        st_changed = True
+                if st_changed:
+                    await app.db.settings.update_one({"_id": st["_id"]}, {"$set": st_update})
+
+            await app.db.migrations.insert_one({
+                "_id": "optimize_stored_images_webp_v1",
+                "ran_at": now_iso(),
+                "converted": converted,
+                "saved_kb": round((total_before - total_after) / 1024, 1)
+            })
+            logger.info(f"[migration] optimize_stored_images_webp_v1: {converted} imagens otimizadas p/ WebP, economia de {round((total_before - total_after) / 1024, 1)} KB")
+        except Exception as e:
+            logger.warning(f"Migracao optimize_stored_images_webp_v1 falhou (nao critico): {e}")
+
     yield
     app.mongodb_client.close()
 

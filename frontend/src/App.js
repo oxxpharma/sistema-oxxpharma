@@ -37,70 +37,73 @@ import CompleteEmployeeRegistration from './pages/public/CompleteEmployeeRegistr
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 
-// Backoffice
-import AdminDashboard from './pages/backoffice/AdminDashboard';
-import AdminProducts from './pages/backoffice/AdminProducts';
-import AdminProductForm from './pages/backoffice/AdminProductForm';
-import AdminCategories from './pages/backoffice/AdminCategories';
-import AdminOrders from './pages/backoffice/AdminOrders';
-import AdminUsers from './pages/backoffice/AdminUsers';
-import AdminUserDetails from './pages/backoffice/AdminUserDetails';
-import AdminSettings from './pages/backoffice/AdminSettings';
-import AdminNetworks from './pages/backoffice/AdminNetworks';
-import AdminCandidates from './pages/backoffice/AdminCandidates';
-import AdminCommissionsReport from './pages/backoffice/AdminCommissionsReport';
-import AdminCommissionsByGeneration from './pages/backoffice/AdminCommissionsByGeneration';
-import AdminWithdrawals from './pages/backoffice/AdminWithdrawals';
-import AdminInvoices from './pages/backoffice/AdminInvoices';
-import AdminEmails from './pages/backoffice/AdminEmails';
-import AdminTenants from './pages/backoffice/AdminTenants';
-import AdminPageBuilder from './pages/backoffice/AdminPageBuilder';
-import AdminWebhook from './pages/backoffice/AdminWebhook';
-import AdminGiftCards from './pages/backoffice/AdminGiftCards';
-import AdminPoints from './pages/backoffice/AdminPoints';
-import AdminPayments from './pages/backoffice/AdminPayments';
-import AdminPgCatalog from './pages/backoffice/AdminPgCatalog';
-import AdminShipping from './pages/backoffice/AdminShipping';
-import AdminMaxx from './pages/backoffice/AdminMaxx';
-import AdminMaxxPending from './pages/backoffice/AdminMaxxPending';
-import AdminIgvd from './pages/backoffice/AdminIgvd';
-import AdminPDV from './pages/backoffice/AdminPDV';
-import AdminMultiplierCampaign from './pages/backoffice/AdminMultiplierCampaign';
-import AdminNetworkSuppression from './pages/backoffice/AdminNetworkSuppression';
-import AdminCompanies from './pages/backoffice/AdminCompanies';
-import AdminCompanyForm from './pages/backoffice/AdminCompanyForm';
-import AdminCompanyBillings from './pages/backoffice/AdminCompanyBillings';
-import AdminWarrantyBonus from './pages/backoffice/AdminWarrantyBonus';
-import CompanyLayout from './layouts/CompanyLayout';
-import CompanyDashboard from './pages/company/CompanyDashboard';
-import CompanyEmployees from './pages/company/CompanyEmployees';
-import CompanyContract from './pages/company/CompanyContract';
-import CompanyReports from './pages/company/CompanyReports';
-import CompanyMonthlyClosing from './pages/company/CompanyMonthlyClosing';
-import PropagandistaLayout from './layouts/PropagandistaLayout';
-import PropagandistaDashboard from './pages/propagandista/PropagandistaDashboard';
-import PropagandistaCompanies from './pages/propagandista/PropagandistaCompanies';
-import PropagandistaCompanyCreatePage from './pages/propagandista/PropagandistaCompanyCreatePage';
-import AdminMelhorEnvio from './pages/backoffice/AdminMelhorEnvio';
-import AdminOpery from './pages/backoffice/AdminOpery';
-import OperyDocs from './pages/OperyDocs';
-import OperyDevMonitor from './pages/OperyDevMonitor';
-import AdminReferralApproved from './pages/backoffice/AdminReferralApproved';
-import AdminAppearance from './pages/backoffice/AdminAppearance';
-import { AdminPagesList, AdminPageEditor } from './pages/backoffice/AdminPages';
+// Public pages
 import CmsPageView from './pages/store/CmsPageView';
+import CustomerReviewPage from './pages/store/CustomerReviewPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
-import AdminUserCategories from './pages/backoffice/AdminUserCategories';
-import AdminCoupons from './pages/backoffice/AdminCoupons';
-import AdminReferralEnrollments from './pages/backoffice/AdminReferralEnrollments';
-import AdminMergeUsers from './pages/backoffice/AdminMergeUsers';
-import AdminRecalcCommissions from './pages/backoffice/AdminRecalcCommissions';
-import AdminRoles from './pages/backoffice/AdminRoles';
-import AdminAuditLogs from './pages/backoffice/AdminAuditLogs';
-import CustomerReviewPage from './pages/store/CustomerReviewPage';
-import AdminReviews from './pages/backoffice/AdminReviews';
-import AdminCampaigns from './pages/backoffice/AdminCampaigns';
+
+// Backoffice & Admin (Code Splitting / Lazy Loading p/ performance maxima da loja publica)
+const AdminDashboard = React.lazy(() => import('./pages/backoffice/AdminDashboard'));
+const AdminProducts = React.lazy(() => import('./pages/backoffice/AdminProducts'));
+const AdminProductForm = React.lazy(() => import('./pages/backoffice/AdminProductForm'));
+const AdminCategories = React.lazy(() => import('./pages/backoffice/AdminCategories'));
+const AdminOrders = React.lazy(() => import('./pages/backoffice/AdminOrders'));
+const AdminUsers = React.lazy(() => import('./pages/backoffice/AdminUsers'));
+const AdminUserDetails = React.lazy(() => import('./pages/backoffice/AdminUserDetails'));
+const AdminSettings = React.lazy(() => import('./pages/backoffice/AdminSettings'));
+const AdminNetworks = React.lazy(() => import('./pages/backoffice/AdminNetworks'));
+const AdminCandidates = React.lazy(() => import('./pages/backoffice/AdminCandidates'));
+const AdminCommissionsReport = React.lazy(() => import('./pages/backoffice/AdminCommissionsReport'));
+const AdminCommissionsByGeneration = React.lazy(() => import('./pages/backoffice/AdminCommissionsByGeneration'));
+const AdminWithdrawals = React.lazy(() => import('./pages/backoffice/AdminWithdrawals'));
+const AdminInvoices = React.lazy(() => import('./pages/backoffice/AdminInvoices'));
+const AdminEmails = React.lazy(() => import('./pages/backoffice/AdminEmails'));
+const AdminTenants = React.lazy(() => import('./pages/backoffice/AdminTenants'));
+const AdminPageBuilder = React.lazy(() => import('./pages/backoffice/AdminPageBuilder'));
+const AdminWebhook = React.lazy(() => import('./pages/backoffice/AdminWebhook'));
+const AdminGiftCards = React.lazy(() => import('./pages/backoffice/AdminGiftCards'));
+const AdminPoints = React.lazy(() => import('./pages/backoffice/AdminPoints'));
+const AdminPayments = React.lazy(() => import('./pages/backoffice/AdminPayments'));
+const AdminPgCatalog = React.lazy(() => import('./pages/backoffice/AdminPgCatalog'));
+const AdminShipping = React.lazy(() => import('./pages/backoffice/AdminShipping'));
+const AdminMaxx = React.lazy(() => import('./pages/backoffice/AdminMaxx'));
+const AdminMaxxPending = React.lazy(() => import('./pages/backoffice/AdminMaxxPending'));
+const AdminIgvd = React.lazy(() => import('./pages/backoffice/AdminIgvd'));
+const AdminPDV = React.lazy(() => import('./pages/backoffice/AdminPDV'));
+const AdminMultiplierCampaign = React.lazy(() => import('./pages/backoffice/AdminMultiplierCampaign'));
+const AdminNetworkSuppression = React.lazy(() => import('./pages/backoffice/AdminNetworkSuppression'));
+const AdminCompanies = React.lazy(() => import('./pages/backoffice/AdminCompanies'));
+const AdminCompanyForm = React.lazy(() => import('./pages/backoffice/AdminCompanyForm'));
+const AdminCompanyBillings = React.lazy(() => import('./pages/backoffice/AdminCompanyBillings'));
+const AdminWarrantyBonus = React.lazy(() => import('./pages/backoffice/AdminWarrantyBonus'));
+const CompanyLayout = React.lazy(() => import('./layouts/CompanyLayout'));
+const CompanyDashboard = React.lazy(() => import('./pages/company/CompanyDashboard'));
+const CompanyEmployees = React.lazy(() => import('./pages/company/CompanyEmployees'));
+const CompanyContract = React.lazy(() => import('./pages/company/CompanyContract'));
+const CompanyReports = React.lazy(() => import('./pages/company/CompanyReports'));
+const CompanyMonthlyClosing = React.lazy(() => import('./pages/company/CompanyMonthlyClosing'));
+const PropagandistaLayout = React.lazy(() => import('./layouts/PropagandistaLayout'));
+const PropagandistaDashboard = React.lazy(() => import('./pages/propagandista/PropagandistaDashboard'));
+const PropagandistaCompanies = React.lazy(() => import('./pages/propagandista/PropagandistaCompanies'));
+const PropagandistaCompanyCreatePage = React.lazy(() => import('./pages/propagandista/PropagandistaCompanyCreatePage'));
+const AdminMelhorEnvio = React.lazy(() => import('./pages/backoffice/AdminMelhorEnvio'));
+const AdminOpery = React.lazy(() => import('./pages/backoffice/AdminOpery'));
+const OperyDocs = React.lazy(() => import('./pages/OperyDocs'));
+const OperyDevMonitor = React.lazy(() => import('./pages/OperyDevMonitor'));
+const AdminReferralApproved = React.lazy(() => import('./pages/backoffice/AdminReferralApproved'));
+const AdminAppearance = React.lazy(() => import('./pages/backoffice/AdminAppearance'));
+const AdminPagesList = React.lazy(() => import('./pages/backoffice/AdminPages').then(m => ({ default: m.AdminPagesList })));
+const AdminPageEditor = React.lazy(() => import('./pages/backoffice/AdminPages').then(m => ({ default: m.AdminPageEditor })));
+const AdminUserCategories = React.lazy(() => import('./pages/backoffice/AdminUserCategories'));
+const AdminCoupons = React.lazy(() => import('./pages/backoffice/AdminCoupons'));
+const AdminReferralEnrollments = React.lazy(() => import('./pages/backoffice/AdminReferralEnrollments'));
+const AdminMergeUsers = React.lazy(() => import('./pages/backoffice/AdminMergeUsers'));
+const AdminRecalcCommissions = React.lazy(() => import('./pages/backoffice/AdminRecalcCommissions'));
+const AdminRoles = React.lazy(() => import('./pages/backoffice/AdminRoles'));
+const AdminAuditLogs = React.lazy(() => import('./pages/backoffice/AdminAuditLogs'));
+const AdminReviews = React.lazy(() => import('./pages/backoffice/AdminReviews'));
+const AdminCampaigns = React.lazy(() => import('./pages/backoffice/AdminCampaigns'));
 
 function Guard({ children, requireAuth = false, requireAdmin = false, requireCompanyAdmin = false, requirePropagandista = false }) {
   const { isAuthenticated, isAdmin, loading, user } = useAuth();
@@ -133,9 +136,16 @@ function Guard({ children, requireAuth = false, requireAdmin = false, requireCom
   return children;
 }
 
+const LazyFallback = () => (
+  <div className="min-h-[60vh] flex items-center justify-center">
+    <div className="w-8 h-8 border-[3px] border-brand-main border-t-transparent rounded-full animate-spin" />
+  </div>
+);
+
 function AppRoutes() {
   return (
-    <Routes>
+    <React.Suspense fallback={<LazyFallback />}>
+      <Routes>
       {/* LOJA PÚBLICA */}
       <Route element={<StoreLayout />}>
         <Route path="/" element={<StoreHome />} />
@@ -249,6 +259,7 @@ function AppRoutes() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </React.Suspense>
   );
 }
 

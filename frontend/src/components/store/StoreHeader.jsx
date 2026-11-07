@@ -378,6 +378,7 @@ export default function StoreHeader() {
               onClick={() => setSearchOpen(true)}
               className="p-2.5 rounded-full hover:bg-orange-50/70 text-gray-700 hover:text-brand-main transition"
               title="Pesquisa avançada"
+              aria-label="Pesquisa avançada"
               data-testid="search-btn"
             >
               <Search className="w-5 h-5 stroke-[2]" />
@@ -393,6 +394,7 @@ export default function StoreHeader() {
                     : 'hover:bg-orange-50/70 text-gray-700 hover:text-brand-main'
                 }`}
                 title="Minha Conta"
+                aria-label="Minha Conta"
                 data-testid="user-menu-btn"
               >
                 <User className="w-5 h-5 stroke-[2]" />
@@ -552,6 +554,7 @@ export default function StoreHeader() {
               className="relative p-2.5 rounded-full hover:bg-orange-50/70 text-gray-700 hover:text-brand-main transition"
               data-testid="cart-icon"
               title="Carrinho de Compras"
+              aria-label="Carrinho de Compras"
             >
               <ShoppingCart className="w-5 h-5 stroke-[2]" />
               {cart.count > 0 && (
@@ -568,6 +571,7 @@ export default function StoreHeader() {
             <button
               className="lg:hidden p-2.5 rounded-full hover:bg-bg-secondary text-gray-700"
               onClick={() => setMobileOpen(!mobileOpen)}
+              aria-label={mobileOpen ? 'Fechar menu de navegação' : 'Abrir menu de navegação'}
               data-testid="mobile-menu-btn"
             >
               {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -705,6 +709,7 @@ export default function StoreHeader() {
                 <button
                   type="button"
                   onClick={() => setSearchTerm('')}
+                  aria-label="Limpar termo de busca"
                   className="absolute right-4 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                 >
                   <X className="w-4 h-4" />
@@ -713,6 +718,7 @@ export default function StoreHeader() {
                 <button
                   type="button"
                   onClick={() => setSearchOpen(false)}
+                  aria-label="Fechar busca"
                   className="absolute right-4 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                 >
                   <X className="w-4 h-4" />
