@@ -155,7 +155,7 @@ export default function BackofficeLayout() {
         }`}
       >
         {/* Header (logo) - fixo no topo */}
-        <div className={`p-4 border-b border-white/10 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} flex-shrink-0`}>
+        <div className={`p-4 border-b border-white/10 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-start'} flex-shrink-0`}>
           {!sidebarCollapsed ? (
             <div className="min-w-0 overflow-hidden">
               <Link to="/backoffice" className="flex items-center gap-2">
@@ -168,27 +168,16 @@ export default function BackofficeLayout() {
               <div className="text-[11px] text-white/60 mt-1 ml-1 truncate">Painel Admin</div>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={toggleSidebarCollapsed}
-              className="hidden lg:flex p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition"
-              title="Expandir menu lateral"
-              data-testid="expand-sidebar-btn"
-            >
-              <PanelLeftOpen className="w-5 h-5 text-brand-main" />
-            </button>
-          )}
-
-          {!sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={toggleSidebarCollapsed}
-              className="hidden lg:flex p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition shrink-0 ml-2"
-              title="Recolher menu lateral"
-              data-testid="collapse-sidebar-btn"
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
+            <div className="flex items-center justify-center">
+              <Link to="/backoffice" title="Painel Admin">
+                <BrandLogo
+                  slot="admin_sidebar"
+                  variant="dark"
+                  showIcon={true}
+                  textClassName="hidden"
+                />
+              </Link>
+            </div>
           )}
         </div>
 
