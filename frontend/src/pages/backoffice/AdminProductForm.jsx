@@ -164,6 +164,12 @@ export default function AdminProductForm() {
         }))
         .filter(c => c.qty > 0 && c.price > 0)
         .sort((a, b) => a.qty - b.qty),
+      category: (Array.isArray(form.categories) && form.categories.length > 0)
+        ? (categories.find(c => c.category_id === form.categories[0])?.name || form.category || '')
+        : (form.category || ''),
+      subcategory: (Array.isArray(form.subcategories) && form.subcategories.length > 0)
+        ? (subcategories.find(sc => sc.subcategory_id === form.subcategories[0])?.name || form.subcategory || '')
+        : (form.subcategory || ''),
       categories: Array.isArray(form.categories) ? form.categories : [],
       subcategories: Array.isArray(form.subcategories) ? form.subcategories : [],
     };
@@ -403,7 +409,8 @@ export default function AdminProductForm() {
                     <input type="checkbox" checked={checked}
                       onChange={() => {
                         const next = checked ? ids.filter(x => x !== sc.subcategory_id) : [...ids, sc.subcategory_id];
-                        setForm({ ...form, subcategories: next });
+                        const primaryName = next.length ? (subcategories.find(ss => ss.subcategory_id === next[0])?.name || '') : '';
+                        setForm({ ...form, subcategories: next, subcategory: primaryName });
                       }}
                       data-testid={`subcat-check-${sc.subcategory_id}`} />
                     <span>{sc.name}</span>

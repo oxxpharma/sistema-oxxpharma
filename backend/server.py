@@ -792,6 +792,37 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Migracao optimize_stored_images_webp_v1 falhou (nao critico): {e}")
 
+    # Iter 70: Sincroniza category e subcategory legados com os nomes reais a partir de categories e subcategories
+    cat_sync_migration = await app.db.migrations.find_one({"_id": "sync_product_category_names_v1"})
+    if not cat_sync_migration:
+        try:
+            all_cats = await app.db.categories.find({}, {"_id": 0, "category_id": 1, "name": 1}).to_list(500)
+            all_subs = await db.subcategories.find({}, {"_id": 0, "subcategory_id": 1, "name": 1}).to_list(500) if hasattr(db, 'subcategories') else await app.db.subcategories.find({}, {"_id": 0, "subcategory_id": 1, "name": 1}).to_list(500)
+            cat_map = {c["category_id"]: c["name"] for c in all_cats if c.get("category_id") and c.get("name")}
+            sub_map = {s["subcategory_id"]: s["name"] for s in all_subs if s.get("subcategory_id") and s.get("name")}
+
+            sync_count = 0
+            async for prod in app.db.products.find({}):
+                upd = {}
+                p_cats = prod.get("categories") or []
+                p_subs = prod.get("subcategories") or []
+                if p_cats and isinstance(p_cats, list) and len(p_cats) > 0:
+                    primary_cat = cat_map.get(p_cats[0]) or p_cats[0]
+                    if primary_cat and prod.get("category") != primary_cat and not primary_cat.startswith("cat_"):
+                        upd["category"] = primary_cat
+                if p_subs and isinstance(p_subs, list) and len(p_subs) > 0:
+                    primary_sub = sub_map.get(p_subs[0]) or p_subs[0]
+                    if primary_sub and prod.get("subcategory") != primary_sub and not primary_sub.startswith("subcat_"):
+                        upd["subcategory"] = primary_sub
+                if upd:
+                    await app.db.products.update_one({"_id": prod["_id"]}, {"$set": upd})
+                    sync_count += 1
+
+            await app.db.migrations.insert_one({"_id": "sync_product_category_names_v1", "ran_at": now_iso(), "synced_products": sync_count})
+            logger.info(f"[migration] sync_product_category_names_v1 aplicado em {sync_count} produtos")
+        except Exception as e:
+            logger.warning(f"sync_product_category_names_v1 falhou (nao critico): {e}")
+
     yield
     app.mongodb_client.close()
 
@@ -1720,6 +1751,7 @@ async def admin_get_product(request: Request, product_id: str, user: dict = Depe
 async def admin_list_products(
     request: Request,
     category: Optional[str] = None,
+    subcategory: Optional[str] = None,
     brand: Optional[str] = None,
     status: Optional[str] = None,
     stock_status: Optional[str] = None,
@@ -1735,15 +1767,46 @@ async def admin_list_products(
     conditions = []
 
     if category and category != "all":
-        conditions.append({
+        cat_doc = await db.categories.find_one({
             "$or": [
-                {"category": category},
-                {"category": {"$regex": f"^{re.escape(category)}$", "$options": "i"}},
-                {"categories": category},
-                {"category_id": category},
-                {"category_slug": category}
+                {"name": {"$regex": f"^{re.escape(category)}$", "$options": "i"}},
+                {"slug": category},
+                {"category_id": category}
             ]
         })
+        cat_id = cat_doc.get("category_id") if cat_doc else None
+        cat_conditions = [
+            {"category": category},
+            {"category": {"$regex": f"^{re.escape(category)}$", "$options": "i"}},
+            {"categories": category},
+            {"category_id": category},
+            {"category_slug": category}
+        ]
+        if cat_id:
+            cat_conditions.append({"categories": cat_id})
+            cat_conditions.append({"category": cat_id})
+        conditions.append({"$or": cat_conditions})
+
+    if subcategory and subcategory != "all":
+        sub_doc = await db.subcategories.find_one({
+            "$or": [
+                {"name": {"$regex": f"^{re.escape(subcategory)}$", "$options": "i"}},
+                {"slug": subcategory},
+                {"subcategory_id": subcategory}
+            ]
+        })
+        sub_id = sub_doc.get("subcategory_id") if sub_doc else None
+        sub_conditions = [
+            {"subcategory": subcategory},
+            {"subcategory": {"$regex": f"^{re.escape(subcategory)}$", "$options": "i"}},
+            {"subcategories": subcategory},
+            {"subcategory_id": subcategory},
+            {"subcategory_slug": subcategory}
+        ]
+        if sub_id:
+            sub_conditions.append({"subcategories": sub_id})
+            sub_conditions.append({"subcategory": sub_id})
+        conditions.append({"$or": sub_conditions})
 
     if brand and brand != "all":
         conditions.append({"brand": brand})
@@ -1827,6 +1890,46 @@ async def admin_list_products(
     total = await db.products.count_documents(q)
     products = await db.products.find(q, {"_id": 0}).sort(sort_fields).skip((page-1)*limit).limit(limit).to_list(limit)
 
+    # Enriquece cada produto com os nomes legíveis de categorias e subcategorias
+    if products:
+        all_cats = await db.categories.find({}, {"_id": 0, "category_id": 1, "name": 1}).to_list(500)
+        all_subs = await db.subcategories.find({}, {"_id": 0, "subcategory_id": 1, "name": 1}).to_list(500)
+        cat_map = {c["category_id"]: c["name"] for c in all_cats if c.get("category_id") and c.get("name")}
+        sub_map = {s["subcategory_id"]: s["name"] for s in all_subs if s.get("subcategory_id") and s.get("name")}
+
+        for p in products:
+            p_cat_names = []
+            if p.get("categories") and isinstance(p["categories"], list):
+                for cid in p["categories"]:
+                    name = cat_map.get(cid) or cid
+                    if name and not name.startswith("cat_") and name not in p_cat_names:
+                        p_cat_names.append(name)
+            if not p_cat_names and p.get("category"):
+                resolved = cat_map.get(p["category"]) or p["category"]
+                if resolved and not resolved.startswith("cat_"):
+                    p_cat_names.append(resolved)
+            p["category_names"] = p_cat_names
+
+            p_sub_names = []
+            if p.get("subcategories") and isinstance(p["subcategories"], list):
+                for sid in p["subcategories"]:
+                    name = sub_map.get(sid) or sid
+                    if name and not name.startswith("subcat_") and name not in p_sub_names:
+                        p_sub_names.append(name)
+            if not p_sub_names and p.get("subcategory"):
+                resolved = sub_map.get(p["subcategory"]) or p["subcategory"]
+                if resolved and not resolved.startswith("subcat_"):
+                    p_sub_names.append(resolved)
+            # Fallback: se subcategorias vazias mas p.category for nome de subcategoria
+            if not p_sub_names and p.get("category"):
+                match_sub = next((s["name"] for s in all_subs if s["name"].lower() == str(p["category"]).lower() or s["subcategory_id"] == p["category"]), None)
+                if match_sub:
+                    p_sub_names.append(match_sub)
+                    if p_cat_names == [match_sub]:
+                        p_cat_names = []
+
+            p["subcategory_names"] = p_sub_names
+
     distinct_brands = await db.products.distinct("brand")
     available_brands = sorted([b for b in distinct_brands if b and isinstance(b, str) and b.strip()])
 
@@ -1874,6 +1977,14 @@ async def admin_reorder_products(request: Request, user: dict = Depends(require_
 async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     payload = data.model_dump()
+    if payload.get("categories") and isinstance(payload["categories"], list) and len(payload["categories"]) > 0:
+        first_cat = await db.categories.find_one({"category_id": payload["categories"][0]}, {"_id": 0, "name": 1})
+        if first_cat and first_cat.get("name"):
+            payload["category"] = first_cat["name"]
+    if payload.get("subcategories") and isinstance(payload["subcategories"], list) and len(payload["subcategories"]) > 0:
+        first_sub = await db.subcategories.find_one({"subcategory_id": payload["subcategories"][0]}, {"_id": 0, "name": 1})
+        if first_sub and first_sub.get("name"):
+            payload["subcategory"] = first_sub["name"]
     base = _slugify(payload.get("slug") or payload["name"])
     payload["slug"] = await _ensure_unique_slug(db, "products", base)
     min_order_doc = await db.products.find_one({}, sort=[("order", 1)])
@@ -1889,6 +2000,14 @@ async def create_product(request: Request, data: ProductCreate, user: dict = Dep
 async def update_product(request: Request, product_id: str, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     update = data.model_dump()
+    if update.get("categories") and isinstance(update["categories"], list) and len(update["categories"]) > 0:
+        first_cat = await db.categories.find_one({"category_id": update["categories"][0]}, {"_id": 0, "name": 1})
+        if first_cat and first_cat.get("name"):
+            update["category"] = first_cat["name"]
+    if update.get("subcategories") and isinstance(update["subcategories"], list) and len(update["subcategories"]) > 0:
+        first_sub = await db.subcategories.find_one({"subcategory_id": update["subcategories"][0]}, {"_id": 0, "name": 1})
+        if first_sub and first_sub.get("name"):
+            update["subcategory"] = first_sub["name"]
     base = _slugify(update.get("slug") or update["name"])
     update["slug"] = await _ensure_unique_slug(db, "products", base, exclude_id_field="product_id", exclude_id=product_id)
     update["updated_at"] = now_iso()

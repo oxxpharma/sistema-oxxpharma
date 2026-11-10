@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Package,
   Layers,
+  FolderTree,
   ArrowUpDown,
   LayoutList,
   LayoutGrid,
@@ -35,6 +36,7 @@ export default function AdminProducts() {
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [subcategories, setSubcategories] = useState([]);
   const [brands, setBrands] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncingPg, setSyncingPg] = useState(false);
@@ -89,6 +91,7 @@ export default function AdminProducts() {
   // Filtros
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
+  const [subcategory, setSubcategory] = useState('all');
   const [brand, setBrand] = useState('all');
   const [status, setStatus] = useState('all');
   const [stockStatus, setStockStatus] = useState('all');
@@ -107,13 +110,21 @@ export default function AdminProducts() {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
 
-  // Carrega lista de categorias para o dropdown
+  // Carrega lista de categorias e subcategorias
   useEffect(() => {
     api.get('/api/admin/categories')
       .then(res => setCategories(res.categories || []))
       .catch(() => {
         api.get('/api/categories')
           .then(res => setCategories(res.categories || []))
+          .catch(() => {});
+      });
+
+    api.get('/api/admin/subcategories')
+      .then(res => setSubcategories(res.subcategories || []))
+      .catch(() => {
+        api.get('/api/subcategories')
+          .then(res => setSubcategories(res.subcategories || []))
           .catch(() => {});
       });
   }, []);
@@ -125,6 +136,7 @@ export default function AdminProducts() {
       const q = new URLSearchParams({ page: String(tp), limit: String(limit) });
       if (search.trim()) q.set('search', search.trim());
       if (category && category !== 'all') q.set('category', category);
+      if (subcategory && subcategory !== 'all') q.set('subcategory', subcategory);
       if (brand && brand !== 'all') q.set('brand', brand);
       if (status && status !== 'all') q.set('status', status);
       if (stockStatus && stockStatus !== 'all') q.set('stock_status', stockStatus);
@@ -145,7 +157,71 @@ export default function AdminProducts() {
     } finally {
       setLoading(false);
     }
-  }, [search, category, brand, status, stockStatus, dateFrom, dateTo, sortBy, limit]);
+  }, [search, category, subcategory, brand, status, stockStatus, dateFrom, dateTo, sortBy, limit]);
+  // Mapeia categorias do produto para nomes legíveis
+  const getProductCategories = useCallback((p) => {
+    if (Array.isArray(p.category_names) && p.category_names.length > 0) {
+      return p.category_names;
+    }
+    const result = [];
+    if (Array.isArray(p.categories) && p.categories.length > 0) {
+      p.categories.forEach(item => {
+        const match = categories.find(c => c.category_id === item || c.name?.toLowerCase() === String(item).toLowerCase());
+        if (match?.name) {
+          if (!result.includes(match.name)) result.push(match.name);
+        } else if (item && typeof item === 'string' && !item.startsWith('cat_') && !result.includes(item)) {
+          result.push(item);
+        }
+      });
+    }
+    if (result.length === 0 && p.category) {
+      const match = categories.find(c => c.category_id === p.category || c.name?.toLowerCase() === String(p.category).toLowerCase());
+      if (match?.name) {
+        result.push(match.name);
+      } else {
+        const isSub = subcategories.some(sc => sc.name?.toLowerCase() === String(p.category).toLowerCase() || sc.subcategory_id === p.category);
+        if (!isSub && !p.category.startsWith('cat_')) {
+          result.push(p.category);
+        }
+      }
+    }
+    return result;
+  }, [categories, subcategories]);
+
+  // Mapeia subcategorias do produto para nomes legíveis
+  const getProductSubcategories = useCallback((p) => {
+    if (Array.isArray(p.subcategory_names) && p.subcategory_names.length > 0) {
+      return p.subcategory_names;
+    }
+    const result = [];
+    if (Array.isArray(p.subcategories) && p.subcategories.length > 0) {
+      p.subcategories.forEach(item => {
+        const match = subcategories.find(sc => sc.subcategory_id === item || sc.name?.toLowerCase() === String(item).toLowerCase());
+        if (match?.name) {
+          if (!result.includes(match.name)) result.push(match.name);
+        } else if (item && typeof item === 'string' && !item.startsWith('subcat_') && !result.includes(item)) {
+          result.push(item);
+        }
+      });
+    }
+    if (result.length === 0 && p.subcategory) {
+      const match = subcategories.find(sc => sc.subcategory_id === p.subcategory || sc.name?.toLowerCase() === String(p.subcategory).toLowerCase());
+      if (match?.name) {
+        result.push(match.name);
+      } else if (!p.subcategory.startsWith('subcat_')) {
+        result.push(p.subcategory);
+      }
+    }
+    // Fallback inteligente: se subcategorias está vazio mas p.category coincide com uma subcategoria conhecida (ex: 'Libido')
+    if (result.length === 0 && p.category) {
+      const match = subcategories.find(sc => sc.name?.toLowerCase() === String(p.category).toLowerCase() || sc.subcategory_id === p.category);
+      if (match?.name) {
+        result.push(match.name);
+      }
+    }
+    return result;
+  }, [subcategories]);
+
 
   // Recarrega sempre que qualquer filtro mudar, voltando pra página 1
   useEffect(() => {
@@ -155,6 +231,7 @@ export default function AdminProducts() {
   const hasActiveFilters = Boolean(
     search.trim() ||
     category !== 'all' ||
+    subcategory !== 'all' ||
     brand !== 'all' ||
     status !== 'all' ||
     stockStatus !== 'all' ||
@@ -165,6 +242,7 @@ export default function AdminProducts() {
   const clearFilters = () => {
     setSearch('');
     setCategory('all');
+    setSubcategory('all');
     setBrand('all');
     setStatus('all');
     setStockStatus('all');
@@ -412,7 +490,7 @@ export default function AdminProducts() {
 
         {/* Grade de Filtros Avançados */}
         {showAdvancedFilters && (
-          <div className="pt-3 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+          <div className="pt-3 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
             {/* Categoria */}
             <div>
               <label className="text-xs font-semibold text-txt-secondary block mb-1.5 flex items-center gap-1.5">
@@ -428,6 +506,26 @@ export default function AdminProducts() {
                 {categories.map(c => (
                   <option key={c.category_id || c.slug} value={c.name}>
                     {c.name} {!c.active ? '(inativa)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Subcategoria */}
+            <div>
+              <label className="text-xs font-semibold text-txt-secondary block mb-1.5 flex items-center gap-1.5">
+                <FolderTree className="w-3.5 h-3.5 text-gray-400" /> Subcategoria
+              </label>
+              <select
+                value={subcategory}
+                onChange={e => setSubcategory(e.target.value)}
+                className="w-full h-10 px-3 bg-bg-secondary/60 border border-border rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-main/20 focus:bg-white"
+                data-testid="filter-subcategory"
+              >
+                <option value="all">Todas as subcategorias</option>
+                {subcategories.map(sc => (
+                  <option key={sc.subcategory_id || sc.slug} value={sc.name}>
+                    {sc.name}
                   </option>
                 ))}
               </select>
@@ -514,7 +612,7 @@ export default function AdminProducts() {
             </div>
 
             {/* Linha de Ordenação e Itens por Página */}
-            <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 xl:col-span-6 flex items-center justify-between pt-2 border-t border-gray-100 flex-wrap gap-3">
+            <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 xl:col-span-7 flex items-center justify-between pt-2 border-t border-gray-100 flex-wrap gap-3">
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <ArrowUpDown className="w-4 h-4 text-txt-secondary" />
@@ -690,14 +788,40 @@ export default function AdminProducts() {
                   {/* Informações do Produto */}
                   <div className="p-4 flex-1 flex flex-col justify-between gap-3">
                     <div>
-                      <div className="flex items-center justify-between text-xs text-txt-secondary mb-1">
-                        <span className="font-medium truncate text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md max-w-[150px]">
-                          {p.category || 'Sem categoria'}
-                        </span>
-                        <span className="text-[11px] font-mono text-gray-400">
+                      <div className="flex items-center justify-between text-xs text-txt-secondary mb-1 gap-2">
+                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                          {getProductCategories(p).length > 0 ? (
+                            getProductCategories(p).map(catName => (
+                              <span
+                                key={catName}
+                                className="font-semibold text-amber-900 bg-amber-50 border border-amber-200/70 px-1.5 py-0.5 rounded text-[11px] truncate max-w-[130px]"
+                                title={catName}
+                              >
+                                {catName}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-gray-400 text-[11px] italic">Sem categoria</span>
+                          )}
+                        </div>
+                        <span className="text-[11px] font-mono text-gray-400 shrink-0">
                           {p.created_at ? formatDate(p.created_at) : ''}
                         </span>
                       </div>
+
+                      {getProductSubcategories(p).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {getProductSubcategories(p).map(subName => (
+                            <span
+                              key={subName}
+                              className="text-[10px] font-medium text-gray-700 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded truncate max-w-[130px]"
+                              title={subName}
+                            >
+                              {subName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
                       <h3>
                         <Link
@@ -806,25 +930,28 @@ export default function AdminProducts() {
         /* ================= VISUALIZAÇÃO EM LISTA (TABELA) ================= */
         <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead className="bg-bg-secondary/70 text-xs uppercase text-txt-secondary border-b border-border">
                 <tr>
                   <th className="p-3.5 pl-4 w-16 text-center font-semibold" title="Arrastar ou mover para reordenar">
                     Ordem
                   </th>
-                  <th className="text-left p-3.5 font-semibold">Produto</th>
-                  <th className="text-left p-3.5 font-semibold">Categoria</th>
-                  <th className="text-center p-3.5 font-semibold">Data Cadastro</th>
-                  <th className="text-right p-3.5 font-semibold">Preço</th>
-                  <th className="text-right p-3.5 font-semibold">Estoque</th>
-                  <th className="text-center p-3.5 font-semibold">Status</th>
-                  <th className="text-right p-3.5 pr-5 font-semibold">Ações</th>
+                  <th className="text-left p-3.5 font-semibold min-w-[260px]">Produto</th>
+                  <th className="text-left p-3.5 font-semibold min-w-[160px]">Categoria</th>
+                  <th className="text-left p-3.5 font-semibold min-w-[170px]">Subcategorias</th>
+                  <th className="text-center p-3.5 font-semibold min-w-[110px]">Data Cadastro</th>
+                  <th className="text-right p-3.5 font-semibold min-w-[100px]">Preço</th>
+                  <th className="text-center p-3.5 font-semibold min-w-[80px]">Estoque</th>
+                  <th className="text-center p-3.5 font-semibold min-w-[90px]">Status</th>
+                  <th className="text-right p-3.5 pr-5 font-semibold min-w-[100px]">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
                 {products.map((p, idx) => {
                   const isDragging = draggedIndex === idx;
                   const isOver = dragOverIndex === idx;
+                  const pCats = getProductCategories(p);
+                  const pSubs = getProductSubcategories(p);
 
                   return (
                     <tr
@@ -910,8 +1037,41 @@ export default function AdminProducts() {
                       </td>
 
                       {/* Categoria */}
-                      <td className="p-3.5 text-txt-secondary font-medium">
-                        {p.category || '-'}
+                      <td className="p-3.5 text-txt-secondary align-middle">
+                        {pCats.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[220px]">
+                            {pCats.map(catName => (
+                              <span
+                                key={catName}
+                                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200/70 shadow-2xs"
+                                title={catName}
+                              >
+                                {catName}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs italic">Sem categoria</span>
+                        )}
+                      </td>
+
+                      {/* Subcategorias */}
+                      <td className="p-3.5 text-txt-secondary align-middle">
+                        {pSubs.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[240px]">
+                            {pSubs.map(subName => (
+                              <span
+                                key={subName}
+                                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200/80 shadow-2xs"
+                                title={subName}
+                              >
+                                {subName}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs italic">-</span>
+                        )}
                       </td>
 
                       {/* Data de Cadastro */}
