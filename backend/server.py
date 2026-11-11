@@ -407,6 +407,12 @@ class CheckoutData(BaseModel):
     payroll_terms_text: Optional[str] = None
     # Iter 66.3: usar bonus de garantia (Ozoxx) — quantidade de unidades a consumir
     warranty_bonus_units: Optional[int] = 0
+    # Iter 67: Uso de saldo de Cashback por geração (até 30% de desconto)
+    use_cashback: Optional[bool] = False
+    cashback_amount: Optional[float] = None
+    cashback_accepted: Optional[bool] = False
+    cashback_terms_text: Optional[str] = None
+    cashback_client_info: Optional[Dict[str, Any]] = None
 
 class WithdrawalCreate(BaseModel):
     amount: float
@@ -517,6 +523,9 @@ async def lifespan(app: FastAPI):
         await app.db.commissions.create_index("user_id")
         await app.db.commissions.create_index([("user_id", 1), ("status", 1)])
         await app.db.commissions.create_index("withdrawal_id")
+        await app.db.cashback_usages.create_index("usage_id", unique=True)
+        await app.db.cashback_usages.create_index("order_id")
+        await app.db.cashback_usages.create_index([("user_id", 1), ("status", 1)])
     except Exception as e:
         logger.warning(f"Aviso ao criar índices no startup: {e}")
     # Iter 42: indice unico para impedir duplicacao por (order, beneficiario, tipo, geracao)
@@ -2166,6 +2175,60 @@ async def remove_from_cart(request: Request, product_id: str, user: dict = Depen
         await db.carts.update_one({"user_id": user["user_id"]}, {"$set": {"items": items, "updated_at": now_iso()}})
     return await get_cart(request, user)
 
+
+# ==================== CASHBACK POR GERAÇÃO (DESCONTO NO CHECKOUT) ====================
+
+async def get_user_available_cashback(db, user_id: str) -> dict:
+    """Calcula o saldo de cashback por geração/indicação disponível para o usuário.
+    
+    Comissões elegíveis:
+      - user_id = user_id
+      - status in ["paid", "pending", "approved"] (exclui "cancelled", "reverted", "pending_enrollment")
+      - sent_to_card != True (pois bônus já transmitidos ao cartão estão no cartão de benefícios)
+      
+    Subtrai:
+      - Total de cashback já consumido em compras (db.cashback_usages com status != "cancelled")
+    """
+    comm_agg = await db.commissions.aggregate([
+        {
+            "$match": {
+                "user_id": user_id,
+                "status": {"$in": ["paid", "pending", "approved"]},
+                "sent_to_card": {"$ne": True},
+            }
+        },
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    total_accumulated = round(comm_agg[0]["total"] if comm_agg else 0.0, 2)
+
+    used_agg = await db.cashback_usages.aggregate([
+        {"$match": {"user_id": user_id, "status": {"$ne": "cancelled"}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    total_used = round(used_agg[0]["total"] if used_agg else 0.0, 2)
+
+    available = max(0.0, round(total_accumulated - total_used, 2))
+
+    return {
+        "available_balance": available,
+        "total_accumulated": total_accumulated,
+        "total_used": total_used,
+        "max_discount_rate": 0.30,
+        "max_discount_pct": 30,
+    }
+
+
+@app.get("/api/users/me/cashback-balance")
+async def get_my_cashback_balance(request: Request, user: dict = Depends(get_current_user)):
+    """Retorna saldo de cashback por geração disponível para uso em desconto no checkout."""
+    db = request.app.db
+    info = await get_user_available_cashback(db, user["user_id"])
+    return {
+        "ok": True,
+        **info,
+    }
+
+
 # ==================== CHECKOUT & ORDERS ====================
 
 @app.post("/api/checkout")
@@ -2408,11 +2471,103 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
 
     commission_amount = round(subtotal * affiliate_rate, 2) if affiliate_id else 0
 
-    # Iter 36: Voucher pre-pago (deduzido do total)
+    # Iter 67: Desconto com saldo de Cashback por geração (máximo 30% da compra com aceite legal)
+    cashback_discount = 0.0
+    cashback_audit = None
+    if data.use_cashback:
+        if not data.cashback_accepted:
+            raise HTTPException(
+                status_code=400,
+                detail="Para utilizar o saldo de cashback, é obrigatório aceitar o termo de consentimento digital.",
+            )
+        cb_info = await get_user_available_cashback(db, user["user_id"])
+        avail_cb = float(cb_info.get("available_balance") or 0)
+        if avail_cb <= 0:
+            raise HTTPException(status_code=400, detail="Você não possui saldo de cashback disponível para utilizar.")
+        
+        # Base de cálculo: subtotal dos produtos deduzido de eventuais cupons
+        eligible_base = max(0.0, float(subtotal) - float(discount_amount))
+        max_cb_allowed = round(eligible_base * 0.30, 2)
+        
+        req_cb = float(data.cashback_amount) if (data.cashback_amount is not None and float(data.cashback_amount) > 0) else max_cb_allowed
+        cashback_to_apply = round(min(req_cb, avail_cb, max_cb_allowed), 2)
+        
+        if cashback_to_apply > (max_cb_allowed + 0.05):
+            raise HTTPException(
+                status_code=400,
+                detail=f"O desconto máximo permitido com cashback é de 30% do valor dos produtos (máx. R$ {max_cb_allowed:.2f}).",
+            )
+        if cashback_to_apply > avail_cb:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Saldo de cashback insuficiente. Disponível: R$ {avail_cb:.2f}.",
+            )
+        
+        if cashback_to_apply > 0:
+            cashback_discount = cashback_to_apply
+            client_ip = (
+                request.headers.get("cf-connecting-ip")
+                or request.headers.get("x-real-ip")
+                or (request.headers.get("x-forwarded-for").split(",")[0].strip() if request.headers.get("x-forwarded-for") else None)
+                or (request.client.host if request.client else "unknown")
+            )
+            user_agent = (request.headers.get("user-agent") or "")[:500]
+            now_dt_utc = datetime.now(timezone.utc)
+            now_utc_str = now_dt_utc.isoformat()
+            try:
+                import pytz
+                tz_br = pytz.timezone("America/Sao_Paulo")
+                now_br_str = now_dt_utc.astimezone(tz_br).strftime("%d/%m/%Y %H:%M:%S (Horário de Brasília)")
+            except Exception:
+                now_br_str = now_dt_utc.strftime("%d/%m/%Y %H:%M:%S UTC")
+                
+            loc_ref = "Retirada no Local" if is_pickup else (f"{addr.get('city', '')} - {addr.get('state', '')}" if isinstance(addr, dict) else "")
+            user_full_name = user.get("name") or "Cliente"
+            user_cpf_str = user.get("cpf") or user_cpf_digits or "Não informado"
+            
+            terms_text_rendered = data.cashback_terms_text or (
+                f"TERMO DE CONSENTIMENTO E AUTORIZAÇÃO DE USO DE SALDO DE CASHBACK\n\n"
+                f"Eu, {user_full_name}, portador(a) do CPF {user_cpf_str}, manifesto meu expresso consentimento "
+                f"e autorizo a OXXPHARMA a abater o montante de R$ {cashback_discount:.2f} do meu saldo acumulado "
+                f"de cashback por geração/indicação como desconto comercial nesta compra (Pedido OxxPharma). "
+                f"Declaro estar ciente de que este valor é imediatamente debitado do meu saldo de cashback disponível no sistema "
+                f"e não poderá ser revertido, resgatado em dinheiro ou transferido para cartão de benefícios após a conclusão da compra."
+            )
+            
+            import hashlib
+            raw_seed = f"{user['user_id']}|{client_ip}|{now_utc_str}|{cashback_discount:.2f}|{terms_text_rendered}"
+            consent_hash = hashlib.sha256(raw_seed.encode("utf-8")).hexdigest()
+            
+            cashback_audit = {
+                "audit_id": gen_id("aud_cbk_"),
+                "order_id": None,
+                "user_id": user["user_id"],
+                "user_name": user_full_name,
+                "user_cpf": user_cpf_str,
+                "user_email": user.get("email") or "",
+                "user_phone": user.get("phone") or "",
+                "amount_used": cashback_discount,
+                "balance_before": avail_cb,
+                "balance_after": round(avail_cb - cashback_discount, 2),
+                "max_allowed_30pct": max_cb_allowed,
+                "eligible_subtotal": eligible_base,
+                "ip_address": client_ip,
+                "user_agent": user_agent,
+                "accepted_at_utc": now_utc_str,
+                "accepted_at_br": now_br_str,
+                "location_reference": loc_ref,
+                "client_metadata": data.cashback_client_info or {},
+                "terms_version": "v1.0",
+                "terms_text": terms_text_rendered,
+                "consent_hash": consent_hash,
+            }
+
+    # Iter 36: Voucher pre-pago (deduzido do total apos cashback)
     voucher_used = 0.0
     user_fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "voucher_balance": 1})
     user_voucher = float((user_fresh or {}).get("voucher_balance") or 0)
-    grand_total = round(subtotal + shipping - discount_amount, 2)
+    grand_total_before_cashback = round(subtotal + shipping - discount_amount, 2)
+    grand_total = max(0.0, round(grand_total_before_cashback - cashback_discount, 2))
     requested_voucher = float(data.voucher_amount or 0)
     if requested_voucher > 0:
         # Limita ao saldo do user E ao total do pedido
@@ -2477,6 +2632,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "voucher_balance_before": round(user_voucher, 2),
         "warranty_bonus_units_used": warranty_bonus_units_used,
         "warranty_bonus_amount": warranty_bonus_amount,
+        "cashback_discount": cashback_discount,
+        "cashback_audit": cashback_audit,
+        "total_before_cashback": grand_total_before_cashback,
         "total": final_total,
         "total_before_voucher": grand_total,
         "shipping_address": addr, "payment_method": data.payment_method,
@@ -2498,6 +2656,37 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         "notes": data.notes, "created_at": now_iso(),
     }
     await db.orders.insert_one(order)
+
+    # Iter 67: Registro formal do uso de saldo de cashback e auditoria jurídica
+    if cashback_discount > 0 and cashback_audit:
+        cashback_audit["order_id"] = order["order_id"]
+        await db.orders.update_one(
+            {"order_id": order["order_id"]},
+            {"$set": {"cashback_audit.order_id": order["order_id"]}}
+        )
+        await db.cashback_usages.insert_one({
+            "usage_id": gen_id("cbk_use_"),
+            "order_id": order["order_id"],
+            "user_id": user["user_id"],
+            "amount": cashback_discount,
+            "status": "applied",
+            "legal_acceptance": cashback_audit,
+            "created_at": now_iso(),
+        })
+        await db.users.update_one(
+            {"user_id": user["user_id"]},
+            {
+                "$inc": {"cashback_used_total": cashback_discount},
+                "$push": {
+                    "cashback_usage_history": {
+                        "order_id": order["order_id"],
+                        "amount": cashback_discount,
+                        "created_at": now_iso(),
+                        "audit_id": cashback_audit["audit_id"],
+                    }
+                }
+            }
+        )
 
     # Iter 66.3: consome bonus de garantia (marca como usados)
     if warranty_bonus_units_used > 0:
@@ -3063,6 +3252,17 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
             {"order_id": order_id, "status": {"$in": ["pending", "paid"]}},
             {"$set": {"status": "cancelled"}},
         )
+        # Iter 67: estorna cashback_usage se o pedido usou cashback
+        cb_uses = await db.cashback_usages.find({"order_id": order_id, "status": "applied"}).to_list(10)
+        for cu in cb_uses:
+            await db.cashback_usages.update_one(
+                {"_id": cu["_id"]},
+                {"$set": {"status": "cancelled", "cancelled_at": now_iso()}},
+            )
+            await db.users.update_one(
+                {"user_id": cu["user_id"]},
+                {"$inc": {"cashback_used_total": -float(cu.get("amount") or 0)}}
+            )
     final = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     # Gatilhos de email
     order_user = await db.users.find_one({"user_id": final.get("user_id")}, {"_id": 0, "password_hash": 0}) if final else None
@@ -5341,14 +5541,13 @@ async def my_referral(request: Request, start: Optional[str] = None, end: Option
         k = s["_id"] or "pending"
         stats[k] = round(s["total"], 2)
         stats["total_count"] += s["count"]
-    stats["total_earned"] = round(stats.get("paid", 0), 2)
+    # Total ganho considera comissões pagas e pendentes de envio
+    stats["total_earned"] = round(stats.get("paid", 0) + stats.get("pending", 0), 2)
     # Total de pessoas indicadas
     referrals_count = await db.users.count_documents({"sponsor_id": user["user_id"]})
-    # Saldos do novo modelo (cartao)
-    account_agg = await db.commissions.aggregate([
-        {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
-    ]).to_list(1)
+    # Iter 67: Saldo acumulado na conta considerando comissões ativas menos cashback já usado em compras
+    cashback_info = await get_user_available_cashback(db, user["user_id"])
+    account_balance = cashback_info["available_balance"]
     sent_agg = await db.commissions.aggregate([
         {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
@@ -5387,7 +5586,12 @@ async def my_referral(request: Request, start: Optional[str] = None, end: Option
         "commission_rate": AFFILIATE_COMMISSION_RATE,
         "referrals_count": referrals_count,
         "stats": stats,
-        "account_balance": round((account_agg[0]["total"] if account_agg else 0), 2),
+        "account_balance": account_balance,
+        "cashback_available": account_balance,
+        "cashback_accumulated": cashback_info["total_accumulated"],
+        "cashback_used_in_purchases": cashback_info["total_used"],
+        "max_discount_pct": 30,
+        "can_use_in_checkout": True,
         "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
         "card_history": card_history,
         "card_release_days": 2,
@@ -6792,14 +6996,10 @@ async def my_network(request: Request, start: Optional[str] = None, end: Optiona
     all_buyers.sort(key=lambda m: (-(m.get("purchases_total") or 0), -(m.get("purchases_count") or 0)))
     top_buyers = all_buyers[:3]
 
-    # Iter 51: saldo total disponivel na conta (cashback pago, ainda nao enviado
-    # para o cartao). E' INDEPENDENTE do filtro de periodo — mostra o valor real
-    # que o usuario tem para receber, para nao gerar confusao quando ele muda o mes.
-    acc_agg = await db.commissions.aggregate([
-        {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
-    ]).to_list(1)
-    account_balance = round((acc_agg[0]["total"] if acc_agg else 0), 2)
+    # Iter 51: saldo total disponivel na conta (cashback acumulado disponível, ainda nao enviado
+    # para o cartao, deduzido do que foi usado em compras). E' INDEPENDENTE do filtro de periodo.
+    cb_summary = await get_user_available_cashback(db, user["user_id"])
+    account_balance = cb_summary["available_balance"]
 
     return {
         "network_type": network_type,
@@ -11241,10 +11441,8 @@ async def my_card_balance(request: Request, user: dict = Depends(get_current_use
         [{ sent_at, amount, available_at, batch_id }]
     """
     db = request.app.db
-    account_agg = await db.commissions.aggregate([
-        {"$match": {"user_id": user["user_id"], "status": "paid", "sent_to_card": {"$ne": True}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
-    ]).to_list(1)
+    cashback_info = await get_user_available_cashback(db, user["user_id"])
+    account_balance = cashback_info["available_balance"]
     sent_agg = await db.commissions.aggregate([
         {"$match": {"user_id": user["user_id"], "sent_to_card": True}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
@@ -11286,7 +11484,10 @@ async def my_card_balance(request: Request, user: dict = Depends(get_current_use
         })
 
     return {
-        "account_balance": round((account_agg[0]["total"] if account_agg else 0), 2),
+        "account_balance": account_balance,
+        "cashback_available": account_balance,
+        "cashback_accumulated": cashback_info["total_accumulated"],
+        "cashback_used_in_purchases": cashback_info["total_used"],
         "sent_to_card_total": round((sent_agg[0]["total"] if sent_agg else 0), 2),
         "pending_commissions": round((pending_agg[0]["total"] if pending_agg else 0), 2),
         "card_history": card_history,

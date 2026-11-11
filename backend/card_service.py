@@ -182,6 +182,13 @@ async def build_daily_batch(db) -> Optional[Dict]:
     if not grouped:
         return None
     uids = [g["_id"] for g in grouped]
+    # Iter 67: deduz cashback já consumido em compras na loja
+    used_records = await db.cashback_usages.aggregate([
+        {"$match": {"user_id": {"$in": uids}, "status": {"$ne": "cancelled"}}},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}}}
+    ]).to_list(len(uids))
+    used_map = {u["_id"]: float(u["total"] or 0) for u in used_records}
+
     users = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "password_hash": 0}).to_list(len(uids))
     umap = {u["user_id"]: u for u in users}
     entries = []
@@ -189,6 +196,10 @@ async def build_daily_batch(db) -> Optional[Dict]:
     for g in grouped:
         u = umap.get(g["_id"], {})
         enroll = u.get("referral_enrollment") or {}
+        used_val = used_map.get(g["_id"], 0.0)
+        net_amount = max(0.0, round(float(g["total"] or 0) - used_val, 2))
+        if net_amount <= 0.01:
+            continue
         entries.append({
             "user_id": g["_id"],
             "name": u.get("name"),
@@ -196,11 +207,11 @@ async def build_daily_batch(db) -> Optional[Dict]:
             "cpf": enroll.get("cpf") or u.get("cpf"),
             "phone": enroll.get("phone") or u.get("phone"),
             "enrollment": enroll,
-            "amount": round(g["total"], 2),
+            "amount": net_amount,
             "commissions_count": g["count"],
             "commission_ids": g["commission_ids"],
         })
-        total += g["total"]
+        total += net_amount
     return {
         "batch_id": f"batch_{uuid.uuid4().hex[:12]}",
         "entries": entries,

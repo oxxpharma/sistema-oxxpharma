@@ -18,6 +18,7 @@ import {
   ExternalLink,
   ShieldCheck,
   CreditCard,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
@@ -322,6 +323,27 @@ export default function OrderDetails() {
         <div className="mt-4 pt-4 border-t border-border space-y-1.5 text-sm">
           <div className="flex justify-between"><span className="text-txt-secondary">Subtotal</span><span>{formatCurrency(order.subtotal)}</span></div>
           <div className="flex justify-between"><span className="text-txt-secondary">Frete</span><span>{formatCurrency(order.shipping_cost)}</span></div>
+          {order.discount_amount > 0 && (
+            <div className="flex justify-between text-emerald-600">
+              <span>Desconto ({order.coupon_code || 'cupom'})</span>
+              <span className="font-semibold">−{formatCurrency(order.discount_amount)}</span>
+            </div>
+          )}
+          {order.cashback_discount > 0 && (
+            <div className="flex justify-between text-amber-700" data-testid="order-cashback-discount">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                Desconto Cashback por Indicação
+              </span>
+              <span className="font-semibold">−{formatCurrency(order.cashback_discount)}</span>
+            </div>
+          )}
+          {order.voucher_used > 0 && (
+            <div className="flex justify-between text-emerald-600">
+              <span>Voucher</span>
+              <span className="font-semibold">−{formatCurrency(order.voucher_used)}</span>
+            </div>
+          )}
           <div className="flex justify-between items-baseline pt-2 border-t border-border">
             <span className="font-bold">Total</span>
             <span className="font-heading font-black text-2xl text-brand-main">{formatCurrency(order.total)}</span>

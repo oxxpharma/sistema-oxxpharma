@@ -7,7 +7,7 @@ import { useReferral } from '../../contexts/RefContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import AddressForm from '../../components/store/AddressForm';
-import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet, Store, ExternalLink } from 'lucide-react';
+import { MapPin, CreditCard, QrCode, FileText, Share2, Plus, Check, Loader2, Wallet, Store, ExternalLink, Sparkles, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
@@ -41,6 +41,10 @@ export default function CheckoutPage() {
   // Iter 38: Voucher pre-pago vindo da Maxx
   const [voucherBalance, setVoucherBalance] = useState(0);
   const [useVoucher, setUseVoucher] = useState(false);
+  // Iter 67: Cashback por Indicação (até 30% de desconto no pedido com aceite legal)
+  const [cashbackBalance, setCashbackBalance] = useState(0);
+  const [useCashback, setUseCashback] = useState(false);
+  const [cashbackAccepted, setCashbackAccepted] = useState(false);
   // Iter 66 (Convenio): contexto de funcionario + aceite digital do desconto em folha
   const [employeeCtx, setEmployeeCtx] = useState(null);
   const [payrollAccepted, setPayrollAccepted] = useState(false);
@@ -73,6 +77,15 @@ export default function CheckoutPage() {
       try {
         const v = await api.get('/api/users/me/voucher');
         setVoucherBalance(Number(v?.balance || 0));
+      } catch { /* noop */ }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cb = await api.get('/api/users/me/cashback-balance');
+        setCashbackBalance(Number(cb?.available_balance || 0));
       } catch { /* noop */ }
     })();
   }, []);
@@ -115,6 +128,10 @@ export default function CheckoutPage() {
 
   const submit = async () => {
     if (!pickup && !selectedAddr) { toast.error('Selecione um endereço'); return; }
+    if (useCashback && cashbackToUse > 0 && !cashbackAccepted) {
+      toast.error('É obrigatório aceitar o termo de consentimento para utilizar o saldo de cashback.');
+      return;
+    }
     if (paymentMethod === 'payroll' && !payrollAccepted) {
       toast.error('É necessário aceitar os termos do desconto em folha');
       return;
@@ -131,6 +148,16 @@ export default function CheckoutPage() {
         payment_method: paymentMethod,
         ref_code: refCode || undefined,
         coupon_code: couponCode,
+        use_cashback: useCashback && cashbackToUse > 0 ? true : undefined,
+        cashback_amount: useCashback && cashbackToUse > 0 ? Number(cashbackToUse.toFixed(2)) : undefined,
+        cashback_accepted: useCashback && cashbackToUse > 0 ? cashbackAccepted : undefined,
+        cashback_terms_text: useCashback && cashbackToUse > 0 ? getRenderedCashbackTermsText() : undefined,
+        cashback_client_info: useCashback && cashbackToUse > 0 ? {
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          language: navigator.language,
+          screen: typeof window !== 'undefined' ? `${window.screen?.width}x${window.screen?.height}` : '',
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        } : undefined,
         voucher_amount: voucherToUse > 0 ? Number(voucherToUse.toFixed(2)) : undefined,
         pickup: pickup || undefined,
         shipping_price: pickup ? 0 : (selectedShipping?.free_shipping ? 0 : (selectedShipping ? Number(selectedShipping.price) : undefined)),
@@ -198,7 +225,13 @@ export default function CheckoutPage() {
       return Number(c?.discount || 0);
     } catch { return 0; }
   })();
-  const grandBeforeVoucher = Math.max(0, subtotal + shipping - couponDiscount);
+
+  // Iter 67: Base de cálculo para o cashback (máximo 30% do valor dos produtos após cupom)
+  const eligibleSubtotal = Math.max(0, subtotal - couponDiscount);
+  const maxCashbackForOrder = Math.round(eligibleSubtotal * 0.30 * 100) / 100;
+  const cashbackToUse = useCashback ? Math.min(cashbackBalance, maxCashbackForOrder) : 0;
+
+  const grandBeforeVoucher = Math.max(0, subtotal + shipping - couponDiscount - cashbackToUse);
   // Iter 38: Voucher abate ate o valor total. Se cobrir tudo, total = 0 e nao vai ao MP.
   const voucherToUse = useVoucher ? Math.min(voucherBalance, grandBeforeVoucher) : 0;
   // Iter 66.3: bonus de garantia
@@ -207,6 +240,17 @@ export default function CheckoutPage() {
     : 0;
   const total = Math.max(0, grandBeforeVoucher - voucherToUse - bonusAmountUsed);
   const fullyCoveredByVoucher = useVoucher && voucherToUse >= grandBeforeVoucher && grandBeforeVoucher > 0;
+
+  const getRenderedCashbackTermsText = () => {
+    const userName = user?.name || 'Cliente';
+    const userCpf = user?.cpf || 'Não informado';
+    return `TERMO DE CONSENTIMENTO E AUTORIZAÇÃO DE USO DE SALDO DE CASHBACK\n\n` +
+      `Eu, ${userName}, portador(a) do CPF ${userCpf}, manifesto meu expresso consentimento e autorizo ` +
+      `a OXXPHARMA a abater o montante de R$ ${cashbackToUse.toFixed(2)} do meu saldo acumulado de cashback ` +
+      `por geração/indicação como desconto comercial nesta compra (Pedido OxxPharma). ` +
+      `Declaro estar ciente de que este valor é imediatamente debitado do meu saldo de cashback disponível no sistema ` +
+      `e não poderá ser revertido, resgatado em dinheiro ou transferido para cartão de benefícios após a conclusão da compra.`;
+  };
 
   // Iter 66: checa elegibilidade de parcelamento em folha
   useEffect(() => {
@@ -397,6 +441,99 @@ export default function CheckoutPage() {
           {/* Pagamento */}
           <section className="bg-white rounded-xl border border-border p-6">
             <h2 className="font-heading font-black text-lg mb-4 flex items-center gap-2"><CreditCard className="w-5 h-5 text-brand-main" /> Forma de pagamento</h2>
+
+            {/* Iter 67: Saldo Cashback por Indicação (até 30% de desconto) */}
+            {cashbackBalance > 0 && (
+              <div
+                className={`mb-4 rounded-xl border p-4 transition ${useCashback ? 'border-amber-400 bg-amber-50/70 shadow-xs' : 'border-border bg-bg-secondary/40'}`}
+                data-testid="cashback-card"
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${useCashback ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-100 text-amber-600'}`}>
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm text-txt-primary">Saldo Cashback por Indicação</span>
+                        <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-300">
+                          Até 30% de desconto
+                        </span>
+                      </div>
+                      <div className="font-heading font-black text-amber-600 text-lg" data-testid="cashback-balance">
+                        {formatCurrency(cashbackBalance)}
+                      </div>
+                    </div>
+                    <p className="text-xs text-txt-secondary mt-1">
+                      Você pode usar seu saldo de cashback para abater até <b>30% do valor da compra</b> (desconto de até <b>{formatCurrency(maxCashbackForOrder)}</b> neste pedido).
+                    </p>
+
+                    <label className="mt-3 flex items-center gap-2.5 cursor-pointer select-none" data-testid="cashback-toggle-label">
+                      <input
+                        type="checkbox"
+                        checked={useCashback}
+                        onChange={(e) => {
+                          setUseCashback(e.target.checked);
+                          if (!e.target.checked) setCashbackAccepted(false);
+                        }}
+                        className="w-4 h-4 accent-amber-500 rounded"
+                        data-testid="cashback-toggle"
+                      />
+                      <span className="text-sm font-semibold text-txt-primary">
+                        Usar cashback neste pedido (desconto de <span className="text-amber-700 font-bold">{formatCurrency(cashbackToUse)}</span>)
+                      </span>
+                    </label>
+
+                    {useCashback && (
+                      <div className="mt-3 space-y-3">
+                        <div className="text-xs bg-white rounded-lg border border-amber-200 p-3 shadow-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="text-txt-secondary">Desconto de cashback aplicado:</span>
+                            <span className="font-bold text-amber-600 text-sm">−{formatCurrency(cashbackToUse)}</span>
+                          </div>
+                          <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-amber-100 text-[11px]">
+                            <span className="text-txt-secondary">Saldo restante após o pedido:</span>
+                            <span className="font-semibold text-txt-primary">{formatCurrency(Math.max(0, cashbackBalance - cashbackToUse))}</span>
+                          </div>
+                        </div>
+
+                        {/* Termo de Aceite Legal Obrigatório */}
+                        <div className="rounded-xl border border-amber-300 bg-white p-3.5 text-xs shadow-xs" data-testid="cashback-legal-box">
+                          <div className="flex items-center gap-1.5 font-bold text-amber-900 mb-2">
+                            <ShieldCheck className="w-4 h-4 text-amber-600" />
+                            Termo de Consentimento e Aceite Digital
+                          </div>
+                          <div className="bg-amber-50/50 rounded-lg p-2.5 text-[11px] text-amber-950/80 leading-relaxed max-h-36 overflow-y-auto border border-amber-100 font-sans">
+                            Eu, <b>{user?.name || 'Cliente'}</b> (CPF: <b>{user?.cpf || 'Cadastrado'}</b>), manifesto meu livre e expresso consentimento para utilizar a quantia de <b>{formatCurrency(cashbackToUse)}</b> do meu saldo acumulado de cashback por geração/indicação como desconto comercial nesta compra no site OxxPharma.
+                            Declaro estar ciente e de pleno acordo que esta quantia será debitada imediatamente do meu saldo disponível e não poderá ser revertida ou transferida para o cartão de benefícios após a finalização do pedido.
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 pt-2 border-t border-border text-[10px] text-txt-secondary">
+                            <div>👤 <b>Titular:</b> {user?.name || 'Cliente'}</div>
+                            <div>📄 <b>CPF:</b> {user?.cpf || 'Cadastrado'}</div>
+                            <div>🕒 <b>Data/Hora:</b> {new Date().toLocaleString('pt-BR')} (Brasília)</div>
+                            <div>🌐 <b>Auditoria Legal:</b> IP e navegador registrados na finalização</div>
+                          </div>
+
+                          <label className="mt-3 flex items-start gap-2.5 cursor-pointer select-none pt-2 border-t border-amber-200 text-txt-primary">
+                            <input
+                              type="checkbox"
+                              checked={cashbackAccepted}
+                              onChange={(e) => setCashbackAccepted(e.target.checked)}
+                              className="w-4 h-4 accent-amber-500 rounded mt-0.5 shrink-0"
+                              data-testid="cashback-accept-checkbox"
+                            />
+                            <span className="text-xs font-semibold leading-snug">
+                              Li, compreendi e concordo com a utilização de {formatCurrency(cashbackToUse)} do meu saldo de cashback como desconto legal nesta compra.
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Iter 38: Saldo Voucher pre-pago */}
             {voucherBalance > 0 && (
@@ -686,6 +823,15 @@ export default function CheckoutPage() {
               )}
               {couponDiscount > 0 && (
                 <div className="flex justify-between text-emerald-600"><span>Cupom</span><span className="font-semibold">−{formatCurrency(couponDiscount)}</span></div>
+              )}
+              {cashbackToUse > 0 && (
+                <div className="flex justify-between text-amber-700" data-testid="summary-cashback-line">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    Desconto Cashback (30%)
+                  </span>
+                  <span className="font-semibold">−{formatCurrency(cashbackToUse)}</span>
+                </div>
               )}
               {voucherToUse > 0 && (
                 <div className="flex justify-between text-emerald-600" data-testid="summary-voucher-line">

@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip, ShieldCheck } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip, ShieldCheck, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
@@ -507,8 +507,40 @@ export default function AdminOrders() {
               <div className="space-y-1 text-sm pt-3 border-t border-border">
                 <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(selected.subtotal)}</span></div>
                 <div className="flex justify-between"><span>Frete</span><span>{formatCurrency(selected.shipping_cost)}</span></div>
+                {selected.discount_amount > 0 && (
+                  <div className="flex justify-between text-emerald-600"><span>Cupom ({selected.coupon_code || 'desconto'})</span><span>−{formatCurrency(selected.discount_amount)}</span></div>
+                )}
+                {selected.cashback_discount > 0 && (
+                  <div className="flex justify-between text-amber-700 font-medium" data-testid="admin-order-cashback-discount">
+                    <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-600" /> Desconto Cashback (30%)</span>
+                    <span>−{formatCurrency(selected.cashback_discount)}</span>
+                  </div>
+                )}
+                {selected.voucher_used > 0 && (
+                  <div className="flex justify-between text-emerald-600"><span>Voucher</span><span>−{formatCurrency(selected.voucher_used)}</span></div>
+                )}
                 <div className="flex justify-between font-black pt-2 border-t border-border"><span>Total</span><span>{formatCurrency(selected.total)}</span></div>
               </div>
+
+              {/* Auditoria Jurídica do Aceite Digital de Cashback */}
+              {selected.cashback_audit && (
+                <div className="mt-3 p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs space-y-1.5" data-testid="admin-cashback-audit">
+                  <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-600" />
+                    Aceite Legal de Cashback Registrado
+                  </div>
+                  <div className="text-[11px] text-amber-950/80 space-y-1">
+                    <div><b>Titular:</b> {selected.cashback_audit.user_name} (CPF: {selected.cashback_audit.user_cpf})</div>
+                    <div><b>Data/Hora do Aceite:</b> {selected.cashback_audit.accepted_at_br || selected.cashback_audit.accepted_at_utc}</div>
+                    <div><b>IP de Origem:</b> <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200 text-amber-900 font-semibold">{selected.cashback_audit.ip_address}</span></div>
+                    <div><b>Dispositivo / Navegador:</b> <span className="truncate block font-mono text-[10px] text-txt-secondary">{selected.cashback_audit.user_agent}</span></div>
+                    <div><b>Localização / Entrega:</b> {selected.cashback_audit.location_reference || 'N/A'}</div>
+                    {selected.cashback_audit.consent_hash && (
+                      <div><b>Hash de Integridade (SHA-256):</b> <span className="font-mono text-[10px] block break-all text-txt-secondary">{selected.cashback_audit.consent_hash}</span></div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="border-t border-border pt-4">
                 <div className="text-sm font-bold mb-2">Atualizar status</div>

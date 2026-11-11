@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import PeriodFilter, { getCurrentMonthRange } from '../../components/PeriodFilter';
-import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet, CreditCard, Send, Gift, MousePointerClick, UserPlus, ShoppingBag, Award } from 'lucide-react';
+import { Share2, Copy, Users, DollarSign, Clock, CheckCircle2, Loader2, Wallet, CreditCard, Send, Gift, MousePointerClick, UserPlus, ShoppingBag, Award, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import ReferralEnrollmentForm from '../../components/ReferralEnrollmentForm';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
@@ -266,15 +266,27 @@ export default function MyReferral() {
       </div>
 
       {/* Saldos novos: Conta + Histórico de envios para o cartão */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <div className="bg-white rounded-xl border border-border p-5 relative overflow-hidden" data-testid="balance-account">
           <div className="flex items-start justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-widest text-txt-secondary font-semibold mb-1">Saldo na conta</div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase tracking-widest text-txt-secondary font-semibold">Saldo na conta</span>
+                <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                  Disponível para compras
+                </span>
+              </div>
               <div className="text-3xl font-heading font-black text-emerald-600">{formatCurrency(data.account_balance)}</div>
-              <div className="text-xs text-txt-secondary mt-1">Bônus acumulados aguardando envio para o cartão.</div>
+              <div className="text-xs text-txt-secondary">
+                Saldo acumulado de cashback por geração/indicação. Você pode utilizá-lo como <b>até 30% de desconto</b> em qualquer compra no site ou aguardar envio para o cartão de benefícios.
+              </div>
+              {data.cashback_used_in_purchases > 0 && (
+                <div className="text-[11px] text-emerald-700 font-semibold pt-1">
+                  ✓ Já utilizado em compras: {formatCurrency(data.cashback_used_in_purchases)}
+                </div>
+              )}
             </div>
-            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
               <Wallet className="w-5 h-5 text-emerald-600" />
             </div>
           </div>
@@ -330,6 +342,32 @@ export default function MyReferral() {
         </div>
       </div>
 
+      {/* Banner de incentivo: Usar cashback no checkout */}
+      <div className="bg-gradient-to-r from-amber-500/10 via-brand-light/30 to-emerald-500/10 border border-brand-main/30 rounded-xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3" data-testid="cashback-checkout-banner">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-brand-main text-white rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="font-bold text-sm text-txt-primary flex items-center gap-2">
+              Use seu saldo como desconto no Checkout!
+              <Badge variant="outline" className="bg-brand-main/10 text-brand-main border-brand-main/20 text-[10px] font-bold">
+                Até 30% OFF
+              </Badge>
+            </div>
+            <p className="text-xs text-txt-secondary mt-0.5">
+              Você pode abater até 30% do valor de qualquer compra na loja utilizando seu saldo de cashback acumulado. Basta ativar a opção na tela de finalização de compra.
+            </p>
+          </div>
+        </div>
+        <a
+          href="/produtos"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-main hover:text-brand-hover bg-white px-3.5 py-2 rounded-lg border border-brand-main/20 shadow-sm shrink-0"
+        >
+          Comprar agora <ShoppingBag className="w-3.5 h-3.5" />
+        </a>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
         <div className="bg-white rounded-xl border border-border p-4">
@@ -343,7 +381,7 @@ export default function MyReferral() {
           <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center mb-2">
             <DollarSign className="w-5 h-5 text-emerald-600" />
           </div>
-          <div className="text-2xl font-heading font-black text-emerald-600">{formatCurrency(data.stats.paid)}</div>
+          <div className="text-2xl font-heading font-black text-emerald-600">{formatCurrency(data.stats.total_earned ?? (data.stats.paid + data.stats.pending))}</div>
           <div className="text-xs text-txt-secondary">Total ganho</div>
         </div>
         <div className="bg-white rounded-xl border border-border p-4">
