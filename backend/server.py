@@ -11,7 +11,7 @@ import traceback
 import bcrypt
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any, Union, Tuple
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -414,6 +414,9 @@ class CheckoutData(BaseModel):
     cashback_accepted: Optional[bool] = False
     cashback_terms_text: Optional[str] = None
     cashback_client_info: Optional[Dict[str, Any]] = None
+
+
+CheckoutData.model_rebuild()
 
 class WithdrawalCreate(BaseModel):
     amount: float
