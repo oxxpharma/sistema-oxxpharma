@@ -51,6 +51,7 @@ AVAILABLE_PAGES = {
     "payments": "Configuração de Pagamentos",
     "email": "Templates de Email",
     "roles": "Gerenciamento de Perfis",
+    "logs": "Logs do Servidor & Diagnóstico",
 }
 
 # Perfis de sistema (não podem ser deletados, apenas editados)

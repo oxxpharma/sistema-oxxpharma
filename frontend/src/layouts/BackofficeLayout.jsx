@@ -5,7 +5,7 @@ import {
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
   GitMerge, Calculator, LayoutGrid, Shield, ShoppingCart, Zap, ShieldAlert, Database,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, Terminal,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -95,6 +95,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/perfis', icon: Shield, label: 'Perfis de Acesso', testId: 'nav-roles', perm: 'manageRoles' },
       { to: '/backoffice/marcas', icon: Store, label: 'Marcas (multi-tenant)', testId: 'nav-tenants', perm: 'manageRoles' },
       { to: '/backoffice/auditoria', icon: ShieldAlert, label: 'Auditoria & Logs', testId: 'nav-audit-logs' },
+      { to: '/backoffice/logs', icon: Terminal, label: 'Logs do Servidor', testId: 'nav-system-logs', perm: 'integrations' },
       { to: '/backoffice/configuracoes', icon: Settings, label: 'Configurações', testId: 'nav-settings', perm: 'integrations' },
     ],
   },

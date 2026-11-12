@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 import asyncio
+import traceback
 import bcrypt
 import logging
 from datetime import datetime, timezone, timedelta
@@ -17,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, BackgroundTasks, Header, UploadFile, File, Form, Body
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, field_validator
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -861,6 +862,36 @@ async def detect_tenant_middleware(request: Request, call_next):
     except Exception:
         pass
     return response
+
+
+# ==================== TRATAMENTO GLOBAL DE EXCEÇÕES & LOGS ====================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    err_tb = traceback.format_exc()
+    logger.error(f"UNHANDLED EXCEPTION on {request.method} {request.url.path}: {exc}\n{err_tb}")
+    try:
+        db = getattr(request.app, "db", None)
+        if db is not None:
+            await db.system_errors.insert_one({
+                "error_id": gen_id("err_"),
+                "method": request.method,
+                "path": str(request.url.path),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "traceback": err_tb,
+                "created_at": now_iso(),
+            })
+    except Exception as db_err:
+        logger.error(f"Falha ao registrar erro no db.system_errors: {db_err}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Erro interno ({type(exc).__name__}): {str(exc) or 'Consulte os logs do sistema'}",
+            "error_type": type(exc).__name__,
+        }
+    )
 
 
 # ==================== CONVENIO (Iter 66) ====================
@@ -2234,526 +2265,586 @@ async def get_my_cashback_balance(request: Request, user: dict = Depends(get_cur
 @app.post("/api/checkout")
 async def checkout(request: Request, data: CheckoutData, user: dict = Depends(get_current_user)):
     db = request.app.db
-    # Get cart
-    cart = await db.carts.find_one({"user_id": user["user_id"]})
-    if not cart or not cart.get("items"):
-        raise HTTPException(status_code=400, detail="Carrinho vazio")
+    try:
+        # Get cart
+        cart = await db.carts.find_one({"user_id": user["user_id"]})
+        if not cart or not cart.get("items"):
+            raise HTTPException(status_code=400, detail="Carrinho vazio")
 
-    # Iter 47: pickup (retirada no local). Pula validacao de endereco do usuario e
-    # usa o endereco/contato da loja configurado em settings.
-    is_pickup = bool(getattr(data, "pickup", False))
-    pickup_snapshot: Dict = {}
-    addr: Dict = {}
-    if is_pickup:
-        cfg = await correios_service.get_config(db)
-        if not cfg.get("pickup_enabled"):
-            raise HTTPException(status_code=400, detail="Retirada no local nao esta disponivel no momento.")
-        pickup_addr = (cfg.get("pickup_address") or "").strip()
-        if not pickup_addr:
-            raise HTTPException(status_code=400, detail="Endereco de retirada nao configurado pelo lojista.")
-        pickup_snapshot = {
-            "address": pickup_addr,
-            "phone": cfg.get("pickup_phone") or "",
-            "hours": cfg.get("pickup_hours") or "",
-            "instructions": cfg.get("pickup_instructions") or "",
-        }
-        # Endereco do pedido vira o da loja (mantem mesma estrutura para compat)
-        addr = {
-            "address_id": "pickup",
-            "label": "Retirada no local",
-            "name": user.get("name") or "",
-            "street": pickup_addr,
-            "number": "—",
-            "complement": pickup_snapshot["hours"],
-            "neighborhood": "",
-            "city": "",
-            "state": "",
-            "zip_code": "00000-000",
-            "is_pickup": True,
-        }
-    else:
-        # Get address normal
-        addrs = user.get("addresses", [])
-        addr = next((a for a in addrs if a.get("address_id") == data.address_id), None)
-        if not addr:
-            raise HTTPException(status_code=400, detail="Endereco nao encontrado")
+        # Iter 47: pickup (retirada no local). Pula validacao de endereco do usuario e
+        # usa o endereco/contato da loja configurado em settings.
+        is_pickup = bool(getattr(data, "pickup", False))
+        pickup_snapshot: Dict = {}
+        addr: Dict = {}
+        if is_pickup:
+            cfg = await correios_service.get_config(db)
+            pickup_addr = (cfg.get("pickup_address") or "Rua Neo Alves Martins, 3177. Zona 01. Maringá/Pr. CEP 87013-060").strip()
+            pickup_snapshot = {
+                "address": pickup_addr,
+                "phone": cfg.get("pickup_phone") or "(44) 99766-2565",
+                "hours": cfg.get("pickup_hours") or "Seg-Sex 08h-18h / Sáb 08h-12h",
+                "instructions": cfg.get("pickup_instructions") or "",
+            }
+            # Endereco do pedido vira o da loja (mantem mesma estrutura para compat)
+            addr = {
+                "address_id": "pickup",
+                "label": "Retirada no local",
+                "name": user.get("name") or "Cliente",
+                "street": pickup_addr,
+                "number": "—",
+                "complement": pickup_snapshot.get("hours") or "",
+                "neighborhood": "Centro",
+                "city": cfg.get("pickup_city") or "Maringá",
+                "state": cfg.get("pickup_state") or "PR",
+                "zip_code": cfg.get("pickup_zip") or "87013-060",
+                "is_pickup": True,
+            }
+        else:
+            # Get address normal
+            addrs = user.get("addresses", [])
+            addr = next((a for a in addrs if a.get("address_id") == data.address_id), None)
+            if not addr:
+                raise HTTPException(status_code=400, detail="Endereco nao encontrado")
 
-    # Iter 45: GARANTIA HARD de CPF no pedido (faturas vinham incompletas).
-    user_cpf_digits = re.sub(r"\D", "", (user.get("cpf") or user.get("cpf_digits") or ""))
-    if len(user_cpf_digits) < 11:
-        raise HTTPException(
-            status_code=400,
-            detail="CPF obrigatorio para finalizar o pedido. Cadastre seu CPF em Minha conta antes de continuar.",
-        )
-
-    if not is_pickup:
-        # CEP: valida o endereco selecionado (legacy: enderecos antigos podem ter zip vazio).
-        addr_zip_digits = re.sub(r"\D", "", str(addr.get("zip_code") or ""))
-        if len(addr_zip_digits) != 8:
+        # Iter 45: GARANTIA HARD de CPF no pedido (faturas vinham incompletas).
+        user_cpf_digits = re.sub(r"\D", "", str(user.get("cpf") or user.get("cpf_digits") or ""))
+        if len(user_cpf_digits) < 11:
             raise HTTPException(
                 status_code=400,
-                detail="CEP obrigatorio no endereco de entrega. Edite seu endereco e informe o CEP completo (8 digitos).",
+                detail="CPF obrigatorio para finalizar o pedido. Cadastre seu CPF em Minha conta antes de continuar.",
             )
-        # Normaliza zip_code dentro do addr antes de virar shipping_address no order
-        addr = {**addr, "zip_code": f"{addr_zip_digits[:5]}-{addr_zip_digits[5:]}"}
-    # Build order items
-    items = []
-    subtotal = 0
-    _tenant = tenant_service.get_tenant(request)
-    # Iter 61: combo pricing so eh aplicado se cliente NAO usar cupom e NAO usar voucher/pontos.
-    combo_allowed = not bool(getattr(data, "coupon_code", None)) and float(getattr(data, "voucher_amount", 0) or 0) <= 0
-    # Iter 66 (Convenio): pre-carrega contexto de funcionario para desconto automatico
-    _employee_ctx_pricing = await convenio_routes.get_employee_context(db, user)
-    _company_disc_pct = float((_employee_ctx_pricing or {}).get("discount_percent") or 0)
-    # Iter 66.3: desconto de convenio NAO acumula com cupom — se ha cupom aplicado, ignora convenio
-    if getattr(data, "coupon_code", None):
-        _company_disc_pct = 0.0
-    _max_units_with_disc = (_employee_ctx_pricing or {}).get("discount_max_units")
-    _units_with_disc_used = 0
-    for ci in cart["items"]:
-        prod = await db.products.find_one({"product_id": ci["product_id"], "active": True}, {"_id": 0})
-        if not prod:
-            continue
-        if prod.get("stock", 0) < ci["quantity"]:
-            raise HTTPException(status_code=400, detail=f"Estoque insuficiente: {prod['name']}")
-        # preco efetivo considerando pricing_tiers do usuario E override por tenant
-        price_info = store_extras.effective_price(prod, user, tenant=_tenant)
-        price = float(price_info["price"])
-        # Iter 66: desconto da empresa credenciada — respeitando max_units por pedido
-        if _company_disc_pct > 0:
-            qty = int(ci["quantity"])
-            if _max_units_with_disc is not None and _max_units_with_disc > 0:
-                remaining = max(0, int(_max_units_with_disc) - _units_with_disc_used)
-                qty_with_disc = min(qty, remaining)
-                qty_without_disc = qty - qty_with_disc
-                _units_with_disc_used += qty_with_disc
-            else:
-                qty_with_disc = qty
-                qty_without_disc = 0
-            if qty_with_disc > 0 and qty_without_disc == 0:
-                price = round(price * (1 - _company_disc_pct / 100), 2)
-            elif qty_with_disc > 0 and qty_without_disc > 0:
-                # mistura: guarda o "unit medio" para exibir
-                p_disc = price * (1 - _company_disc_pct / 100)
-                mixed = (qty_with_disc * p_disc + qty_without_disc * price) / qty
-                price = round(mixed, 2)
-        combo = store_extras.combo_line_total(prod, ci["quantity"], price, allowed=combo_allowed)
-        if combo["applied"]:
-            total = combo["line_total"]
-            unit = combo["unit_from_combo"]
-        else:
-            unit = price
-            total = round(price * ci["quantity"], 2)
-        subtotal += total
-        items.append({
-            "product_id": prod["product_id"],
-            "name": prod["name"],
-            "price": unit,
-            "quantity": ci["quantity"],
-            "total": total,
-            "image": (prod.get("images") or [None])[0],
-            "points_value": float(prod.get("points_value") or 0),
-            "tier_applied": price_info.get("applied_tier"),
-            "combo_applied": combo["applied"],
-            "combo_price": combo.get("combo_price"),
-            "sku": prod.get("sku"),
-            "ean": prod.get("ean"),
-        })
-        # Decrement stock
-        await db.products.update_one({"product_id": prod["product_id"]}, {"$inc": {"stock": -ci["quantity"]}})
-    if not items:
-        raise HTTPException(status_code=400, detail="Nenhum produto valido")
-    # ============ Frete ============
-    # Iter 47: pickup zera o frete e ignora qualquer cotacao recebida do front.
-    shipping = None
-    shipping_meta = {}
-    if is_pickup:
-        shipping = 0.0
-        shipping_meta = {
-            "shipping_service_name": "Retirada no Local",
-            "shipping_carrier": "Local",
-            "shipping_service_id": "pickup",
-            "shipping_delivery_days": 0,
-        }
-    elif data.shipping_price is not None and data.shipping_price >= 0:
-        shipping = float(data.shipping_price)
-        shipping_meta = {
-            "shipping_service_name": data.shipping_service_name,
-            "shipping_carrier": data.shipping_carrier,
-            "shipping_service_id": data.shipping_service_id,
-            "shipping_delivery_days": data.shipping_delivery_days,
-        }
-    else:
-        # Recotar no provider ativo usando CEP do endereco escolhido
-        cep_dest = (addr.get("zip_code") or "").replace("-", "").replace(".", "").strip()
-        calc_items = []
-        for it in items:
-            prod = await db.products.find_one({"product_id": it["product_id"]}, {"_id": 0})
-            calc_items.append({
-                "weight": prod.get("weight") or 0.3 if prod else 0.3,
-                "length_cm": prod.get("length_cm") if prod else None,
-                "width_cm": prod.get("width_cm") if prod else None,
-                "height_cm": prod.get("height_cm") if prod else None,
-                "quantity": it["quantity"],
-            })
-        fs_settings_tmp = await _get_site_settings(db, tenant_service.get_tenant(request))
-        provider = (fs_settings_tmp.get("shipping_provider") or "correios").lower()
+
+        if not is_pickup:
+            # CEP: valida o endereco selecionado (legacy: enderecos antigos podem ter zip vazio).
+            addr_zip_digits = re.sub(r"\D", "", str(addr.get("zip_code") or ""))
+            if len(addr_zip_digits) != 8:
+                raise HTTPException(
+                    status_code=400,
+                    detail="CEP obrigatorio no endereco de entrega. Edite seu endereco e informe o CEP completo (8 digitos).",
+                )
+            # Normaliza zip_code dentro do addr antes de virar shipping_address no order
+            addr = {**addr, "zip_code": f"{addr_zip_digits[:5]}-{addr_zip_digits[5:]}"}
+
+        # Build order items
+        items = []
+        subtotal = 0.0
+        _tenant = tenant_service.get_tenant(request)
+        # Iter 61: combo pricing so eh aplicado se cliente NAO usar cupom e NAO usar voucher/pontos.
+        combo_allowed = not bool(getattr(data, "coupon_code", None)) and float(getattr(data, "voucher_amount", 0) or 0) <= 0
+        # Iter 66 (Convenio): pre-carrega contexto de funcionario para desconto automatico
         try:
-            if provider == "melhorenvio":
-                me_items = [{
-                    "weight_kg": i.get("weight") or 0.3,
-                    "length_cm": i.get("length_cm"), "width_cm": i.get("width_cm"), "height_cm": i.get("height_cm"),
-                    "quantity": i.get("quantity", 1),
-                    "insurance_value": (subtotal / max(len(calc_items), 1)),
-                } for i in calc_items]
-                calc = await melhorenvio_service.calculate_shipping(db, cep_dest, me_items, insurance_value=subtotal)
+            _employee_ctx_pricing = await convenio_routes.get_employee_context(db, user)
+        except Exception:
+            _employee_ctx_pricing = None
+        _company_disc_pct = float((_employee_ctx_pricing or {}).get("discount_percent") or 0)
+        # Iter 66.3: desconto de convenio NAO acumula com cupom — se ha cupom aplicado, ignora convenio
+        if getattr(data, "coupon_code", None):
+            _company_disc_pct = 0.0
+        _max_units_with_disc = (_employee_ctx_pricing or {}).get("discount_max_units")
+        _units_with_disc_used = 0
+
+        stock_to_decrement = []
+        for ci in cart.get("items", []):
+            pid = ci.get("product_id")
+            if not pid:
+                continue
+            prod = await db.products.find_one({"product_id": pid, "active": True}, {"_id": 0})
+            if not prod:
+                continue
+            
+            qty = int(ci.get("quantity") or 1)
+            if qty <= 0:
+                continue
+
+            # Estoque seguro
+            if prod.get("stock") is not None:
+                current_stock = int(prod.get("stock") or 0)
+                if current_stock < qty:
+                    raise HTTPException(status_code=400, detail=f"Estoque insuficiente para o produto: {prod.get('name', pid)}")
+            
+            # preco efetivo considerando pricing_tiers do usuario E override por tenant
+            try:
+                price_info = store_extras.effective_price(prod, user, tenant=_tenant)
+                price = float(price_info.get("price") or 0.0)
+            except Exception:
+                price = float(prod.get("discount_price") or prod.get("price") or 0.0)
+                price_info = {"price": price, "applied_tier": None}
+
+            # Iter 66: desconto da empresa credenciada — respeitando max_units por pedido
+            if _company_disc_pct > 0:
+                if _max_units_with_disc is not None and _max_units_with_disc > 0:
+                    remaining = max(0, int(_max_units_with_disc) - _units_with_disc_used)
+                    qty_with_disc = min(qty, remaining)
+                    qty_without_disc = qty - qty_with_disc
+                    _units_with_disc_used += qty_with_disc
+                else:
+                    qty_with_disc = qty
+                    qty_without_disc = 0
+                if qty_with_disc > 0 and qty_without_disc == 0:
+                    price = round(price * (1 - _company_disc_pct / 100), 2)
+                elif qty_with_disc > 0 and qty_without_disc > 0:
+                    # mistura: guarda o "unit medio" para exibir
+                    p_disc = price * (1 - _company_disc_pct / 100)
+                    mixed = (qty_with_disc * p_disc + qty_without_disc * price) / qty
+                    price = round(mixed, 2)
+
+            combo = store_extras.combo_line_total(prod, qty, price, allowed=combo_allowed)
+            if combo.get("applied"):
+                total = float(combo["line_total"])
+                unit = float(combo["unit_from_combo"])
             else:
-                calc = await correios_service.calculate_freight(db, cep_dest, calc_items, subtotal)
-            opts = (calc or {}).get("options") or []
-            if opts:
-                best = min(opts, key=lambda o: float(o.get("price") or 0))
-                shipping = float(best.get("price") or 0)
-                shipping_meta = {
-                    "shipping_service_name": best.get("service_name") or best.get("name"),
-                    "shipping_carrier": best.get("company_name") or best.get("carrier"),
-                    "shipping_service_id": best.get("service_id") or best.get("code"),
-                    "shipping_delivery_days": best.get("delivery_days"),
-                }
+                unit = price
+                total = round(price * qty, 2)
+
+            subtotal += total
+            items.append({
+                "product_id": prod["product_id"],
+                "name": prod.get("name") or "Produto",
+                "price": unit,
+                "quantity": qty,
+                "total": total,
+                "image": (prod.get("images") or [None])[0],
+                "points_value": float(prod.get("points_value") or 0),
+                "tier_applied": price_info.get("applied_tier"),
+                "combo_applied": bool(combo.get("applied")),
+                "combo_price": combo.get("combo_price"),
+                "sku": prod.get("sku"),
+                "ean": prod.get("ean"),
+            })
+            stock_to_decrement.append((prod["product_id"], qty))
+
+        if not items:
+            raise HTTPException(status_code=400, detail="Nenhum produto valido")
+
+        # ============ Frete ============
+        # Iter 47: pickup zera o frete e ignora qualquer cotacao recebida do front.
+        shipping = None
+        shipping_meta = {}
+        if is_pickup:
+            shipping = 0.0
+            shipping_meta = {
+                "shipping_service_name": "Retirada no Local",
+                "shipping_carrier": "Local",
+                "shipping_service_id": "pickup",
+                "shipping_delivery_days": 0,
+            }
+        elif data.shipping_price is not None and data.shipping_price >= 0:
+            shipping = float(data.shipping_price)
+            shipping_meta = {
+                "shipping_service_name": data.shipping_service_name,
+                "shipping_carrier": data.shipping_carrier,
+                "shipping_service_id": data.shipping_service_id,
+                "shipping_delivery_days": data.shipping_delivery_days,
+            }
+        else:
+            # Recotar no provider ativo usando CEP do endereco escolhido
+            cep_dest = (addr.get("zip_code") or "").replace("-", "").replace(".", "").strip()
+            calc_items = []
+            for it in items:
+                prod = await db.products.find_one({"product_id": it["product_id"]}, {"_id": 0})
+                calc_items.append({
+                    "weight": prod.get("weight") or 0.3 if prod else 0.3,
+                    "length_cm": prod.get("length_cm") if prod else None,
+                    "width_cm": prod.get("width_cm") if prod else None,
+                    "height_cm": prod.get("height_cm") if prod else None,
+                    "quantity": it["quantity"],
+                })
+            try:
+                fs_settings_tmp = await _get_site_settings(db, tenant_service.get_tenant(request))
+                provider = (fs_settings_tmp.get("shipping_provider") or "correios").lower()
+                if provider == "melhorenvio":
+                    me_items = [{
+                        "weight_kg": i.get("weight") or 0.3,
+                        "length_cm": i.get("length_cm"), "width_cm": i.get("width_cm"), "height_cm": i.get("height_cm"),
+                        "quantity": i.get("quantity", 1),
+                        "insurance_value": (subtotal / max(len(calc_items), 1)),
+                    } for i in calc_items]
+                    calc = await melhorenvio_service.calculate_shipping(db, cep_dest, me_items, insurance_value=subtotal)
+                else:
+                    calc = await correios_service.calculate_freight(db, cep_dest, calc_items, subtotal)
+                opts = (calc or {}).get("options") or []
+                if opts:
+                    best = min(opts, key=lambda o: float(o.get("price") or 0))
+                    shipping = float(best.get("price") or 0)
+                    shipping_meta = {
+                        "shipping_service_name": best.get("service_name") or best.get("name"),
+                        "shipping_carrier": best.get("company_name") or best.get("carrier"),
+                        "shipping_service_id": best.get("service_id") or best.get("code"),
+                        "shipping_delivery_days": best.get("delivery_days"),
+                    }
+            except Exception:
+                pass
+
+        if shipping is None:
+            shipping = 0.0  # Em ultimo caso, evita cobrar valor fantasma
+
+        # Aplica frete grátis se configurado em site_settings (espelha regras publicas)
+        try:
+            fs_settings = await _get_site_settings(db, tenant_service.get_tenant(request))
+            apply_free, _ = _evaluate_free_shipping(fs_settings, user, subtotal)
+            if apply_free:
+                shipping = 0.0
         except Exception:
             pass
-    if shipping is None:
-        shipping = 0.0  # Em ultimo caso, evita cobrar valor fantasma
 
-    # Aplica frete grátis se configurado em site_settings (espelha regras publicas)
-    fs_settings = await _get_site_settings(db, tenant_service.get_tenant(request))
-    fs_label_default = fs_settings.get("free_shipping_label") or "Frete grátis"
-    apply_free, _ = _evaluate_free_shipping(fs_settings, user, subtotal)
-    if apply_free:
-        shipping = 0.0
+        # Cupom (opcional)
+        discount_amount = 0.0
+        coupon_code_applied = None
+        coupon_id_applied = None
+        if getattr(data, "coupon_code", None):
+            result = await store_extras.validate_coupon(db, data.coupon_code, round(subtotal, 2), user)
+            if not result.get("valid"):
+                raise HTTPException(status_code=400, detail=result.get("reason") or "Cupom inválido")
+            discount_amount = float(result.get("discount") or 0)
+            coupon_code_applied = result["coupon"]["code"]
+            coupon_id_applied = result["coupon"]["coupon_id"]
 
-    # Cupom (opcional)
-    discount_amount = 0.0
-    coupon_code_applied = None
-    coupon_id_applied = None
-    if getattr(data, "coupon_code", None):
-        result = await store_extras.validate_coupon(db, data.coupon_code, round(subtotal, 2), user)
-        if not result.get("valid"):
-            raise HTTPException(status_code=400, detail=result.get("reason") or "Cupom inválido")
-        discount_amount = float(result.get("discount") or 0)
-        coupon_code_applied = result["coupon"]["code"]
-        coupon_id_applied = result["coupon"]["coupon_id"]
+        settings = await get_settings(db)
+        try:
+            affiliate_rate = float(settings.get("affiliate_commission_rate") or 0.08)
+        except Exception:
+            affiliate_rate = 0.08
 
-    settings = await get_settings(db)
-    affiliate_rate = settings["affiliate_commission_rate"]
+        # Identificar afiliado (prioridade: sponsor_id do usuario, senao ref_code do checkout)
+        affiliate_id = None
+        affiliate_code = None
+        if user.get("sponsor_id"):
+            aff = await db.users.find_one({"user_id": user["sponsor_id"]}, {"_id": 0})
+            if aff:
+                affiliate_id = aff["user_id"]
+                affiliate_code = aff.get("referral_code")
+        elif data.ref_code:
+            code = data.ref_code.strip().upper()
+            aff = await db.users.find_one({"referral_code": code}, {"_id": 0})
+            if aff and aff["user_id"] != user["user_id"]:
+                affiliate_id = aff["user_id"]
+                affiliate_code = code
+                # Iter 42l: Sticky — persiste o sponsor_id no perfil do usuario para preservar
+                # afiliacao em pedidos futuros, Top 10 indicadores, comissoes MMN e relatorios.
+                await db.users.update_one(
+                    {"user_id": user["user_id"], "$or": [{"sponsor_id": None}, {"sponsor_id": {"$exists": False}}]},
+                    {"$set": {"sponsor_id": affiliate_id, "sponsor_code": code}},
+                )
+                user["sponsor_id"] = affiliate_id
+                user["sponsor_code"] = code
 
-    # Identificar afiliado (prioridade: sponsor_id do usuario, senao ref_code do checkout)
-    affiliate_id = None
-    affiliate_code = None
-    if user.get("sponsor_id"):
-        aff = await db.users.find_one({"user_id": user["sponsor_id"]}, {"_id": 0})
-        if aff:
-            affiliate_id = aff["user_id"]
-            affiliate_code = aff.get("referral_code")
-    elif data.ref_code:
-        code = data.ref_code.strip().upper()
-        aff = await db.users.find_one({"referral_code": code}, {"_id": 0})
-        if aff and aff["user_id"] != user["user_id"]:
-            affiliate_id = aff["user_id"]
-            affiliate_code = code
-            # Iter 42l: Sticky — persiste o sponsor_id no perfil do usuario para preservar
-            # afiliacao em pedidos futuros, Top 10 indicadores, comissoes MMN e relatorios.
-            await db.users.update_one(
-                {"user_id": user["user_id"], "$or": [{"sponsor_id": None}, {"sponsor_id": {"$exists": False}}]},
-                {"$set": {"sponsor_id": affiliate_id, "sponsor_code": code}},
-            )
-            user["sponsor_id"] = affiliate_id
-            user["sponsor_code"] = code
+        commission_amount = round(subtotal * affiliate_rate, 2) if affiliate_id else 0
 
-    commission_amount = round(subtotal * affiliate_rate, 2) if affiliate_id else 0
-
-    # Iter 67: Desconto com saldo de Cashback por geração (máximo 30% da compra com aceite legal)
-    cashback_discount = 0.0
-    cashback_audit = None
-    if data.use_cashback:
-        if not data.cashback_accepted:
-            raise HTTPException(
-                status_code=400,
-                detail="Para utilizar o saldo de cashback, é obrigatório aceitar o termo de consentimento digital.",
-            )
-        cb_info = await get_user_available_cashback(db, user["user_id"])
-        avail_cb = float(cb_info.get("available_balance") or 0)
-        if avail_cb <= 0:
-            raise HTTPException(status_code=400, detail="Você não possui saldo de cashback disponível para utilizar.")
-        
-        # Base de cálculo: subtotal dos produtos deduzido de eventuais cupons
-        eligible_base = max(0.0, float(subtotal) - float(discount_amount))
-        max_cb_allowed = round(eligible_base * 0.30, 2)
-        
-        req_cb = float(data.cashback_amount) if (data.cashback_amount is not None and float(data.cashback_amount) > 0) else max_cb_allowed
-        cashback_to_apply = round(min(req_cb, avail_cb, max_cb_allowed), 2)
-        
-        if cashback_to_apply > (max_cb_allowed + 0.05):
-            raise HTTPException(
-                status_code=400,
-                detail=f"O desconto máximo permitido com cashback é de 30% do valor dos produtos (máx. R$ {max_cb_allowed:.2f}).",
-            )
-        if cashback_to_apply > avail_cb:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Saldo de cashback insuficiente. Disponível: R$ {avail_cb:.2f}.",
-            )
-        
-        if cashback_to_apply > 0:
-            cashback_discount = cashback_to_apply
-            client_ip = (
-                request.headers.get("cf-connecting-ip")
-                or request.headers.get("x-real-ip")
-                or (request.headers.get("x-forwarded-for").split(",")[0].strip() if request.headers.get("x-forwarded-for") else None)
-                or (request.client.host if request.client else "unknown")
-            )
-            user_agent = (request.headers.get("user-agent") or "")[:500]
-            now_dt_utc = datetime.now(timezone.utc)
-            now_utc_str = now_dt_utc.isoformat()
-            try:
-                import pytz
-                tz_br = pytz.timezone("America/Sao_Paulo")
-                now_br_str = now_dt_utc.astimezone(tz_br).strftime("%d/%m/%Y %H:%M:%S (Horário de Brasília)")
-            except Exception:
-                now_br_str = now_dt_utc.strftime("%d/%m/%Y %H:%M:%S UTC")
+        # Iter 67: Desconto com saldo de Cashback por geração (máximo 30% da compra com aceite legal)
+        cashback_discount = 0.0
+        cashback_audit = None
+        if data.use_cashback:
+            if not data.cashback_accepted:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Para utilizar o saldo de cashback, é obrigatório aceitar o termo de consentimento digital.",
+                )
+            cb_info = await get_user_available_cashback(db, user["user_id"])
+            avail_cb = float(cb_info.get("available_balance") or 0)
+            if avail_cb <= 0:
+                raise HTTPException(status_code=400, detail="Você não possui saldo de cashback disponível para utilizar.")
+            
+            # Base de cálculo: subtotal dos produtos deduzido de eventuais cupons
+            eligible_base = max(0.0, float(subtotal) - float(discount_amount))
+            max_cb_allowed = round(eligible_base * 0.30, 2)
+            
+            req_cb = float(data.cashback_amount) if (data.cashback_amount is not None and float(data.cashback_amount) > 0) else max_cb_allowed
+            cashback_to_apply = round(min(req_cb, avail_cb, max_cb_allowed), 2)
+            
+            if cashback_to_apply > (max_cb_allowed + 0.05):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"O desconto máximo permitido com cashback é de 30% do valor dos produtos (máx. R$ {max_cb_allowed:.2f}).",
+                )
+            if cashback_to_apply > avail_cb:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo de cashback insuficiente. Disponível: R$ {avail_cb:.2f}.",
+                )
+            
+            if cashback_to_apply > 0:
+                cashback_discount = cashback_to_apply
+                client_ip = (
+                    request.headers.get("cf-connecting-ip")
+                    or request.headers.get("x-real-ip")
+                    or (request.headers.get("x-forwarded-for").split(",")[0].strip() if request.headers.get("x-forwarded-for") else None)
+                    or (request.client.host if request.client else "unknown")
+                )
+                user_agent = (request.headers.get("user-agent") or "")[:500]
+                now_dt_utc = datetime.now(timezone.utc)
+                now_utc_str = now_dt_utc.isoformat()
+                try:
+                    import pytz
+                    tz_br = pytz.timezone("America/Sao_Paulo")
+                    now_br_str = now_dt_utc.astimezone(tz_br).strftime("%d/%m/%Y %H:%M:%S (Horário de Brasília)")
+                except Exception:
+                    now_br_str = now_dt_utc.strftime("%d/%m/%Y %H:%M:%S UTC")
+                    
+                loc_ref = "Retirada no Local" if is_pickup else (f"{addr.get('city', '')} - {addr.get('state', '')}" if isinstance(addr, dict) else "")
+                user_full_name = user.get("name") or "Cliente"
+                user_cpf_str = user.get("cpf") or user_cpf_digits or "Não informado"
                 
-            loc_ref = "Retirada no Local" if is_pickup else (f"{addr.get('city', '')} - {addr.get('state', '')}" if isinstance(addr, dict) else "")
-            user_full_name = user.get("name") or "Cliente"
-            user_cpf_str = user.get("cpf") or user_cpf_digits or "Não informado"
-            
-            terms_text_rendered = data.cashback_terms_text or (
-                f"TERMO DE CONSENTIMENTO E AUTORIZAÇÃO DE USO DE SALDO DE CASHBACK\n\n"
-                f"Eu, {user_full_name}, portador(a) do CPF {user_cpf_str}, manifesto meu expresso consentimento "
-                f"e autorizo a OXXPHARMA a abater o montante de R$ {cashback_discount:.2f} do meu saldo acumulado "
-                f"de cashback por geração/indicação como desconto comercial nesta compra (Pedido OxxPharma). "
-                f"Declaro estar ciente de que este valor é imediatamente debitado do meu saldo de cashback disponível no sistema "
-                f"e não poderá ser revertido, resgatado em dinheiro ou transferido para cartão de benefícios após a conclusão da compra."
-            )
-            
-            import hashlib
-            raw_seed = f"{user['user_id']}|{client_ip}|{now_utc_str}|{cashback_discount:.2f}|{terms_text_rendered}"
-            consent_hash = hashlib.sha256(raw_seed.encode("utf-8")).hexdigest()
-            
-            cashback_audit = {
-                "audit_id": gen_id("aud_cbk_"),
-                "order_id": None,
-                "user_id": user["user_id"],
-                "user_name": user_full_name,
-                "user_cpf": user_cpf_str,
-                "user_email": user.get("email") or "",
-                "user_phone": user.get("phone") or "",
-                "amount_used": cashback_discount,
-                "balance_before": avail_cb,
-                "balance_after": round(avail_cb - cashback_discount, 2),
-                "max_allowed_30pct": max_cb_allowed,
-                "eligible_subtotal": eligible_base,
-                "ip_address": client_ip,
-                "user_agent": user_agent,
-                "accepted_at_utc": now_utc_str,
-                "accepted_at_br": now_br_str,
-                "location_reference": loc_ref,
-                "client_metadata": data.cashback_client_info or {},
-                "terms_version": "v1.0",
-                "terms_text": terms_text_rendered,
-                "consent_hash": consent_hash,
-            }
-
-    # Iter 36: Voucher pre-pago (deduzido do total apos cashback)
-    voucher_used = 0.0
-    user_fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "voucher_balance": 1})
-    user_voucher = float((user_fresh or {}).get("voucher_balance") or 0)
-    grand_total_before_cashback = round(subtotal + shipping - discount_amount, 2)
-    grand_total = max(0.0, round(grand_total_before_cashback - cashback_discount, 2))
-    requested_voucher = float(data.voucher_amount or 0)
-    if requested_voucher > 0:
-        # Limita ao saldo do user E ao total do pedido
-        voucher_used = round(min(requested_voucher, user_voucher, grand_total), 2)
-        if voucher_used <= 0:
-            voucher_used = 0.0
-    final_total = round(grand_total - voucher_used, 2)
-
-    # Iter 66.3: Bonus de garantia (Ozoxx)
-    warranty_bonus_amount = 0.0
-    warranty_bonus_units_used = 0
-    if int(data.warranty_bonus_units or 0) > 0:
-        bonus_state = await warranty_bonus_routes.compute_usable_bonus(db, user["user_id"], subtotal)
-        max_usable = int(bonus_state.get("usable_units") or 0)
-        req = min(int(data.warranty_bonus_units), max_usable)
-        if req > 0:
-            warranty_bonus_units_used = req
-            warranty_bonus_amount = round(req * float(bonus_state.get("amount_per_unit") or 0), 2)
-            warranty_bonus_amount = min(warranty_bonus_amount, final_total)
-            final_total = round(final_total - warranty_bonus_amount, 2)
-
-    # Iter 66 (Convenio): Desconto em folha
-    payroll_charge_pending = None
-    employee_ctx_for_order = None
-    payroll_inst_count = 1
-    if data.payment_method == "payroll":
-        if not data.payroll_accepted:
-            raise HTTPException(status_code=400, detail="Aceite digital do desconto em folha e obrigatorio")
-        employee_ctx_for_order = await convenio_routes.get_employee_context(db, user)
-        if not employee_ctx_for_order:
-            raise HTTPException(status_code=400, detail="Usuario nao e funcionario de empresa credenciada")
-        if not employee_ctx_for_order["payroll_enabled"]:
-            raise HTTPException(status_code=400, detail="Empresa nao permite desconto em folha")
-        payroll_inst_count = max(1, min(int(getattr(data, "payroll_installments", 1) or 1), 12))
-        inst_amount = round(final_total / payroll_inst_count, 2)
-        if inst_amount > employee_ctx_for_order["available_monthly_margin"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"A parcela de R$ {inst_amount:.2f} excede a sua margem mensal disponível de R$ {employee_ctx_for_order['available_monthly_margin']:.2f} (máximo 30% do salário).",
-            )
-        if final_total > employee_ctx_for_order["available_total_limit"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"O valor total do pedido (R$ {final_total:.2f}) excede o seu limite total acumulado disponível de R$ {employee_ctx_for_order['available_total_limit']:.2f} (máximo 100% do salário).",
-            )
-        payroll_charge_pending = employee_ctx_for_order
-
-    order = {
-        "order_id": gen_id("ord_"), "user_id": user["user_id"],
-        "customer_name": user.get("name"), "customer_email": user.get("email"),
-        # Iter 45: snapshot do CPF + telefone do cliente no momento da compra
-        # (preserva dado fiscal mesmo se o user editar/limpar o perfil depois).
-        "customer_cpf": user.get("cpf") or "",
-        "customer_cpf_digits": user_cpf_digits,
-        "customer_phone": user.get("phone") or "",
-        "items": items, "subtotal": round(subtotal, 2),
-        "shipping_cost": shipping,
-        **shipping_meta,
-        "discount_amount": round(discount_amount, 2),
-        "coupon_code": coupon_code_applied,
-        "voucher_used": voucher_used,
-        "voucher_balance_before": round(user_voucher, 2),
-        "warranty_bonus_units_used": warranty_bonus_units_used,
-        "warranty_bonus_amount": warranty_bonus_amount,
-        "cashback_discount": cashback_discount,
-        "cashback_audit": cashback_audit,
-        "total_before_cashback": grand_total_before_cashback,
-        "total": final_total,
-        "total_before_voucher": grand_total,
-        "shipping_address": addr, "payment_method": data.payment_method,
-        "payroll_installments": payroll_inst_count if data.payment_method == "payroll" else None,
-        # Iter 47: marca pedidos de retirada no local com snapshot do endereco da loja
-        "is_pickup": is_pickup,
-        "pickup_snapshot": pickup_snapshot if is_pickup else None,
-        "payment_status": "pending", "order_status": "pending",
-        "payment_provider": "mock",  # Sera "mercadopago" quando integrado
-        "payment_id": None, "payment_url": None,
-        "affiliate_id": affiliate_id, "affiliate_code": affiliate_code,
-        "affiliate_commission": commission_amount,
-        # Iter 42l: snapshot do sponsor_id no momento da compra (preserva afiliacao
-        # mesmo se o user mudar de sponsor no futuro; usado por Top 10, comissoes MMN
-        # e relatorios). Fallback para affiliate_id quando user nao tem sponsor proprio.
-        "sponsor_id": (user.get("sponsor_id") or affiliate_id),
-        # Iter 43: tenant da marca onde o pedido foi feito (OxxPharma vs Pharmakon).
-        "tenant": tenant_service.get_tenant(request),
-        "notes": data.notes, "created_at": now_iso(),
-    }
-    await db.orders.insert_one(order)
-
-    # Iter 67: Registro formal do uso de saldo de cashback e auditoria jurídica
-    if cashback_discount > 0 and cashback_audit:
-        cashback_audit["order_id"] = order["order_id"]
-        await db.orders.update_one(
-            {"order_id": order["order_id"]},
-            {"$set": {"cashback_audit.order_id": order["order_id"]}}
-        )
-        await db.cashback_usages.insert_one({
-            "usage_id": gen_id("cbk_use_"),
-            "order_id": order["order_id"],
-            "user_id": user["user_id"],
-            "amount": cashback_discount,
-            "status": "applied",
-            "legal_acceptance": cashback_audit,
-            "created_at": now_iso(),
-        })
-        await db.users.update_one(
-            {"user_id": user["user_id"]},
-            {
-                "$inc": {"cashback_used_total": cashback_discount},
-                "$push": {
-                    "cashback_usage_history": {
-                        "order_id": order["order_id"],
-                        "amount": cashback_discount,
-                        "created_at": now_iso(),
-                        "audit_id": cashback_audit["audit_id"],
-                    }
+                terms_text_rendered = data.cashback_terms_text or (
+                    f"TERMO DE CONSENTIMENTO E AUTORIZAÇÃO DE USO DE SALDO DE CASHBACK\n\n"
+                    f"Eu, {user_full_name}, portador(a) do CPF {user_cpf_str}, manifesto meu expresso consentimento "
+                    f"e autorizo a OXXPHARMA a abater o montante de R$ {cashback_discount:.2f} do meu saldo acumulado "
+                    f"de cashback por geração/indicação como desconto comercial nesta compra (Pedido OxxPharma). "
+                    f"Declaro estar ciente de que este valor é imediatamente debitado do meu saldo de cashback disponível no sistema "
+                    f"e não poderá ser revertido, resgatado em dinheiro ou transferido para cartão de benefícios após a conclusão da compra."
+                )
+                
+                import hashlib
+                raw_seed = f"{user['user_id']}|{client_ip}|{now_utc_str}|{cashback_discount:.2f}|{terms_text_rendered}"
+                consent_hash = hashlib.sha256(raw_seed.encode("utf-8")).hexdigest()
+                
+                cashback_audit = {
+                    "audit_id": gen_id("aud_cbk_"),
+                    "order_id": None,
+                    "user_id": user["user_id"],
+                    "user_name": user_full_name,
+                    "user_cpf": user_cpf_str,
+                    "user_email": user.get("email") or "",
+                    "user_phone": user.get("phone") or "",
+                    "amount_used": cashback_discount,
+                    "balance_before": avail_cb,
+                    "balance_after": round(avail_cb - cashback_discount, 2),
+                    "max_allowed_30pct": max_cb_allowed,
+                    "eligible_subtotal": eligible_base,
+                    "ip_address": client_ip,
+                    "user_agent": user_agent,
+                    "accepted_at_utc": now_utc_str,
+                    "accepted_at_br": now_br_str,
+                    "location_reference": loc_ref,
+                    "client_metadata": data.cashback_client_info or {},
+                    "terms_version": "v1.0",
+                    "terms_text": terms_text_rendered,
+                    "consent_hash": consent_hash,
                 }
-            }
-        )
 
-    # Iter 66.3: consome bonus de garantia (marca como usados)
-    if warranty_bonus_units_used > 0:
-        try:
-            await warranty_bonus_routes.consume_bonuses(db, user["user_id"], warranty_bonus_units_used, order["order_id"])
-        except Exception as e:
-            logger.error(f"Falha consumindo warranty_bonuses: {e}")
+        # Iter 36: Voucher pre-pago (deduzido do total apos cashback)
+        voucher_used = 0.0
+        user_fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "voucher_balance": 1})
+        user_voucher = float((user_fresh or {}).get("voucher_balance") or 0)
+        grand_total_before_cashback = round(subtotal + shipping - discount_amount, 2)
+        grand_total = max(0.0, round(grand_total_before_cashback - cashback_discount, 2))
+        requested_voucher = float(data.voucher_amount or 0)
+        if requested_voucher > 0:
+            # Limita ao saldo do user E ao total do pedido
+            voucher_used = round(min(requested_voucher, user_voucher, grand_total), 2)
+            if voucher_used <= 0:
+                voucher_used = 0.0
+        final_total = round(grand_total - voucher_used, 2)
 
-    # Iter 66 (Convenio): pedido pago via desconto em folha
-    # -> marca pago imediatamente, roda hooks (comissoes, pontos, emails, nota fiscal)
-    # -> cria PayrollCharges parcelados que viram parte dos fechamentos mensais da empresa
-    # -> registra aceite digital com IP + user_agent + parcelas para conformidade legal
-    if payroll_charge_pending:
-        await mark_order_paid(db, order["order_id"], payment_id=None, source="payroll")
-        acceptance = {
-            "ip": request.headers.get("x-forwarded-for") or (request.client.host if request.client else None),
-            "user_agent": request.headers.get("user-agent", "")[:300],
-            "terms_version": data.payroll_terms_version or "v1",
-            "payroll_terms_text": data.payroll_terms_text,
+        # Iter 66.3: Bonus de garantia (Ozoxx)
+        warranty_bonus_amount = 0.0
+        warranty_bonus_units_used = 0
+        if int(data.warranty_bonus_units or 0) > 0:
+            bonus_state = await warranty_bonus_routes.compute_usable_bonus(db, user["user_id"], subtotal)
+            max_usable = int(bonus_state.get("usable_units") or 0)
+            req = min(int(data.warranty_bonus_units), max_usable)
+            if req > 0:
+                warranty_bonus_units_used = req
+                warranty_bonus_amount = round(req * float(bonus_state.get("amount_per_unit") or 0), 2)
+                warranty_bonus_amount = min(warranty_bonus_amount, final_total)
+                final_total = round(final_total - warranty_bonus_amount, 2)
+
+        # Iter 66 (Convenio): Desconto em folha
+        payroll_charge_pending = None
+        employee_ctx_for_order = None
+        payroll_inst_count = 1
+        if data.payment_method == "payroll":
+            if not data.payroll_accepted:
+                raise HTTPException(status_code=400, detail="Aceite digital do desconto em folha e obrigatorio")
+            employee_ctx_for_order = await convenio_routes.get_employee_context(db, user)
+            if not employee_ctx_for_order:
+                raise HTTPException(status_code=400, detail="Usuario nao e funcionario de empresa credenciada")
+            if not employee_ctx_for_order.get("payroll_enabled"):
+                raise HTTPException(status_code=400, detail="Empresa nao permite desconto em folha")
+            payroll_inst_count = max(1, min(int(getattr(data, "payroll_installments", 1) or 1), 12))
+            inst_amount = round(final_total / payroll_inst_count, 2)
+            if inst_amount > employee_ctx_for_order.get("available_monthly_margin", 0):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A parcela de R$ {inst_amount:.2f} excede a sua margem mensal disponível de R$ {employee_ctx_for_order.get('available_monthly_margin', 0):.2f} (máximo 30% do salário).",
+                )
+            if final_total > employee_ctx_for_order.get("available_total_limit", 0):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"O valor total do pedido (R$ {final_total:.2f}) excede o seu limite total acumulado disponível de R$ {employee_ctx_for_order.get('available_total_limit', 0):.2f} (máximo 100% do salário).",
+                )
+            payroll_charge_pending = employee_ctx_for_order
+
+        order = {
+            "order_id": gen_id("ord_"), "user_id": user["user_id"],
+            "customer_name": user.get("name"), "customer_email": user.get("email"),
+            "customer_cpf": user.get("cpf") or "",
+            "customer_cpf_digits": user_cpf_digits,
+            "customer_phone": user.get("phone") or "",
+            "items": items, "subtotal": round(subtotal, 2),
+            "shipping_cost": shipping,
+            **shipping_meta,
+            "discount_amount": round(discount_amount, 2),
+            "coupon_code": coupon_code_applied,
+            "voucher_used": voucher_used,
+            "voucher_balance_before": round(user_voucher, 2),
+            "warranty_bonus_units_used": warranty_bonus_units_used,
+            "warranty_bonus_amount": warranty_bonus_amount,
+            "cashback_discount": cashback_discount,
+            "cashback_audit": cashback_audit,
+            "total_before_cashback": grand_total_before_cashback,
+            "total": final_total,
+            "total_before_voucher": grand_total,
+            "shipping_address": addr, "payment_method": data.payment_method,
+            "payroll_installments": payroll_inst_count if data.payment_method == "payroll" else None,
+            "is_pickup": is_pickup,
+            "pickup_snapshot": pickup_snapshot if is_pickup else None,
+            "payment_status": "pending", "order_status": "pending",
+            "payment_provider": "mock",  # Sera "mercadopago" quando integrado
+            "payment_id": None, "payment_url": None,
+            "affiliate_id": affiliate_id, "affiliate_code": affiliate_code,
+            "affiliate_commission": commission_amount,
+            "sponsor_id": (user.get("sponsor_id") or affiliate_id),
+            "tenant": tenant_service.get_tenant(request),
+            "notes": data.notes, "created_at": now_iso(),
         }
+        await db.orders.insert_one(order)
+
+        # Decrement stock now that order is securely saved
+        for pid, q in stock_to_decrement:
+            try:
+                await db.products.update_one({"product_id": pid}, {"$inc": {"stock": -q}})
+            except Exception as st_err:
+                logger.warning(f"Erro decrementando estoque para {pid}: {st_err}")
+
+        # Iter 67: Registro formal do uso de saldo de cashback e auditoria jurídica
+        if cashback_discount > 0 and cashback_audit:
+            try:
+                cashback_audit["order_id"] = order["order_id"]
+                await db.orders.update_one(
+                    {"order_id": order["order_id"]},
+                    {"$set": {"cashback_audit.order_id": order["order_id"]}}
+                )
+                await db.cashback_usages.insert_one({
+                    "usage_id": gen_id("cbk_use_"),
+                    "order_id": order["order_id"],
+                    "user_id": user["user_id"],
+                    "amount": cashback_discount,
+                    "status": "applied",
+                    "legal_acceptance": cashback_audit,
+                    "created_at": now_iso(),
+                })
+                await db.users.update_one(
+                    {"user_id": user["user_id"]},
+                    {
+                        "$inc": {"cashback_used_total": cashback_discount},
+                        "$push": {
+                            "cashback_usage_history": {
+                                "order_id": order["order_id"],
+                                "amount": cashback_discount,
+                                "created_at": now_iso(),
+                                "audit_id": cashback_audit["audit_id"],
+                            }
+                        }
+                    }
+                )
+            except Exception as cb_err:
+                logger.error(f"Erro ao registrar cashback_audit no checkout: {cb_err}")
+
+        # Iter 66.3: consome bonus de garantia (marca como usados)
+        if warranty_bonus_units_used > 0:
+            try:
+                await warranty_bonus_routes.consume_bonuses(db, user["user_id"], warranty_bonus_units_used, order["order_id"])
+            except Exception as e:
+                logger.error(f"Falha consumindo warranty_bonuses: {e}")
+
+        # Iter 66 (Convenio): pedido pago via desconto em folha
+        # -> marca pago imediatamente, roda hooks (comissoes, pontos, emails, nota fiscal)
+        # -> cria PayrollCharges parcelados que viram parte dos fechamentos mensais da empresa
+        # -> registra aceite digital com IP + user_agent + parcelas para conformidade legal
+        if payroll_charge_pending:
+            try:
+                await mark_order_paid(db, order["order_id"], payment_id=None, source="payroll")
+                acceptance = {
+                    "ip": request.headers.get("x-forwarded-for") or (request.client.host if request.client else None),
+                    "user_agent": request.headers.get("user-agent", "")[:300],
+                    "terms_version": data.payroll_terms_version or "v1",
+                    "payroll_terms_text": data.payroll_terms_text,
+                }
+                fresh_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
+                await convenio_routes.create_payroll_charge(
+                    db, fresh_order or order, payroll_charge_pending, acceptance, installments=payroll_inst_count
+                )
+            except Exception as e:
+                logger.error(f"Falha ao criar payroll charge: {e}")
+
+        # Iter 36: Debita o voucher do user agora (lock-in para evitar consumir 2x)
+        if voucher_used > 0:
+            try:
+                await db.users.update_one(
+                    {"user_id": user["user_id"]},
+                    {"$inc": {"voucher_balance": -voucher_used},
+                     "$push": {"voucher_history": {
+                         "delta": -voucher_used,
+                         "source": "checkout",
+                         "order_id": order["order_id"],
+                         "received_at": now_iso(),
+                     }}},
+                )
+            except Exception as v_err:
+                logger.error(f"Erro debitando voucher: {v_err}")
+
+        # Atualiza usage_count do cupom (apos criar a ordem)
+        if coupon_id_applied:
+            try:
+                await store_extras.increment_coupon_usage(db, coupon_id_applied)
+            except Exception as c_err:
+                logger.warning(f"Erro ao incrementar cupom: {c_err}")
+
+        # Clear cart
+        await db.carts.delete_one({"user_id": user["user_id"]})
+        final_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
+
+        # === EMAILS (async, nao bloqueia a response) ===
         try:
-            fresh_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
-            await convenio_routes.create_payroll_charge(
-                db, fresh_order or order, payroll_charge_pending, acceptance, installments=payroll_inst_count
-            )
-        except Exception as e:
-            logger.error(f"Falha ao criar payroll charge: {e}")
+            ctx = order_ctx(final_order or order, user)
+            user_email = user.get("email") or (final_order or {}).get("customer_email")
+            if user_email:
+                asyncio.create_task(email_service.trigger(db, "order_created", user_email, ctx))
+            admins = await admin_recipients(db)
+            if admins:
+                app_url = get_app_url()
+                asyncio.create_task(email_service.trigger(db, "admin_new_order", admins, {
+                    **ctx, "items_count": len(items),
+                    "admin_link": f"{app_url}/backoffice/pedidos",
+                }))
+        except Exception as em_err:
+            logger.warning(f"Erro agendando emails do pedido: {em_err}")
 
-    # Iter 36: Debita o voucher do user agora (lock-in para evitar consumir 2x)
-    if voucher_used > 0:
-        await db.users.update_one(
-            {"user_id": user["user_id"]},
-            {"$inc": {"voucher_balance": -voucher_used},
-             "$push": {"voucher_history": {
-                 "delta": -voucher_used,
-                 "source": "checkout",
-                 "order_id": order["order_id"],
-                 "received_at": now_iso(),
-             }}},
+        return final_order or order
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        err_tb = traceback.format_exc()
+        logger.error(f"Erro crítico no checkout para user {user.get('user_id')}: {exc}\n{err_tb}")
+        try:
+            await db.system_errors.insert_one({
+                "error_id": gen_id("err_chk_"),
+                "source": "/api/checkout",
+                "method": "POST",
+                "user_id": user.get("user_id"),
+                "user_email": user.get("email"),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "traceback": err_tb,
+                "created_at": now_iso(),
+            })
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Não foi possível concluir o pedido ({type(exc).__name__}): {str(exc) or 'Consulte os logs do sistema'}",
         )
-
-    # Atualiza usage_count do cupom (apos criar a ordem)
-    if coupon_id_applied:
-        await store_extras.increment_coupon_usage(db, coupon_id_applied)
-
-    # Iter 42d: Comissoes NAO sao mais criadas no checkout. Sao criadas apenas
-    # quando o pedido vira "paid" (em mark_order_paid ou update_order_status).
-    # Isso evita comissoes orfas em pedidos cancelados/abandonados.
-
-    # Clear cart
-    await db.carts.delete_one({"user_id": user["user_id"]})
-    final_order = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0})
-
-    # === EMAILS (async, nao bloqueia a response) ===
-    ctx = order_ctx(final_order, user)
-    # Pedido criado -> cliente
-    asyncio.create_task(email_service.trigger(db, "order_created", user["email"], ctx))
-    # Novo pedido -> admins
-    admins = await admin_recipients(db)
-    if admins:
-        app_url = get_app_url()
-        asyncio.create_task(email_service.trigger(db, "admin_new_order", admins, {
-            **ctx, "items_count": len(items),
-            "admin_link": f"{app_url}/backoffice/pedidos",
-        }))
-
-    return final_order
 
 @app.get("/api/orders")
 async def list_user_orders(request: Request, page: int = 1, limit: int = 10, user: dict = Depends(get_current_user)):
@@ -11786,6 +11877,62 @@ async def check_page_access(request: Request, page: str, user: dict = Depends(ge
         "user_role": user.get("role"),
         "available_pages": await role_profiles.get_profile_pages(db, user.get("role", "customer")),
     }
+
+
+# ==================== SYSTEM ERRORS & LOGS DIAGNOSTICS ====================
+
+@app.get("/api/admin/system-logs")
+async def get_system_logs(request: Request, limit: int = 50, user: dict = Depends(require_admin())):
+    """Retorna os erros internos recentes registrados no MongoDB e os logs do backend."""
+    db = request.app.db
+    
+    # 1. Erros gravados na collection system_errors
+    errors = await db.system_errors.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    total_errors = await db.system_errors.count_documents({})
+    
+    # 2. Últimas linhas dos arquivos de log do servidor Linux (se existirem)
+    file_logs = []
+    log_paths = [
+        "/var/log/oxxpharma/backend.err.log",
+        "/var/log/oxxpharma/backend.out.log",
+    ]
+    for p in log_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                    tail_lines = lines[-100:] if len(lines) > 100 else lines
+                    file_logs.append({
+                        "file": p,
+                        "exists": True,
+                        "lines": "".join(tail_lines),
+                    })
+            except Exception as e:
+                file_logs.append({"file": p, "exists": True, "error": str(e)})
+        else:
+            file_logs.append({"file": p, "exists": False})
+
+    import platform
+    import sys
+    return {
+        "ok": True,
+        "total_errors": total_errors,
+        "errors": errors,
+        "file_logs": file_logs,
+        "system_info": {
+            "python_version": sys.version,
+            "platform": platform.platform(),
+            "server_time": now_iso(),
+        }
+    }
+
+
+@app.delete("/api/admin/system-logs")
+async def clear_system_logs(request: Request, user: dict = Depends(require_admin())):
+    """Limpa os registros da collection system_errors."""
+    db = request.app.db
+    res = await db.system_errors.delete_many({})
+    return {"ok": True, "deleted_count": res.deleted_count}
 
 # ==================== AUDIT LOGGING SYSTEM ====================
 

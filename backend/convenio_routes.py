@@ -1941,11 +1941,9 @@ async def get_employee_context(db, user: Optional[Dict]) -> Optional[Dict]:
 
 @router.get("/me/employee-context")
 async def me_employee_context(request: Request, user: dict = Depends(_current_user_lazy)):
-    """Retorna contexto de funcionario do usuario logado (ou 404 se nao for)."""
+    """Retorna contexto de funcionario do usuario logado (ou null se nao for)."""
     db = request.app.db
     ctx = await get_employee_context(db, user)
-    if not ctx:
-        raise HTTPException(status_code=404, detail="Usuario nao vinculado a nenhuma empresa credenciada")
     return ctx
 
 

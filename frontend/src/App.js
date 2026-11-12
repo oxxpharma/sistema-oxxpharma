@@ -102,6 +102,7 @@ const AdminMergeUsers = React.lazy(() => import('./pages/backoffice/AdminMergeUs
 const AdminRecalcCommissions = React.lazy(() => import('./pages/backoffice/AdminRecalcCommissions'));
 const AdminRoles = React.lazy(() => import('./pages/backoffice/AdminRoles'));
 const AdminAuditLogs = React.lazy(() => import('./pages/backoffice/AdminAuditLogs'));
+const AdminSystemLogs = React.lazy(() => import('./pages/backoffice/AdminSystemLogs'));
 const AdminReviews = React.lazy(() => import('./pages/backoffice/AdminReviews'));
 const AdminCampaigns = React.lazy(() => import('./pages/backoffice/AdminCampaigns'));
 
@@ -237,6 +238,7 @@ function AppRoutes() {
         <Route path="page-builder" element={<AdminPageBuilder />} />
         <Route path="webhook" element={<AdminWebhook />} />
         <Route path="auditoria" element={<AdminAuditLogs />} />
+        <Route path="logs" element={<AdminSystemLogs />} />
         <Route path="configuracoes" element={<AdminSettings />} />
       </Route>
 
