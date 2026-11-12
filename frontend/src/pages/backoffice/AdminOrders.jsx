@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
-import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip, ShieldCheck, Sparkles } from 'lucide-react';
+import { Search, Eye, Loader2, X, Trash2, AlertTriangle, FileEdit, Save, Wand2, Mail, Store, FileText, Download, Upload, Paperclip, ShieldCheck, Sparkles, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import Pagination from '../../components/admin/Pagination';
 import PayrollAcceptanceModal from '../../components/convenio/PayrollAcceptanceModal';
@@ -450,12 +450,56 @@ export default function AdminOrders() {
               )}
 
               <div>
-                <div className="text-txt-secondary text-xs mb-2">Itens</div>
-                <div className="space-y-2">
+                <div className="text-txt-secondary text-xs mb-2">Itens do Pedido</div>
+                <div className="space-y-2.5">
                   {selected.items.map((it, i) => (
-                    <div key={i} className="flex justify-between text-sm p-2 bg-bg-secondary rounded">
-                      <span>{it.quantity}x {it.name}</span>
-                      <span className="font-bold">{formatCurrency(it.total)}</span>
+                    <div key={i} className="text-sm p-3 bg-bg-secondary rounded-xl border border-border/60 space-y-2">
+                      <div className="flex justify-between items-start gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-txt-primary">{it.quantity}x {it.name}</span>
+                            {it.is_kit && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-900 border border-orange-300">
+                                📦 KIT ({it.kit_items?.length || 0} itens)
+                              </span>
+                            )}
+                          </div>
+                          {!it.is_kit && it.sku && (
+                            <div className="font-mono text-[11px] text-txt-secondary mt-0.5">SKU: {it.sku}</div>
+                          )}
+                          {it.is_kit && it.sku && (
+                            <div className="font-mono text-[11px] text-txt-secondary mt-0.5">SKU Geral: {it.sku}</div>
+                          )}
+                        </div>
+                        <span className="font-bold text-txt-primary shrink-0">{formatCurrency(it.total)}</span>
+                      </div>
+
+                      {/* Composição do Kit para Separação */}
+                      {it.is_kit && Array.isArray(it.kit_items) && it.kit_items.length > 0 && (
+                        <div className="bg-orange-50/90 border border-orange-200/90 rounded-lg p-2.5 text-xs text-orange-950">
+                          <div className="font-bold text-orange-900 flex items-center gap-1.5 mb-1.5 uppercase text-[10px] tracking-wider">
+                            <Package className="w-3.5 h-3.5 text-orange-600" />
+                            Composição para Separação / Expedição:
+                          </div>
+                          <div className="space-y-1">
+                            {it.kit_items.map((kItem, ki) => {
+                              const kQty = parseInt(kItem.quantity, 10) || 1;
+                              const totalToPick = kQty * (parseInt(it.quantity, 10) || 1);
+                              return (
+                                <div key={ki} className="flex justify-between items-center bg-white/80 px-2.5 py-1 rounded border border-orange-100 text-xs">
+                                  <span>
+                                    <b className="text-gray-900">{totalToPick}x</b> <span className="text-gray-800">{kItem.name}</span>{' '}
+                                    {it.quantity > 1 && <span className="text-[10px] text-gray-500">({kQty} un/kit)</span>}
+                                  </span>
+                                  <span className="font-mono text-[10px] font-bold bg-orange-100 text-orange-900 px-2 py-0.5 rounded border border-orange-200">
+                                    SKU: {kItem.sku || 'S/N'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -367,6 +367,12 @@ class ProductCreate(BaseModel):
     seo_description: Optional[str] = None
     seo_keywords: Optional[str] = None
     canonical_url: Optional[str] = None
+    # Iter 68: Kits de Produtos (compostos por múltiplos SKUs e produtos da loja)
+    is_kit: Optional[bool] = False
+    kit_items: Optional[List[Dict[str, Any]]] = []
+
+
+ProductCreate.model_rebuild()
 
 class CategoryCreate(BaseModel):
     name: str
@@ -2153,6 +2159,8 @@ async def get_cart(request: Request, user: dict = Depends(get_current_user)):
                 "points_value": float(prod.get("points_value") or 0),
                 "sku": prod.get("sku"),
                 "ean": prod.get("ean"),
+                "is_kit": bool(prod.get("is_kit", False)),
+                "kit_items": prod.get("kit_items") or [],
             })
     return {"items": enriched, "subtotal": round(subtotal, 2), "count": len(enriched)}
 
@@ -2413,6 +2421,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                 "combo_price": combo.get("combo_price"),
                 "sku": prod.get("sku"),
                 "ean": prod.get("ean"),
+                "is_kit": bool(prod.get("is_kit", False)),
+                "kit_items": prod.get("kit_items") or [],
             })
             stock_to_decrement.append((prod["product_id"], qty))
 
@@ -2867,6 +2877,19 @@ async def get_order(request: Request, order_id: str, user: dict = Depends(get_cu
     if not is_admin and o.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
 
+    # Iter 68: enriquece itens de kit caso pedidos legados não tenham snapshotado is_kit
+    items = o.get("items") or []
+    prod_ids = [it.get("product_id") for it in items if it.get("product_id") and not it.get("is_kit")]
+    if prod_ids:
+        cur = db.products.find({"product_id": {"$in": prod_ids}, "is_kit": True}, {"_id": 0, "product_id": 1, "is_kit": 1, "kit_items": 1})
+        p_map = {}
+        async for p in cur:
+            p_map[p["product_id"]] = p
+        for it in items:
+            if it.get("product_id") in p_map:
+                it["is_kit"] = True
+                it["kit_items"] = p_map[it["product_id"]].get("kit_items") or []
+
     # Se estiver pendente e for iPag, verifica status em tempo real com o gateway
     if o.get("payment_status") == "pending" and o.get("payment_provider") == "ipag":
         try:
@@ -2928,6 +2951,19 @@ async def sync_order_payment(request: Request, order_id: str, user: dict = Depen
     if not is_admin and o.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
 
+    # Iter 68: enriquece itens de kit caso pedidos legados não tenham snapshotado is_kit
+    items = o.get("items") or []
+    prod_ids = [it.get("product_id") for it in items if it.get("product_id") and not it.get("is_kit")]
+    if prod_ids:
+        cur = db.products.find({"product_id": {"$in": prod_ids}, "is_kit": True}, {"_id": 0, "product_id": 1, "is_kit": 1, "kit_items": 1})
+        p_map = {}
+        async for p in cur:
+            p_map[p["product_id"]] = p
+        for it in items:
+            if it.get("product_id") in p_map:
+                it["is_kit"] = True
+                it["kit_items"] = p_map[it["product_id"]].get("kit_items") or []
+
     if o.get("payment_status") == "paid":
         return {"status": "paid", "already_paid": True, "order": o}
 
@@ -2957,6 +2993,19 @@ async def get_order_tracking(request: Request, order_id: str, user: dict = Depen
     is_admin = user.get("role") in ("admin", "super_admin") or user.get("access_level", 99) <= 1
     if not is_admin and o.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
+
+    # Iter 68: enriquece itens de kit caso pedidos legados não tenham snapshotado is_kit
+    items = o.get("items") or []
+    prod_ids = [it.get("product_id") for it in items if it.get("product_id") and not it.get("is_kit")]
+    if prod_ids:
+        cur = db.products.find({"product_id": {"$in": prod_ids}, "is_kit": True}, {"_id": 0, "product_id": 1, "is_kit": 1, "kit_items": 1})
+        p_map = {}
+        async for p in cur:
+            p_map[p["product_id"]] = p
+        for it in items:
+            if it.get("product_id") in p_map:
+                it["is_kit"] = True
+                it["kit_items"] = p_map[it["product_id"]].get("kit_items") or []
 
     code = (o.get("tracking_code") or "").strip().upper()
     if not code:
@@ -3076,6 +3125,24 @@ async def admin_list_orders(request: Request, status: Optional[str] = None, sear
         for o in orders:
             o["customer_network_type"] = "customer"
             o["customer_networks"] = ["customer"]
+
+    # Iter 68: enriquece itens de kit caso pedidos legados não tenham snapshotado is_kit
+    pids_to_check = set()
+    for o in orders:
+        for it in o.get("items") or []:
+            if not it.get("is_kit") and it.get("product_id"):
+                pids_to_check.add(it["product_id"])
+    if pids_to_check:
+        kit_prods = await db.products.find(
+            {"product_id": {"$in": list(pids_to_check)}, "is_kit": True},
+            {"_id": 0, "product_id": 1, "is_kit": 1, "kit_items": 1}
+        ).to_list(len(pids_to_check))
+        kit_map = {p["product_id"]: p for p in kit_prods}
+        for o in orders:
+            for it in o.get("items") or []:
+                if it.get("product_id") in kit_map:
+                    it["is_kit"] = True
+                    it["kit_items"] = kit_map[it["product_id"]].get("kit_items") or []
 
     return {"orders": orders, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
 
@@ -3386,28 +3453,57 @@ async def _send_admin_invoice_if_configured(db, order, order_user):
         ctx = order_ctx(order, order_user)
         # Pre-renderiza HTML com items, endereco, totais (o render_template nao suporta loops)
         items = order.get("items") or []
-        # Iter 46: enriquece SKU/EAN para pedidos legados que nao snapshotaram esses
-        # campos. Faz 1 lookup batch para nao impactar performance.
-        missing_sku_ids = [it.get("product_id") for it in items if it.get("product_id") and not (it.get("sku") or "").strip()]
-        sku_lookup: dict = {}
-        if missing_sku_ids:
-            cur = db.products.find({"product_id": {"$in": missing_sku_ids}}, {"_id": 0, "product_id": 1, "sku": 1, "ean": 1})
+        # Iter 46/68: enriquece SKU/EAN e dados de Kit para pedidos legados
+        prod_ids = [it.get("product_id") for it in items if it.get("product_id")]
+        prod_info_lookup: dict = {}
+        if prod_ids:
+            cur = db.products.find({"product_id": {"$in": prod_ids}}, {"_id": 0, "product_id": 1, "sku": 1, "ean": 1, "is_kit": 1, "kit_items": 1})
             async for p in cur:
-                sku_lookup[p["product_id"]] = {"sku": p.get("sku") or "", "ean": p.get("ean") or ""}
+                prod_info_lookup[p["product_id"]] = p
         items_rows = []
         for it in items:
             qty = int(it.get("quantity") or 1)
             unit = float(it.get("price") or 0)
             total = float(it.get("total") or (qty * unit))
-            # Iter 43/46: SKU + EAN no email da fatura (coluna dedicada).
+            is_kit = bool(it.get("is_kit") or (prod_info_lookup.get(it.get("product_id"), {}).get("is_kit")))
+            kit_items = it.get("kit_items") or prod_info_lookup.get(it.get("product_id"), {}).get("kit_items") or []
+
+            # Iter 43/46/68: SKU + EAN + Kit
             sku = (it.get("sku") or "").strip()
             ean = (it.get("ean") or "").strip()
-            if (not sku or not ean) and it.get("product_id") in sku_lookup:
-                sku = sku or sku_lookup[it["product_id"]]["sku"]
-                ean = ean or sku_lookup[it["product_id"]]["ean"]
-            sku_cell = sku or "—"
+            if (not sku or not ean) and it.get("product_id") in prod_info_lookup:
+                sku = sku or prod_info_lookup[it["product_id"]].get("sku") or ""
+                ean = ean or prod_info_lookup[it["product_id"]].get("ean") or ""
+
+            if is_kit and kit_items:
+                sku_cell = f"<span style='background:#ffedd5;color:#9a3412;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:bold;'>KIT ({len(kit_items)} itens)</span>"
+                if sku:
+                    sku_cell += f"<br><span style='font-size:10px;color:#666;'>{sku}</span>"
+            else:
+                sku_cell = sku or "—"
+
             ean_html = f"<br><span style='color:#999;font-size:10px;'>EAN: {ean}</span>" if ean else ""
             name_cell = (it.get('name') or it.get('product_name') or '')[:80]
+
+            if is_kit and kit_items:
+                kit_lines = []
+                for ki in kit_items:
+                    k_qty = int(ki.get("quantity") or 1) * qty
+                    k_name = ki.get("name") or "Item"
+                    k_sku = ki.get("sku") or "S/N"
+                    kit_lines.append(
+                        f"<div style='font-size:11px;color:#7c2d12;margin:2px 0;'>"
+                        f"&bull; <strong>{k_qty}x</strong> {k_name} "
+                        f"<span style='font-family:monospace;background:#ffedd5;padding:1px 4px;border-radius:3px;'>SKU: {k_sku}</span>"
+                        f"</div>"
+                    )
+                name_cell += (
+                    f"<div style='margin-top:6px;padding:6px 8px;background:#fff7ed;border-left:3px solid #f97316;border-radius:4px;text-align:left;'>"
+                    f"<div style='font-size:10px;font-weight:bold;color:#9a3412;text-transform:uppercase;'>&#128230; Composição do Kit para Separação:</div>"
+                    + "".join(kit_lines) +
+                    f"</div>"
+                )
+
             items_rows.append(
                 f"<tr>"
                 f"<td style='padding:6px 8px;border-bottom:1px solid #EEE;'>{name_cell}</td>"
@@ -3868,6 +3964,8 @@ async def admin_create_manual_order(request: Request, body: PDVOrderIn, user: di
             "tier_applied": resolved.get("applied_tier"),
             "sku": p.get("sku"),
             "ean": p.get("ean"),
+            "is_kit": bool(p.get("is_kit", False)),
+            "kit_items": p.get("kit_items") or [],
         })
     if not order_items:
         raise HTTPException(status_code=400, detail="Nenhum item válido")
@@ -8019,10 +8117,36 @@ async def build_invoice_data(db, order: dict):
     }
     # Busca CPF do usuario se existir
     buyer = await db.users.find_one({"user_id": order.get("user_id")}, {"_id": 0, "password_hash": 0}) or {}
+
+    # Iter 68: enriquece itens de kit e SKU para exibicao completa na fatura/separacao
+    order_doc = dict(order)
+    items = list(order_doc.get("items") or [])
+    prod_ids = [it.get("product_id") for it in items if it.get("product_id")]
+    if prod_ids:
+        cur = db.products.find({"product_id": {"$in": prod_ids}}, {"_id": 0, "product_id": 1, "sku": 1, "ean": 1, "is_kit": 1, "kit_items": 1})
+        p_map = {}
+        async for p in cur:
+            p_map[p["product_id"]] = p
+        enriched_items = []
+        for it in items:
+            it_c = dict(it)
+            p = p_map.get(it_c.get("product_id")) or {}
+            if not it_c.get("sku") and p.get("sku"):
+                it_c["sku"] = p["sku"]
+            if not it_c.get("ean") and p.get("ean"):
+                it_c["ean"] = p["ean"]
+            if it_c.get("is_kit") is None and p.get("is_kit"):
+                it_c["is_kit"] = bool(p.get("is_kit"))
+                it_c["kit_items"] = p.get("kit_items") or []
+            elif it_c.get("is_kit") and not it_c.get("kit_items") and p.get("kit_items"):
+                it_c["kit_items"] = p.get("kit_items") or []
+            enriched_items.append(it_c)
+        order_doc["items"] = enriched_items
+
     return {
         "invoice_number": order.get("invoice_number"),
         "invoice_issued_at": order.get("invoice_issued_at"),
-        "order": order,
+        "order": order_doc,
         "company": company,
         "buyer": {
             "name": order.get("customer_name") or buyer.get("name"),

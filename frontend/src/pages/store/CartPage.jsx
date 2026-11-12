@@ -147,6 +147,13 @@ export default function CartPage() {
               <img src={item.image || 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=200'} alt={item.name} className="w-20 h-20 md:w-24 md:h-24 rounded-lg object-cover bg-bg-secondary" />
               <div className="flex-1 min-w-0">
                 <Link to={`/produto/${item.product_id}`} className="font-semibold text-sm text-txt-primary line-clamp-2 hover:text-brand-main">{item.name}</Link>
+                {item.is_kit && (
+                  <div className="mt-0.5">
+                    <span className="inline-block text-[10px] font-bold uppercase tracking-wider bg-orange-100 text-orange-900 border border-orange-200 px-1.5 py-0.5 rounded">
+                      📦 Kit ({item.kit_items?.length || 0} itens)
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-baseline gap-2 mt-1">
                   <div className="text-lg font-heading font-black text-txt-primary">{formatCurrency(item.price)}</div>
                   {item.original_price && item.original_price > item.price && (

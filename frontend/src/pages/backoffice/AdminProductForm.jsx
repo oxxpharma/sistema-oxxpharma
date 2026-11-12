@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Plus, Trash2, Upload, Loader2, ArrowLeft, Save, GripVertical, PlusCircle, Eye } from 'lucide-react';
+import { Plus, Trash2, Upload, Loader2, ArrowLeft, Save, GripVertical, PlusCircle, Eye, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import RichTextEditor from '../../components/admin/RichTextEditor';
 import SEOFormFields from '../../components/admin/SEOFormFields';
@@ -22,6 +22,8 @@ const emptyForm = {
   custom_fields: [],
   combo_pricing: [],
   slug: '', seo_title: '', seo_description: '', seo_keywords: '', canonical_url: '',
+  is_kit: false,
+  kit_items: [],
 };
 
 export default function AdminProductForm() {
@@ -33,6 +35,7 @@ export default function AdminProductForm() {
   const [categories, setCategories] = useState([]);
   const [subcategories, setSubcategories] = useState([]);
   const [userCats, setUserCats] = useState([]);
+  const [availableProducts, setAvailableProducts] = useState([]);
   const [fieldTemplates, setFieldTemplates] = useState([]);
   const [showTplManage, setShowTplManage] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -46,16 +49,18 @@ export default function AdminProductForm() {
   }, [categories]);
 
   const loadRefs = useCallback(async () => {
-    const [c, sc, uc, tpls] = await Promise.all([
+    const [c, sc, uc, tpls, prods] = await Promise.all([
       api.get('/api/admin/categories').catch(() => api.get('/api/categories')),
       api.get('/api/admin/subcategories').catch(() => ({ subcategories: [] })),
       api.get('/api/admin/user-categories').catch(() => ({ categories: [] })),
       api.get('/api/admin/product-field-templates').catch(() => ({ templates: [] })),
+      api.get('/api/admin/products?limit=500').catch(() => api.get('/api/products?limit=500')).catch(() => ({ products: [] })),
     ]);
     setCategories(c.categories || []);
     setSubcategories(sc.subcategories || []);
     setUserCats(uc.categories || []);
     setFieldTemplates(tpls.templates || []);
+    setAvailableProducts(prods.products || []);
     return c.categories || [];
   }, []);
 
@@ -98,6 +103,8 @@ export default function AdminProductForm() {
               seo_description: prod.seo_description || '',
               seo_keywords: prod.seo_keywords || '',
               canonical_url: prod.canonical_url || '',
+              is_kit: !!prod.is_kit,
+              kit_items: Array.isArray(prod.kit_items) ? prod.kit_items : [],
             });
           } else {
             toast.error('Produto nao encontrado');
@@ -172,6 +179,19 @@ export default function AdminProductForm() {
         : (form.subcategory || ''),
       categories: Array.isArray(form.categories) ? form.categories : [],
       subcategories: Array.isArray(form.subcategories) ? form.subcategories : [],
+      is_kit: !!form.is_kit,
+      kit_items: form.is_kit
+        ? (form.kit_items || [])
+            .filter(it => it && it.product_id)
+            .map(it => ({
+              product_id: it.product_id,
+              name: String(it.name || '').trim(),
+              sku: String(it.sku || '').trim(),
+              quantity: Math.max(1, parseInt(it.quantity, 10) || 1),
+              image: it.image || '',
+              price: parseFloat(it.price) || 0,
+            }))
+        : [],
     };
   };
 
@@ -435,8 +455,206 @@ export default function AdminProductForm() {
           <Input label="Pontos por unidade" type="number" step="0.01" value={form.points_value} onChange={e => setForm({ ...form, points_value: e.target.value })} placeholder="Ex: 10" />
         </div>
 
+        {/* Iter 68: Configuração de Kit de Produtos */}
+        <div className={`border-2 rounded-xl p-4 md:p-5 transition-all ${form.is_kit ? 'border-orange-500 bg-orange-50/20' : 'border-border bg-bg-secondary/40'}`}>
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div className="flex items-start gap-3">
+              <div className={`p-2.5 rounded-lg shrink-0 ${form.is_kit ? 'bg-orange-500 text-white shadow-sm' : 'bg-gray-200 text-gray-600'}`}>
+                <Package className="w-5 h-5" />
+              </div>
+              <div>
+                <label className="text-base font-bold text-txt-primary flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!form.is_kit}
+                    onChange={e => {
+                      const checked = e.target.checked;
+                      setForm(f => ({
+                        ...f,
+                        is_kit: checked,
+                        kit_items: checked && (!f.kit_items || f.kit_items.length === 0)
+                          ? [{ product_id: '', name: '', sku: '', quantity: 1, image: '', price: 0 }]
+                          : (f.kit_items || [])
+                      }));
+                    }}
+                    className="w-5 h-5 text-orange-600 rounded border-gray-300 focus:ring-orange-500 cursor-pointer"
+                    data-testid="is-kit-checkbox"
+                  />
+                  <span>Este produto é um Kit de Produtos</span>
+                </label>
+                <p className="text-xs text-txt-secondary mt-1 max-w-2xl leading-relaxed">
+                  Marque se este item for um kit/conjunto composto por múltiplos produtos da loja. Você selecionará quais produtos integram o kit e o sistema puxará o SKU e detalhes de cada um para constar no resumo do pedido e na fatura de separação.
+                </p>
+              </div>
+            </div>
+            {form.is_kit && (
+              <span className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-300 self-start">
+                Modo Kit Ativo ({form.kit_items?.filter(it => it.product_id).length || 0} {form.kit_items?.filter(it => it.product_id).length === 1 ? 'item' : 'itens'})
+              </span>
+            )}
+          </div>
+
+          {form.is_kit && (
+            <div className="mt-5 pt-5 border-t border-orange-200 space-y-4" data-testid="kit-items-section">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h4 className="font-bold text-sm text-txt-primary flex items-center gap-1.5">
+                    📦 Composição do Kit (Produtos Integrantes)
+                  </h4>
+                  <p className="text-xs text-txt-secondary">
+                    Puxe os produtos da loja abaixo. O SKU de cada produto será preenchido automaticamente.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="border-orange-300 hover:bg-orange-100/70 text-orange-800 font-semibold text-xs"
+                  onClick={() => {
+                    setForm(f => ({
+                      ...f,
+                      kit_items: [...(f.kit_items || []), { product_id: '', name: '', sku: '', quantity: 1, image: '', price: 0 }]
+                    }));
+                  }}
+                  data-testid="add-kit-item-btn"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Produto ao Kit
+                </Button>
+              </div>
+
+              {/* Lista de itens do Kit */}
+              {(!form.kit_items || form.kit_items.length === 0) ? (
+                <div className="p-4 text-center border border-dashed border-orange-300 rounded-lg text-xs text-orange-800 bg-white">
+                  Nenhum produto adicionado ao kit ainda. Clique no botão acima para adicionar o primeiro item.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {form.kit_items.map((kItem, idx) => (
+                    <div key={idx} className="bg-white border border-orange-200 rounded-xl p-3.5 shadow-2xs flex flex-col md:flex-row md:items-center gap-3">
+                      <div className="flex items-center gap-2 text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded shrink-0 self-start md:self-center">
+                        Item #{idx + 1}
+                      </div>
+
+                      {/* Seletor de Produto */}
+                      <div className="flex-1 min-w-[220px]">
+                        <label className="text-[11px] font-bold text-txt-secondary block mb-1">Selecione o produto da loja*</label>
+                        <select
+                          value={kItem.product_id || ''}
+                          onChange={e => {
+                            const selId = e.target.value;
+                            const found = availableProducts.find(p => p.product_id === selId);
+                            const next = [...form.kit_items];
+                            next[idx] = {
+                              ...next[idx],
+                              product_id: selId,
+                              name: found ? found.name : '',
+                              sku: found ? (found.sku || '') : '',
+                              image: found && found.images?.length ? found.images[0] : '',
+                              price: found ? (found.discount_price || found.price || 0) : 0,
+                            };
+                            setForm(f => ({ ...f, kit_items: next }));
+                          }}
+                          className="w-full h-10 px-3 border border-border rounded-lg text-sm bg-bg-primary focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
+                          data-testid={`kit-item-select-${idx}`}
+                        >
+                          <option value="">-- Selecione o produto --</option>
+                          {availableProducts
+                            .filter(p => !productId || p.product_id !== productId)
+                            .map(p => (
+                              <option key={p.product_id} value={p.product_id}>
+                                {p.sku ? `[SKU: ${p.sku}] ` : ''}{p.name} — R$ {(p.discount_price || p.price || 0).toFixed(2)}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {/* SKU puxado automaticamente */}
+                      <div className="w-full md:w-36 shrink-0">
+                        <label className="text-[11px] font-bold text-txt-secondary block mb-1">SKU do Item</label>
+                        <input
+                          type="text"
+                          value={kItem.sku || ''}
+                          readOnly
+                          placeholder="Sem SKU"
+                          className="w-full h-10 px-3 border border-orange-200 rounded-lg text-xs bg-orange-50/50 font-mono font-bold text-orange-950"
+                          title="SKU obtido do cadastro do produto selecionado"
+                        />
+                      </div>
+
+                      {/* Quantidade no kit */}
+                      <div className="w-full md:w-28 shrink-0">
+                        <label className="text-[11px] font-bold text-txt-secondary block mb-1">Qtd no Kit</label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={kItem.quantity || 1}
+                          onChange={e => {
+                            const val = Math.max(1, parseInt(e.target.value, 10) || 1);
+                            const next = [...form.kit_items];
+                            next[idx] = { ...next[idx], quantity: val };
+                            setForm(f => ({ ...f, kit_items: next }));
+                          }}
+                          className="w-full h-10 px-3 border border-border rounded-lg text-sm font-bold text-center"
+                          data-testid={`kit-item-qty-${idx}`}
+                        />
+                      </div>
+
+                      {/* Remover item */}
+                      <div className="shrink-0 flex items-center justify-end md:self-end md:mb-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm(f => ({ ...f, kit_items: f.kit_items.filter((_, i) => i !== idx) }));
+                          }}
+                          className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Remover este item do kit"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Resumo informativo dos SKUs do Kit */}
+              {form.kit_items && form.kit_items.filter(it => it.product_id).length > 0 && (
+                <div className="bg-orange-100/70 border border-orange-200 rounded-lg p-3 text-xs text-orange-950 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="font-bold">SKUs integrantes para separação:</span>{' '}
+                    <span className="font-mono font-semibold">
+                      {form.kit_items
+                        .filter(it => it.product_id)
+                        .map(it => `${it.quantity}x ${it.sku || it.name}`)
+                        .join(' + ')}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-orange-800">
+                    Total de unidades físicas no kit:{' '}
+                    <b>{form.kit_items.filter(it => it.product_id).reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 1), 0)} itens</b>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
-          <Input label="SKU (codigo interno)" value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} placeholder="Ex: VITC-500-30" data-testid="prod-sku" />
+          <div>
+            <Input
+              label={form.is_kit ? "SKU Geral do Kit (opcional)" : "SKU (codigo interno)"}
+              value={form.sku}
+              onChange={e => setForm({ ...form, sku: e.target.value })}
+              placeholder={form.is_kit ? "Ex: KIT-MOMCARE" : "Ex: VITC-500-30"}
+              data-testid="prod-sku"
+            />
+            {form.is_kit && (
+              <span className="text-[11px] text-orange-700 block mt-1 font-medium">
+                💡 Como este produto é um kit, a separação utilizará os SKUs individuais de cada item configurado acima.
+              </span>
+            )}
+          </div>
           <Input label="EAN (codigo de barras)" value={form.ean} onChange={e => setForm({ ...form, ean: e.target.value })} placeholder="Ex: 7891234567890" data-testid="prod-ean" />
         </div>
 

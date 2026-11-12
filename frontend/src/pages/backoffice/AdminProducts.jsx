@@ -834,8 +834,19 @@ export default function AdminProducts() {
                       </h3>
 
                       <div className="flex items-center gap-2 mt-1.5 text-xs text-txt-secondary flex-wrap">
+                        {p.is_kit && (
+                          <span className="font-bold text-orange-800 bg-orange-100 border border-orange-300 px-1.5 py-0.5 rounded text-[10px]" title="Produto configurado como Kit">
+                            📦 KIT ({p.kit_items?.length || 0} itens)
+                          </span>
+                        )}
                         {p.brand && <span className="font-semibold text-gray-700 bg-orange-50/70 text-brand-main px-1.5 py-0.5 rounded text-[11px]">{p.brand}</span>}
-                        {p.sku && <span className="text-[11px] text-gray-400">SKU: {p.sku}</span>}
+                        {p.is_kit && p.kit_items?.length > 0 ? (
+                          <span className="text-[11px] text-orange-900/80 font-mono" title={p.kit_items.map(k => `${k.quantity}x ${k.sku || k.name}`).join(', ')}>
+                            SKUs: {p.kit_items.map(k => k.sku).filter(Boolean).join(', ') || 'definidos no kit'}
+                          </span>
+                        ) : p.sku ? (
+                          <span className="text-[11px] text-gray-400">SKU: {p.sku}</span>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1024,13 +1035,24 @@ export default function AdminProducts() {
                             >
                               {p.name}
                             </Link>
-                            <div className="flex items-center gap-2 mt-0.5 text-xs text-txt-secondary">
+                            <div className="flex items-center gap-2 mt-0.5 text-xs text-txt-secondary flex-wrap">
+                              {p.is_kit && (
+                                <span className="font-bold text-orange-800 bg-orange-100 border border-orange-300 px-1.5 py-0.5 rounded text-[10px]" title="Produto configurado como Kit">
+                                  📦 KIT ({p.kit_items?.length || 0} itens)
+                                </span>
+                              )}
                               {p.brand && (
                                 <span className="font-medium text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">
                                   {p.brand}
                                 </span>
                               )}
-                              {p.sku && <span>SKU: {p.sku}</span>}
+                              {p.is_kit && p.kit_items?.length > 0 ? (
+                                <span className="font-mono text-[11px] text-orange-900/80" title={p.kit_items.map(k => `${k.quantity}x ${k.sku || k.name}`).join(', ')}>
+                                  SKUs: {p.kit_items.map(k => k.sku).filter(Boolean).join(', ') || 'definidos no kit'}
+                                </span>
+                              ) : p.sku ? (
+                                <span>SKU: {p.sku}</span>
+                              ) : null}
                             </div>
                           </div>
                         </div>

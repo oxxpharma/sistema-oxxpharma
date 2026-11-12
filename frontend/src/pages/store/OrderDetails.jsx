@@ -315,6 +315,21 @@ export default function OrderDetails() {
               <div className="flex-1">
                 <div className="text-sm font-semibold">{it.name}</div>
                 <div className="text-xs text-txt-secondary">{it.quantity}x {formatCurrency(it.price)}</div>
+                {it.is_kit && (
+                  <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-900 border border-orange-200 mt-1">
+                    Kit com {it.kit_items?.length || 0} itens
+                  </span>
+                )}
+                {it.is_kit && Array.isArray(it.kit_items) && it.kit_items.length > 0 && (
+                  <div className="mt-2 pl-2.5 border-l-2 border-orange-300 text-xs text-txt-secondary space-y-0.5">
+                    <div className="font-semibold text-txt-primary text-[11px]">Itens inclusos no kit:</div>
+                    {it.kit_items.map((kItem, ki) => (
+                      <div key={ki} className="text-[11px]">
+                        • {kItem.quantity * it.quantity}x {kItem.name} {kItem.sku ? `(SKU: ${kItem.sku})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="font-bold">{formatCurrency(it.total)}</div>
             </div>

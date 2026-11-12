@@ -94,11 +94,65 @@ export default function InvoicePage() {
             </thead>
             <tbody>
               {order.items.map((it, i) => (
-                <tr key={i} className="border-b border-border">
-                  <td className="py-2 font-semibold">{it.name}</td>
-                  <td className="py-2 text-right">{it.quantity}</td>
-                  <td className="py-2 text-right">{formatCurrency(it.price)}</td>
-                  <td className="py-2 text-right font-bold">{formatCurrency(it.total)}</td>
+                <tr key={i} className="border-b border-border align-top">
+                  <td className="py-2.5 font-semibold">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>{it.name}</span>
+                      {it.is_kit && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-orange-100 text-orange-900 border border-orange-300 print:border-gray-800 print:text-black print:bg-gray-100">
+                          📦 Kit ({it.kit_items?.length || 0} itens)
+                        </span>
+                      )}
+                    </div>
+                    {!it.is_kit && it.sku && (
+                      <div className="text-[11px] font-mono text-txt-secondary font-normal mt-0.5">
+                        SKU: {it.sku}
+                      </div>
+                    )}
+                    {it.is_kit && it.sku && (
+                      <div className="text-[11px] font-mono text-txt-secondary font-normal mt-0.5">
+                        SKU Geral: {it.sku}
+                      </div>
+                    )}
+
+                    {/* Detalhamento do Kit para Separação / Expedição */}
+                    {it.is_kit && Array.isArray(it.kit_items) && it.kit_items.length > 0 && (
+                      <div className="mt-2.5 p-3 rounded-lg bg-orange-50/80 border border-orange-200 print:bg-gray-50 print:border-gray-400 text-xs font-normal">
+                        <div className="font-bold text-orange-950 print:text-black mb-1.5 flex items-center gap-1.5 uppercase text-[11px] tracking-wider">
+                          <span>📦</span> Composição do Kit para Separação:
+                        </div>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-orange-200/60 print:border-gray-300 text-[10px] text-gray-500 font-semibold uppercase">
+                              <th className="text-left py-1">Item integrante</th>
+                              <th className="text-left py-1 font-mono">SKU do Item</th>
+                              <th className="text-right py-1 w-20">Qtd un.</th>
+                              <th className="text-right py-1 w-28 font-bold">Total a separar</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-orange-100/60 print:divide-gray-200">
+                            {it.kit_items.map((kItem, ki) => {
+                              const kQty = parseInt(kItem.quantity, 10) || 1;
+                              const totalToPick = kQty * (parseInt(it.quantity, 10) || 1);
+                              return (
+                                <tr key={ki} className="text-gray-900">
+                                  <td className="py-1 font-medium">{kItem.name}</td>
+                                  <td className="py-1 font-mono font-bold text-gray-900">{kItem.sku || 'S/N'}</td>
+                                  <td className="py-1 text-right text-gray-500">{kQty}x</td>
+                                  <td className="py-1 text-right font-bold text-orange-950 print:text-black">
+                                    {totalToPick} un
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2.5 text-right">{it.quantity}</td>
+                  <td className="py-2.5 text-right">{formatCurrency(it.price)}</td>
+                  <td className="py-2.5 text-right font-bold">{formatCurrency(it.total)}</td>
                 </tr>
               ))}
             </tbody>

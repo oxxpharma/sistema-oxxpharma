@@ -770,6 +770,11 @@ export default function CheckoutPage() {
                   <img src={it.image || 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=100'} alt="" className="w-10 h-10 rounded object-cover" />
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold truncate">{it.name}</div>
+                    {it.is_kit && (
+                      <span className="inline-block text-[9px] font-bold uppercase tracking-wider bg-orange-100 text-orange-900 border border-orange-200 px-1 py-0.5 rounded">
+                        Kit ({it.kit_items?.length || 0} itens)
+                      </span>
+                    )}
                     <div className="text-txt-secondary">{it.quantity}x {formatCurrency(it.price)}</div>
                   </div>
                   <div className="font-bold">{formatCurrency(it.total)}</div>
