@@ -241,31 +241,7 @@ export default function ProductDetails() {
             </ul>
           )}
 
-          {/* Iter 68: Itens inclusos no Kit */}
-          {product.is_kit && Array.isArray(product.kit_items) && product.kit_items.length > 0 && (
-            <div className="mt-4 p-4 rounded-xl bg-orange-50/70 border border-orange-200" data-testid="kit-items-list">
-              <div className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5 mb-2.5">
-                <Package className="w-4 h-4 text-brand-main" />
-                Este Kit inclui ({product.kit_items.length} {product.kit_items.length === 1 ? 'item' : 'itens'}):
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {product.kit_items.map((kItem, ki) => (
-                  <div key={ki} className="flex items-center gap-2.5 p-2 bg-white rounded-lg border border-orange-100 text-xs shadow-2xs">
-                    {kItem.image && (
-                      <img src={kItem.image} alt={kItem.name} className="w-10 h-10 rounded-md object-cover shrink-0 border border-gray-100" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-gray-900 truncate" title={kItem.name}>{kItem.name}</div>
-                      <div className="text-txt-secondary text-[11px] flex items-center gap-2 mt-0.5">
-                        <span className="font-bold text-orange-800">{kItem.quantity} un</span>
-                        {kItem.sku && <span className="font-mono text-gray-400">SKU: {kItem.sku}</span>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          
           {/* Iter 61: descricao rica (HTML se disponivel, senao texto puro) */}
           {product.description_html ? (
             <div
@@ -390,7 +366,7 @@ export default function ProductDetails() {
               {!product.active ? 'Indisponível (Inativo)' : 'Comprar agora'}
             </Button>
           </div>
-
+			
           {/* Iter 61: Comprar pelo WhatsApp */}
           {product.active && settings?.whatsapp?.enabled && settings?.whatsapp?.number && (() => {
             const rawNum = String(settings.whatsapp.number || '').replace(/\D/g, '');
@@ -418,6 +394,32 @@ export default function ProductDetails() {
               </a>
             );
           })()}
+		  
+		  {/* Iter 68: Itens inclusos no Kit */}
+          {product.is_kit && Array.isArray(product.kit_items) && product.kit_items.length > 0 && (
+            <div className="mt-4 p-4 rounded-xl bg-orange-50/70 border border-orange-200" data-testid="kit-items-list">
+              <div className="text-xs font-bold uppercase tracking-wider text-orange-950 flex items-center gap-1.5 mb-2.5">
+                <Package className="w-4 h-4 text-brand-main" />
+                Este Kit inclui ({product.kit_items.length} {product.kit_items.length === 1 ? 'item' : 'itens'}):
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {product.kit_items.map((kItem, ki) => (
+                  <div key={ki} className="flex items-center gap-2.5 p-2 bg-white rounded-lg border border-orange-100 text-xs shadow-2xs">
+                    {kItem.image && (
+                      <img src={kItem.image} alt={kItem.name} className="w-10 h-10 rounded-md object-cover shrink-0 border border-gray-100" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-gray-900 truncate" title={kItem.name}>{kItem.name}</div>
+                      <div className="text-txt-secondary text-[11px] flex items-center gap-2 mt-0.5">
+                        <span className="font-bold text-orange-800">{kItem.quantity} un</span>
+                        {kItem.sku && <span className="font-mono text-gray-400">SKU: {kItem.sku}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Barra de Benefícios da Loja */}
           <TrustBar variant="compact" />
