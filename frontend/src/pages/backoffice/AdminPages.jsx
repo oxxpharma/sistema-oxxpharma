@@ -107,6 +107,7 @@ export function AdminPageEditor() {
   const navigate = useNavigate();
   const containerRef = useRef(null);
   const editorRef = useRef(null);
+  const initializedIdRef = useRef(null);
   const [page, setPage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -125,9 +126,10 @@ export function AdminPageEditor() {
     })();
   }, [id, navigate]);
 
-  // Inicializar GrapesJS
+  // Inicializar GrapesJS apenas uma vez para este id de página
   useEffect(() => {
-    if (!page || !containerRef.current || editorRef.current) return;
+    if (!page || !containerRef.current || initializedIdRef.current === page.page_id) return;
+    initializedIdRef.current = page.page_id;
 
     const editor = grapesjs.init({
       container: containerRef.current,
@@ -223,26 +225,36 @@ export function AdminPageEditor() {
     return () => {
       try { editor.destroy(); } catch {}
       editorRef.current = null;
+      initializedIdRef.current = null;
     };
-  }, [page]);
+  }, [id, page?.page_id]);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (publishOverride) => {
     if (!editorRef.current || !page) return;
     setSaving(true);
     try {
       const html = editorRef.current.getHtml();
       const css = editorRef.current.getCss();
       const components_json = editorRef.current.getProjectData();
+      const isPublished = publishOverride !== undefined ? publishOverride : page.published;
       const updated = await api.put(`/api/admin/pages/${id}`, {
         title: page.title,
         slug: page.slug,
         html,
         css,
         components_json,
-        published: page.published,
+        published: isPublished,
         meta_description: page.meta_description,
       });
-      setPage(updated);
+      if (updated) {
+        setPage(prev => ({
+          ...prev,
+          ...updated,
+          title: updated.title || prev.title,
+          slug: updated.slug || prev.slug,
+          published: updated.published !== undefined ? updated.published : isPublished,
+        }));
+      }
       toast.success('Página salva com sucesso!');
     } catch (e) {
       toast.error(e?.message || 'Erro ao salvar página');
@@ -263,7 +275,11 @@ export function AdminPageEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [save]);
 
-  const publishToggle = () => setPage(p => ({ ...p, published: !p.published }));
+  const publishToggle = () => {
+    const nextPublished = !page.published;
+    setPage(p => ({ ...p, published: nextPublished }));
+    save(nextPublished);
+  };
 
   const copyUrl = () => {
     const url = `${window.location.origin}/p/${page.slug}`;

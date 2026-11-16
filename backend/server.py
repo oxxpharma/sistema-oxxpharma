@@ -1019,20 +1019,53 @@ def _default_home_blocks() -> list:
 @app.get("/api/pages/{slug}")
 async def public_get_page(request: Request, slug: str):
     """Retorna o layout publicado da pagina para o tenant resolvido por Host/X-Tenant.
-    Se nao houver layout salvo, cria default minimo (apenas para slug='home')."""
+    Se nao houver layout salvo, cria default minimo (apenas para slug='home').
+    Se nao for home e nao tiver blocos em page_layouts, busca nas paginas institucionais (cms_pages)."""
     db = request.app.db
     tid = tenant_service.get_tenant(request)
+    user = await get_optional_user(request)
+    is_admin = bool(user and user.get("role") == "admin")
+
+    # 1. Se for slug 'home', prioridade para page_layouts
+    if slug == "home":
+        doc = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug, "published": True}, {"_id": 0})
+        if not doc:
+            return {"tenant_id": tid, "slug": slug, "blocks": _default_home_blocks(), "is_default": True}
+        return doc
+
+    # 2. Se for layout com blocos customizados
     doc = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug, "published": True}, {"_id": 0})
-    if not doc and slug == "home":
-        return {"tenant_id": tid, "slug": slug, "blocks": _default_home_blocks(), "is_default": True}
-    if not doc:
-        return {"tenant_id": tid, "slug": slug, "blocks": [], "is_default": True}
-    return doc
+    if doc and doc.get("blocks"):
+        return doc
+
+    # 3. Busca nas páginas CMS informativas (Sobre, Termos, Políticas, etc.)
+    # Admins podem visualizar mesmo se ainda estiver em rascunho para pré-visualização
+    cms_query = {"slug": slug} if is_admin else {"slug": slug, "published": True}
+    cms = await db.cms_pages.find_one(cms_query, {"_id": 0, "components_json": 0})
+    if cms:
+        return cms
+
+    if doc:
+        return doc
+    raise HTTPException(status_code=404, detail="Pagina nao encontrada")
 
 
 @app.get("/api/admin/pages/{slug}")
 async def admin_get_page(request: Request, slug: str, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
     db = request.app.db
+    # 1. Se for identificador de CMS (começa com 'page_') ou existir em cms_pages:
+    if slug.startswith("page_"):
+        cms = await db.cms_pages.find_one({"page_id": slug}, {"_id": 0})
+        if cms:
+            return cms
+        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
+
+    if slug != "home":
+        cms = await db.cms_pages.find_one({"slug": slug}, {"_id": 0})
+        if cms:
+            return cms
+
+    # 2. Caso contrário, busca em page_layouts (PageBuilder)
     tid = (tenant or request.headers.get("x-tenant") or tenant_service.DEFAULT_TENANT).strip().lower()
     doc = await db.page_layouts.find_one({"tenant_id": tid, "slug": slug}, {"_id": 0})
     if not doc:
@@ -1051,6 +1084,28 @@ async def admin_get_page(request: Request, slug: str, tenant: Optional[str] = No
 async def admin_save_page(request: Request, slug: str, tenant: Optional[str] = None, user: dict = Depends(require_admin())):
     db = request.app.db
     body = await request.json() or {}
+
+    # 1. Se for CMS (começa com 'page_' ou tem campos típicos de CMS: html, components_json, title)
+    if slug.startswith("page_") or "html" in body or "components_json" in body:
+        target = await db.cms_pages.find_one({"page_id": slug})
+        if not target and not slug.startswith("page_"):
+            target = await db.cms_pages.find_one({"slug": slug})
+        if target:
+            page_id = target["page_id"]
+            update = {k: v for k, v in body.items() if k in {"title", "html", "css", "components_json", "published", "meta_description"}}
+            if body.get("slug"):
+                new_slug = body["slug"].strip().lower().replace(" ", "-")
+                if new_slug != target.get("slug"):
+                    if await db.cms_pages.find_one({"slug": new_slug, "page_id": {"$ne": page_id}}):
+                        raise HTTPException(status_code=400, detail="slug ja existe")
+                    update["slug"] = new_slug
+            update["updated_at"] = now_iso()
+            await db.cms_pages.update_one({"page_id": page_id}, {"$set": update})
+            return await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
+        elif slug.startswith("page_"):
+            raise HTTPException(status_code=404, detail="Pagina nao encontrada")
+
+    # 2. PageBuilder (page_layouts)
     tid = (tenant or request.headers.get("x-tenant") or tenant_service.DEFAULT_TENANT).strip().lower()
     blocks = body.get("blocks") or []
     # Sanitiza blocos
@@ -10035,31 +10090,13 @@ async def admin_optimize_product_images(request: Request, user: dict = Depends(r
     }
 
 
-# ==================== CMS PAGES (Editor visual - legacy) ====================
-
-@app.get("/api/pages/{slug}")
-async def public_get_cms_page(request: Request, slug: str):
-    db = request.app.db
-    p = await db.cms_pages.find_one({"slug": slug, "published": True}, {"_id": 0, "components_json": 0})
-    if not p:
-        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
-    return p
-
+# ==================== CMS PAGES (Editor visual) ====================
 
 @app.get("/api/admin/pages")
 async def admin_list_pages(request: Request, user: dict = Depends(require_admin())):
     db = request.app.db
     pages = await db.cms_pages.find({}, {"_id": 0, "html": 0, "css": 0, "components_json": 0}).sort("updated_at", -1).to_list(200)
     return {"pages": pages}
-
-
-@app.get("/api/admin/pages/{page_id}")
-async def admin_get_cms_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
-    db = request.app.db
-    p = await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
-    if not p:
-        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
-    return p
 
 
 @app.post("/api/admin/pages")
@@ -10084,26 +10121,6 @@ async def admin_create_page(request: Request, user: dict = Depends(require_admin
         "created_by": user["user_id"],
     }
     await db.cms_pages.insert_one(doc)
-    return await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
-
-
-@app.put("/api/admin/pages/{page_id}")
-async def admin_update_page(request: Request, page_id: str, user: dict = Depends(require_admin())):
-    body = await request.json() or {}
-    db = request.app.db
-    target = await db.cms_pages.find_one({"page_id": page_id})
-    if not target:
-        raise HTTPException(status_code=404, detail="Pagina nao encontrada")
-    update = {k: v for k, v in body.items() if k in {"title", "html", "css", "components_json", "published", "meta_description"}}
-    # Slug pode mudar mas valida unicidade
-    if body.get("slug"):
-        new_slug = body["slug"].strip().lower().replace(" ", "-")
-        if new_slug != target.get("slug"):
-            if await db.cms_pages.find_one({"slug": new_slug, "page_id": {"$ne": page_id}}):
-                raise HTTPException(status_code=400, detail="slug ja existe")
-            update["slug"] = new_slug
-    update["updated_at"] = now_iso()
-    await db.cms_pages.update_one({"page_id": page_id}, {"$set": update})
     return await db.cms_pages.find_one({"page_id": page_id}, {"_id": 0})
 
 
