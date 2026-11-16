@@ -3,12 +3,13 @@ import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { optimizeImageFile } from '../../lib/imageOptimizer';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink, Monitor, Smartphone } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink, Monitor, Smartphone, Share2, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
 const TABS = [
   { key: 'identity', label: 'Identidade', icon: Palette },
+  { key: 'social_share', label: 'Compartilhamento (WhatsApp)', icon: Share2 },
   { key: 'navigation', label: 'Menu Superior (Topbar)', icon: Layout },
   { key: 'logo_sizes', label: 'Logo por local', icon: ImageIcon },
   { key: 'hero', label: 'Banner principal', icon: Layout },
@@ -120,13 +121,26 @@ export default function AdminAppearance() {
               reader.readAsDataURL(file);
             });
             dataUrl = await resizeToSquare(dataUrl, 64);
+          } else if (key === 'share_image_url') {
+            const opt = await optimizeImageFile(file, { maxWidth: 1200, maxHeight: 630, quality: 0.90 });
+            dataUrl = opt.dataUrl;
           } else {
             const opt = await optimizeImageFile(file, { maxWidth: 1920, maxHeight: 1200, quality: 0.82 });
             dataUrl = opt.dataUrl;
           }
-          const r = await api.post('/api/admin/upload-image', { data: dataUrl, name: file.name });
+          const r = await api.post('/api/admin/upload-image', {
+            data: dataUrl,
+            name: file.name,
+            output_format: key === 'share_image_url' ? 'PNG' : 'WEBP'
+          });
           if (!returnUrl && key) set(key, r.url);
-          toast.success(key === 'favicon_url' ? 'Favicon enviado (redimensionado para 64×64).' : 'Imagem enviada e otimizada (WebP)');
+          toast.success(
+            key === 'favicon_url'
+              ? 'Favicon enviado (redimensionado para 64×64).'
+              : key === 'share_image_url'
+              ? 'Imagem de compartilhamento enviada com sucesso!'
+              : 'Imagem enviada e otimizada (WebP)'
+          );
           resolve(r.url);
         } catch (e) { toast.error(e?.message); resolve(null); }
       };
@@ -262,6 +276,31 @@ export default function AdminAppearance() {
             <ImageUpload label="Logo (header claro)" url={s.logo_url} onPick={() => uploadImage('logo_url')} onClear={() => set('logo_url', '')} testId="logo-upload" />
             <ImageUpload label="Logo escura (opcional)" url={s.logo_dark_url} onPick={() => uploadImage('logo_dark_url')} onClear={() => set('logo_dark_url', '')} />
             <ImageUpload label="Favicon (32×32)" url={s.favicon_url} onPick={() => uploadImage('favicon_url')} onClear={() => set('favicon_url', '')} />
+            <div className="pt-3 border-t border-border">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold flex items-center gap-1.5 text-txt-primary">
+                  <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                  Imagem de compartilhamento (WhatsApp / Redes Sociais)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTab('social_share')}
+                  className="text-xs font-semibold text-brand-main hover:underline flex items-center gap-1"
+                >
+                  Abrir editor completo & preview →
+                </button>
+              </div>
+              <ImageUpload
+                label=""
+                url={s.share_image_url}
+                onPick={() => uploadImage('share_image_url')}
+                onClear={() => set('share_image_url', '')}
+                testId="share-image-upload"
+              />
+              <p className="text-[11px] text-txt-secondary mt-1">
+                Aparece ao enviar o link da loja no WhatsApp. Recomendado: 1200×630 px (PNG/JPG, máx 300KB).
+              </p>
+            </div>
           </Card>
           <Card title="Cores da marca">
             <div className="grid grid-cols-2 gap-3">
@@ -275,6 +314,135 @@ export default function AdminAppearance() {
             <Field label="YouTube (URL)" value={s.social_youtube} onChange={(v) => set('social_youtube', v)} />
             <Field label="WhatsApp (URL ou número)" value={s.social_whatsapp} onChange={(v) => set('social_whatsapp', v)} placeholder="https://wa.me/5511999999999" />
           </Card>
+        </div>
+      )}
+
+      {tab === 'social_share' && (
+        <div className="space-y-6 max-w-5xl">
+          <div className="bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 rounded-2xl p-5 flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Share2 className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-heading font-bold text-lg text-txt-primary flex items-center gap-2">
+                Compartilhamento & WhatsApp (Redes Sociais / Open Graph)
+              </h2>
+              <p className="text-xs text-txt-secondary mt-1 leading-relaxed">
+                Personalize exatamente como a sua loja aparece quando alguém compartilha o link (<b>https://oxxpharma.com.br/</b>) no <b>WhatsApp</b>, <b>Facebook</b>, <b>Instagram Direct</b>, <b>Telegram</b> ou <b>Twitter</b>.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Coluna da esquerda: Campos de Edição */}
+            <div className="lg:col-span-7 space-y-4">
+              <Card title="Imagem de Compartilhamento (WhatsApp)">
+                <div className="space-y-3">
+                  <p className="text-xs text-txt-secondary">
+                    Esta imagem aparece em destaque no card de visualização do WhatsApp. Se nenhuma imagem personalizada for enviada, o sistema gera automaticamente a logo oficial centralizada com fundo padrão.
+                  </p>
+
+                  <ImageUpload
+                    label="Foto / Imagem do Link"
+                    url={s.share_image_url}
+                    onPick={() => uploadImage('share_image_url')}
+                    onClear={() => set('share_image_url', '')}
+                    testId="share-image-upload-main"
+                  />
+
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                    {s.share_image_url && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => set('share_image_url', '')}
+                        className="text-xs"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> Restaurar logo padrão
+                      </Button>
+                    )}
+                    <a
+                      href="/api/site-settings/share-image.png"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-txt-secondary hover:text-brand-main flex items-center gap-1 font-medium underline"
+                    >
+                      <ExternalLink className="w-3 h-3" /> Ver link público da imagem atual
+                    </a>
+                  </div>
+
+                  <div className="bg-bg-secondary/60 rounded-xl p-3 text-[11px] text-txt-secondary space-y-1">
+                    <p className="font-semibold text-txt-primary">Recomendações técnicas para o WhatsApp:</p>
+                    <p>• Dimensão recomendada: <b>1200 × 630 pixels</b> (horizontal 1.91:1) ou <b>600 × 600 pixels</b> (quadrada).</p>
+                    <p>• Tamanho do arquivo: Menor que <b>300 KB</b> (o WhatsApp descarta fotos muito pesadas).</p>
+                    <p>• Formatos suportados: <b>PNG</b> ou <b>JPEG</b>.</p>
+                  </div>
+                </div>
+              </Card>
+
+              <Card title="Textos do Card (Título e Descrição)">
+                <Field
+                  label="Título de Compartilhamento"
+                  value={s.share_title}
+                  onChange={(v) => set('share_title', v)}
+                  placeholder={s.store_name ? `${s.store_name} — Farmácia Magistral` : "OxxPharma — Farmácia Magistral"}
+                  hint="Aparece em negrito logo abaixo da imagem no balão do WhatsApp."
+                />
+
+                <Field
+                  label="Descrição / Frase de destaque"
+                  value={s.share_description}
+                  onChange={(v) => set('share_description', v)}
+                  multiline={true}
+                  rows={3}
+                  placeholder={s.tagline || "Produtos com alta tecnologia e inovação em saúde personalizada. Conheça nossa linha e benefícios exclusivos."}
+                  hint="Texto de 1 a 2 linhas que resume sua loja para o destinatário."
+                />
+              </Card>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-950 space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-amber-900">Como funciona o cache do WhatsApp?</p>
+                    <p className="mt-1 leading-relaxed text-amber-900/90">
+                      O WhatsApp e o Facebook guardam a prévia do link em cache nos servidores da Meta e na memória do aplicativo de cada usuário.
+                    </p>
+                  </div>
+                </div>
+                <div className="pl-6 space-y-1.5 text-amber-900/90 leading-relaxed text-[11px]">
+                  <p>
+                    1. <b>Para testar agora mesmo:</b> Adicione um código no fim do link ao enviar no WhatsApp, por exemplo: <code className="bg-amber-200/60 font-bold px-1.5 py-0.5 rounded text-amber-950">https://oxxpharma.com.br/?v=1</code> (o WhatsApp baixa a imagem nova na hora!).
+                  </p>
+                  <p>
+                    2. <b>Para atualizar o cache global da Meta:</b> Cole o link na ferramenta oficial do Facebook Debugger e clique em <i>"Depurar / Buscar novas informações"</i>:
+                  </p>
+                </div>
+                <div className="pl-6 pt-1">
+                  <a
+                    href="https://developers.facebook.com/tools/debug/?q=https%3A%2F%2Foxxpharma.com.br%2F"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition"
+                  >
+                    Abrir Facebook Sharing Debugger <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Coluna da direita: Mockup visual do WhatsApp ao vivo */}
+            <div className="lg:col-span-5 sticky top-6 space-y-4">
+              <WhatsAppPreviewMockup
+                title={s.share_title}
+                description={s.share_description}
+                imageUrl={s.share_image_url}
+                storeName={s.store_name}
+                tagline={s.tagline}
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -1394,6 +1562,110 @@ function HeroSlidesEditor({ slides, onChange, uploadImage }) {
         </div>
       ))}
       <Button variant="outline" size="sm" onClick={add} data-testid="hero-add"><Plus className="w-4 h-4" /> Adicionar slide</Button>
+    </div>
+  );
+}
+
+function WhatsAppPreviewMockup({ title, description, imageUrl, storeName, tagline }) {
+  const [theme, setTheme] = useState('dark');
+  const displayTitle = (title || storeName || 'OxxPharma').trim();
+  const displayDesc = (description || tagline || 'Produtos com alta tecnologia e inovação em saúde personalizada. Conheça nossa linha e benefícios exclusivos.').trim();
+  const displayImage = imageUrl || '/api/site-settings/share-image.png';
+  const isDark = theme === 'dark';
+
+  return (
+    <div className="border border-border rounded-2xl overflow-hidden shadow-sm bg-white">
+      {/* Header do Mockup */}
+      <div className="px-4 py-3 bg-bg-secondary/60 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Share2 className="w-4 h-4 text-emerald-600" />
+          <span className="text-xs font-bold uppercase tracking-wider text-txt-secondary">
+            Prévia no WhatsApp
+          </span>
+        </div>
+        <div className="flex items-center gap-1 bg-white border border-border rounded-lg p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setTheme('dark')}
+            className={`px-2.5 py-1 rounded font-medium transition ${isDark ? 'bg-zinc-800 text-white shadow-2xs' : 'text-txt-secondary hover:text-txt-primary'}`}
+          >
+            Escuro
+          </button>
+          <button
+            type="button"
+            onClick={() => setTheme('light')}
+            className={`px-2.5 py-1 rounded font-medium transition ${!isDark ? 'bg-emerald-600 text-white shadow-2xs' : 'text-txt-secondary hover:text-txt-primary'}`}
+          >
+            Claro
+          </button>
+        </div>
+      </div>
+
+      {/* Janela de Chat do WhatsApp */}
+      <div
+        className={`p-4 sm:p-5 transition-colors ${isDark ? 'bg-[#0b141a]' : 'bg-[#efeae2]'}`}
+        style={{
+          backgroundImage: isDark
+            ? 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.03) 0%, transparent 80%)'
+            : 'radial-gradient(circle at 50% 50%, rgba(0,0,0,0.03) 0%, transparent 80%)',
+        }}
+      >
+        {/* Balão de mensagem do WhatsApp */}
+        <div className="max-w-sm mx-auto">
+          <div
+            className={`rounded-2xl p-2 shadow-md transition-colors ${
+              isDark ? 'bg-[#202c33] text-zinc-100' : 'bg-[#ffffff] text-zinc-900'
+            }`}
+          >
+            {/* Card de Link Preview */}
+            <div
+              className={`rounded-xl overflow-hidden border transition-colors ${
+                isDark ? 'bg-[#182229] border-zinc-700/60' : 'bg-[#f0f2f5] border-zinc-200'
+              }`}
+            >
+              {/* Imagem do preview */}
+              <div className="relative aspect-[1.91/1] w-full bg-white flex items-center justify-center overflow-hidden border-b border-border/40">
+                <img
+                  src={displayImage}
+                  alt={displayTitle}
+                  className="w-full h-full object-contain p-2"
+                  onError={(e) => {
+                    e.currentTarget.src = '/logo.png';
+                  }}
+                />
+              </div>
+
+              {/* Textos do preview */}
+              <div className="p-3 space-y-1">
+                <h4 className={`text-sm font-bold line-clamp-1 ${isDark ? 'text-zinc-100' : 'text-zinc-900'}`}>
+                  {displayTitle}
+                </h4>
+                <p className={`text-xs line-clamp-2 leading-relaxed ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                  {displayDesc}
+                </p>
+                <div className={`text-[11px] pt-0.5 truncate ${isDark ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                  oxxpharma.com.br
+                </div>
+              </div>
+            </div>
+
+            {/* Texto do Link dentro do balão */}
+            <div className="pt-2 px-1 pb-0.5 flex items-baseline justify-between gap-2">
+              <span className={`text-xs underline font-medium truncate ${isDark ? 'text-[#53bdeb]' : 'text-[#027eb5]'}`}>
+                https://oxxpharma.com.br/
+              </span>
+              <span className={`text-[10px] shrink-0 font-mono ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                16:21 ✓✓
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Rodapé informativo */}
+      <div className="p-3 bg-bg-secondary/40 border-t border-border text-xs text-txt-secondary flex items-center justify-between gap-3">
+        <span>Simulação fiel de como os contatos verão no WhatsApp.</span>
+      </div>
     </div>
   );
 }

@@ -9699,6 +9699,9 @@ DEFAULT_SITE_SETTINGS = {
     "logo_url": "",
     "logo_dark_url": "",
     "favicon_url": "",
+    "share_image_url": "",
+    "share_title": "OxxPharma — Farmácia Magistral",
+    "share_description": "Produtos com alta tecnologia e inovação em saúde personalizada. Conheça nossa linha e benefícios exclusivos.",
     "brand_primary_color": "#E8731A",
     "brand_secondary_color": "#1F2937",
     "hero_title": "Saúde e bem-estar em sua casa",
@@ -9919,6 +9922,169 @@ async def public_site_logo_dark(request: Request):
     raise HTTPException(status_code=404, detail="Logo escura não configurada")
 
 
+@app.get("/api/site-settings/share-image")
+@app.get("/api/site-settings/share-image.png")
+@app.get("/api/site-settings/share-image.jpg")
+async def public_site_share_image(request: Request):
+    """Retorna os bytes da imagem de compartilhamento para WhatsApp e redes sociais.
+    Garante formato binário compatível (PNG/JPEG) para crawlers da Meta, WhatsApp, Telegram, Twitter."""
+    import base64
+    import io
+    from PIL import Image
+
+    db = request.app.db
+    tid = tenant_service.get_tenant(request)
+    s = await _get_site_settings(db, tid)
+    img_data = (s.get("share_image_url") or "").strip()
+
+    if img_data.startswith("data:image/"):
+        try:
+            header, b64 = img_data.split(",", 1)
+            raw_bytes = base64.b64decode(b64)
+            try:
+                im = Image.open(io.BytesIO(raw_bytes))
+                buf = io.BytesIO()
+                if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+                    im.save(buf, format="PNG", optimize=True)
+                    media_type = "image/png"
+                else:
+                    im.convert("RGB").save(buf, format="JPEG", quality=90, optimize=True)
+                    media_type = "image/jpeg"
+                return Response(
+                    content=buf.getvalue(),
+                    media_type=media_type,
+                    headers={"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400"}
+                )
+            except Exception:
+                media_type = "image/png"
+                if ";" in header and ":" in header:
+                    media_type = header.split(":")[1].split(";")[0]
+                return Response(
+                    content=raw_bytes,
+                    media_type=media_type,
+                    headers={"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400"}
+                )
+        except Exception as e:
+            logger.warning(f"Erro ao decodificar share_image: {e}")
+
+    if img_data.startswith(("http://", "https://")):
+        return RedirectResponse(url=img_data, status_code=302)
+
+    # Fallback para arquivos locais
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(curr_dir)
+    for fallback_path in [
+        os.path.join(parent_dir, "frontend", "public", "share-image.png"),
+        os.path.join(parent_dir, "frontend", "build", "share-image.png"),
+        "/var/www/oxxpharma/frontend/build/share-image.png",
+        os.path.join(curr_dir, "uploads", "branding", "share-image.png"),
+        os.path.join(parent_dir, "frontend", "public", "logo.png"),
+        os.path.join(parent_dir, "frontend", "build", "logo.png"),
+    ]:
+        if os.path.isfile(fallback_path):
+            with open(fallback_path, "rb") as f:
+                return Response(
+                    content=f.read(),
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=3600"}
+                )
+
+    raise HTTPException(status_code=404, detail="Imagem de compartilhamento não configurada")
+
+
+def _sync_share_meta_to_disk(body: dict):
+    """Sincroniza a imagem de compartilhamento e meta tags diretamente no build estatico
+    para que crawlers que nao executam JS (como WhatsApp) leiam imediatamente."""
+    try:
+        import base64
+        import io
+        from PIL import Image
+
+        curr_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(curr_dir)
+        share_url = (body.get("share_image_url") or "").strip()
+        share_title = (body.get("share_title") or body.get("store_name") or "OxxPharma").strip()
+        share_desc = (body.get("share_description") or body.get("tagline") or "").strip()
+
+        img_bytes = None
+        if share_url.startswith("data:image/"):
+            try:
+                _, b64 = share_url.split(",", 1)
+                raw = base64.b64decode(b64)
+                im = Image.open(io.BytesIO(raw))
+                buf = io.BytesIO()
+                im.convert("RGB").save(buf, format="PNG", optimize=True)
+                img_bytes = buf.getvalue()
+            except Exception as e:
+                logger.warning(f"Erro ao processar imagem para disco: {e}")
+
+        # Salva share-image.png nos caminhos possiveis
+        if img_bytes:
+            paths = [
+                os.path.join(parent_dir, "frontend", "public", "share-image.png"),
+                os.path.join(parent_dir, "frontend", "build", "share-image.png"),
+                "/var/www/oxxpharma/frontend/build/share-image.png",
+            ]
+            for p in paths:
+                try:
+                    os.makedirs(os.path.dirname(p), exist_ok=True)
+                    with open(p, "wb") as f:
+                        f.write(img_bytes)
+                except Exception:
+                    pass
+
+        # Atualiza meta tags no frontend/build/index.html se existir
+        for html_path in [
+            os.path.join(parent_dir, "frontend", "build", "index.html"),
+            "/var/www/oxxpharma/frontend/build/index.html"
+        ]:
+            if os.path.isfile(html_path):
+                try:
+                    with open(html_path, "r", encoding="utf-8") as f:
+                        html = f.read()
+
+                    if share_title:
+                        html = re.sub(
+                            r'<meta\s+property=["\']og:title["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                            f'<meta property="og:title" content="{share_title}" />',
+                            html,
+                            flags=re.IGNORECASE
+                        )
+                        html = re.sub(
+                            r'<meta\s+name=["\']twitter:title["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                            f'<meta name="twitter:title" content="{share_title}" />',
+                            html,
+                            flags=re.IGNORECASE
+                        )
+
+                    if share_desc:
+                        html = re.sub(
+                            r'<meta\s+property=["\']og:description["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                            f'<meta property="og:description" content="{share_desc}" />',
+                            html,
+                            flags=re.IGNORECASE
+                        )
+                        html = re.sub(
+                            r'<meta\s+name=["\']twitter:description["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                            f'<meta name="twitter:description" content="{share_desc}" />',
+                            html,
+                            flags=re.IGNORECASE
+                        )
+                        html = re.sub(
+                            r'<meta\s+name=["\']description["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                            f'<meta name="description" content="{share_desc}" />',
+                            html,
+                            flags=re.IGNORECASE
+                        )
+
+                    with open(html_path, "w", encoding="utf-8") as f:
+                        f.write(html)
+                except Exception as e:
+                    logger.warning(f"Erro ao atualizar meta tags em {html_path}: {e}")
+    except Exception as e:
+        logger.warning(f"Erro em _sync_share_meta_to_disk: {e}")
+
+
 @app.get("/api/admin/site-settings")
 async def admin_get_site_settings(request: Request, user: dict = Depends(require_admin())):
     """Iter 44: GET admin retorna settings da marca selecionada (via X-Tenant ou ?tenant=).
@@ -9948,12 +10114,13 @@ async def admin_site_settings(request: Request, user: dict = Depends(require_sup
             if legacy:
                 await db.settings.update_one({"_id": doc_id}, {"$set": legacy}, upsert=True)
     await db.settings.update_one({"_id": doc_id}, {"$set": body}, upsert=True)
+    _sync_share_meta_to_disk(body)
     return await _get_site_settings(db, tid)
 
 
 @app.post("/api/admin/upload-image")
 async def admin_upload_image(request: Request, user: dict = Depends(require_admin())):
-    """Upload de imagem (base64) com otimização automática para WebP de alta performance."""
+    """Upload de imagem (base64) com otimização automática para WebP ou PNG de alta performance."""
     body = await request.json() or {}
     data_url = body.get("data") or ""
     if not data_url.startswith("data:"):
@@ -9962,6 +10129,9 @@ async def admin_upload_image(request: Request, user: dict = Depends(require_admi
     max_w = int(body.get("max_width") or 1920)
     max_h = int(body.get("max_height") or 1200)
     quality = int(body.get("quality") or 82)
+    output_format = (body.get("output_format") or "WEBP").upper()
+    if output_format not in ("WEBP", "PNG", "JPEG"):
+        output_format = "WEBP"
 
     try:
         optimized_url, stats = image_optimizer.optimize_image_data_url(
@@ -9969,7 +10139,7 @@ async def admin_upload_image(request: Request, user: dict = Depends(require_admi
             max_width=max_w,
             max_height=max_h,
             quality=quality,
-            output_format="WEBP"
+            output_format=output_format
         )
     except Exception as e:
         logger.warning(f"[upload-image] falha ao otimizar imagem: {e}")

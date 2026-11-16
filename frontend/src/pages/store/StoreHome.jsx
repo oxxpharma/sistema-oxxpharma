@@ -7,6 +7,7 @@ import DynamicBlocks from '../../components/store/DynamicBlocks';
 import { getIcon } from '../../lib/iconLibrary';
 import { Loader2, Pill, Baby, Heart, Sparkles, Droplets, Leaf, LayoutGrid } from 'lucide-react';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
+import SEOHead from '../../components/SEOHead';
 
 const ICONS = {
   'Medicamentos': Pill,
@@ -91,6 +92,12 @@ export default function StoreHome() {
 
   return (
     <div data-testid="store-home">
+      <SEOHead
+        title={settings?.share_title || settings?.store_name || "OxxPharma"}
+        description={settings?.share_description || settings?.tagline || "Produtos com alta tecnologia e inovação em saúde personalizada."}
+        canonical="/"
+        image={settings?.share_image_url || `${typeof window !== 'undefined' ? window.location.origin : 'https://oxxpharma.com.br'}/api/site-settings/share-image.png`}
+      />
       {/* 1. Layout dinâmico do Page Builder (renderização instantânea via cache local ou API) */}
       {pageLayout && pageLayout.blocks?.length > 0 ? (
         <div className="w-full">
