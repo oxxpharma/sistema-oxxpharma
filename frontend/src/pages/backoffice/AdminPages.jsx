@@ -139,15 +139,9 @@ export function AdminPageEditor() {
         [gjsPresetWebpage]: {
           modalImportTitle: 'Importar HTML',
           modalImportLabel: 'Cole seu código HTML/CSS aqui',
-          blocks: {
-            'link-block': false,
-            'quote': false,
-            'text-basic': false,
-          },
         },
         [gjsBlocksBasic]: {
           flexGrid: true,
-          blocks: ['column1', 'column2', 'column3', 'text', 'link', 'image', 'video'],
         },
       },
       canvas: {
@@ -190,8 +184,20 @@ export function AdminPageEditor() {
 
     // Carregar conteúdo pré-existente
     if (page.components_json) {
-      try { editor.loadProjectData(page.components_json); }
-      catch { editor.setComponents(page.html || ''); editor.setStyle(page.css || ''); }
+      try {
+        const pData = typeof page.components_json === 'string'
+          ? JSON.parse(page.components_json)
+          : page.components_json;
+        if (pData && (pData.pages || pData.components)) {
+          editor.loadProjectData(pData);
+        } else {
+          editor.setComponents(page.html || '');
+          editor.setStyle(page.css || '');
+        }
+      } catch {
+        editor.setComponents(page.html || '');
+        editor.setStyle(page.css || '');
+      }
     } else {
       editor.setComponents(page.html || '<div class="cms-container" style="max-width: 1100px; margin: 0 auto; padding: 40px 20px;"><h1 style="font-family: \'Anona\', sans-serif; font-size: 38px; font-weight: 800; color: #1E293B; margin-bottom: 16px;">Nova página informativa</h1><p style="font-family: \'IBM Plex Sans\', sans-serif; font-size: 16px; color: #64748B; line-height: 1.8;">Utilize a barra lateral direita para arrastar novos blocos de conteúdo, títulos, colunas, imagens e botões.</p></div>');
       editor.setStyle(page.css || '');
@@ -199,18 +205,17 @@ export function AdminPageEditor() {
 
     // Injeta CSS com as fontes no canvas iframe
     editor.on('load', () => {
-      const doc = editor.Canvas.getDocument();
-      if (doc && doc.head) {
-        const style = doc.createElement('style');
-        style.setAttribute('data-oxx-cms-fonts', 'true');
-        style.innerHTML = CMS_FONTS_CSS;
-        doc.head.appendChild(style);
-      }
-
-      // Abre os blocos por padrão
       try {
-        editor.runCommand('open-blocks');
-      } catch {}
+        const doc = editor.Canvas.getDocument();
+        if (doc && doc.head) {
+          const style = doc.createElement('style');
+          style.setAttribute('data-oxx-cms-fonts', 'true');
+          style.innerHTML = CMS_FONTS_CSS;
+          doc.head.appendChild(style);
+        }
+      } catch (err) {
+        console.warn('Erro ao injetar fontes no canvas:', err);
+      }
     });
 
     editorRef.current = editor;
@@ -272,10 +277,22 @@ export function AdminPageEditor() {
     if (!editorRef.current) return;
     setActiveTab(viewName);
     try {
-      if (viewName === 'blocks') editorRef.current.runCommand('open-blocks');
-      else if (viewName === 'styles') editorRef.current.runCommand('open-sm');
-      else if (viewName === 'layers') editorRef.current.runCommand('open-layers');
-      else if (viewName === 'traits') editorRef.current.runCommand('open-traits');
+      const pnm = editorRef.current.Panels;
+      const cmdMap = {
+        blocks: 'open-blocks',
+        styles: 'open-sm',
+        layers: 'open-layers',
+        traits: 'open-tm',
+      };
+      const cmd = cmdMap[viewName];
+      if (cmd) {
+        const btn = pnm.getButton('views', cmd);
+        if (btn) {
+          btn.set('active', true);
+        } else {
+          editorRef.current.runCommand(cmd);
+        }
+      }
     } catch (e) {}
   };
 
