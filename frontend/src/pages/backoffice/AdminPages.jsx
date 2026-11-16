@@ -233,18 +233,28 @@ export function AdminPageEditor() {
     if (!editorRef.current || !page) return;
     setSaving(true);
     try {
-      const html = editorRef.current.getHtml();
-      const css = editorRef.current.getCss();
-      const components_json = editorRef.current.getProjectData();
-      const isPublished = publishOverride !== undefined ? publishOverride : page.published;
+      const html = editorRef.current.getHtml() || '';
+      const css = editorRef.current.getCss() || '';
+      let components_json = null;
+      try {
+        components_json = editorRef.current.getProjectData();
+      } catch (err) {
+        console.warn('Erro ao obter projectData:', err);
+      }
+
+      // Garante que isPublished seja estritamente booleano (evita capturar o evento de clique do React)
+      const isPublished = typeof publishOverride === 'boolean'
+        ? publishOverride
+        : Boolean(page.published);
+
       const updated = await api.put(`/api/admin/pages/${id}`, {
-        title: page.title,
-        slug: page.slug,
+        title: page.title || '',
+        slug: page.slug || '',
         html,
         css,
         components_json,
         published: isPublished,
-        meta_description: page.meta_description,
+        meta_description: page.meta_description || '',
       });
       if (updated) {
         setPage(prev => ({
@@ -434,7 +444,7 @@ export function AdminPageEditor() {
           </a>
 
           {/* Salvar */}
-          <Button onClick={save} disabled={saving} data-testid="save-page-btn" className="shadow-xs">
+          <Button onClick={() => save()} disabled={saving} data-testid="save-page-btn" className="shadow-xs">
             {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
             Salvar
           </Button>
