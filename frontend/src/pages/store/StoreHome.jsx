@@ -96,7 +96,7 @@ export default function StoreHome() {
         title={settings?.share_title || settings?.store_name || "OxxPharma"}
         description={settings?.share_description || settings?.tagline || "Produtos com alta tecnologia e inovação em saúde personalizada."}
         canonical="/"
-        image={settings?.share_image_url || `${typeof window !== 'undefined' ? window.location.origin : 'https://oxxpharma.com.br'}/api/site-settings/share-image.png`}
+        image={settings?.share_image_url || `${typeof window !== 'undefined' ? window.location.origin : 'https://oxxpharma.com.br'}/api/site-settings/share-image`}
       />
       {/* 1. Layout dinâmico do Page Builder (renderização instantânea via cache local ou API) */}
       {pageLayout && pageLayout.blocks?.length > 0 ? (

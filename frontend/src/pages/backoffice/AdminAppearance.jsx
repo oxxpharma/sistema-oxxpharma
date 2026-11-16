@@ -363,7 +363,7 @@ export default function AdminAppearance() {
                       </Button>
                     )}
                     <a
-                      href="/api/site-settings/share-image.png"
+                      href="/api/site-settings/share-image"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-txt-secondary hover:text-brand-main flex items-center gap-1 font-medium underline"
@@ -1570,7 +1570,7 @@ function WhatsAppPreviewMockup({ title, description, imageUrl, storeName, taglin
   const [theme, setTheme] = useState('dark');
   const displayTitle = (title || storeName || 'OxxPharma').trim();
   const displayDesc = (description || tagline || 'Produtos com alta tecnologia e inovação em saúde personalizada. Conheça nossa linha e benefícios exclusivos.').trim();
-  const displayImage = imageUrl || '/api/site-settings/share-image.png';
+  const displayImage = imageUrl || '/api/site-settings/share-image';
   const isDark = theme === 'dark';
 
   return (

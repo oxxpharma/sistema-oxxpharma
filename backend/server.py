@@ -10018,12 +10018,15 @@ def _sync_share_meta_to_disk(body: dict):
             except Exception as e:
                 logger.warning(f"Erro ao processar imagem para disco: {e}")
 
-        # Salva share-image.png nos caminhos possiveis
+        # Salva share-image.png nos caminhos possiveis (incluindo api/site-settings para nginx static fallback)
         if img_bytes:
             paths = [
                 os.path.join(parent_dir, "frontend", "public", "share-image.png"),
                 os.path.join(parent_dir, "frontend", "build", "share-image.png"),
                 "/var/www/oxxpharma/frontend/build/share-image.png",
+                os.path.join(parent_dir, "frontend", "public", "api", "site-settings", "share-image.png"),
+                os.path.join(parent_dir, "frontend", "build", "api", "site-settings", "share-image.png"),
+                "/var/www/oxxpharma/frontend/build/api/site-settings/share-image.png",
             ]
             for p in paths:
                 try:
@@ -10042,6 +10045,26 @@ def _sync_share_meta_to_disk(body: dict):
                 try:
                     with open(html_path, "r", encoding="utf-8") as f:
                         html = f.read()
+
+                    # Garante que og:image aponte para rota sem extensao .png para evitar bloqueio por regex do nginx
+                    html = re.sub(
+                        r'<meta\s+property=["\']og:image["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                        '<meta property="og:image" content="https://oxxpharma.com.br/api/site-settings/share-image" />',
+                        html,
+                        flags=re.IGNORECASE
+                    )
+                    html = re.sub(
+                        r'<meta\s+property=["\']og:image:secure_url["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                        '<meta property="og:image:secure_url" content="https://oxxpharma.com.br/api/site-settings/share-image" />',
+                        html,
+                        flags=re.IGNORECASE
+                    )
+                    html = re.sub(
+                        r'<meta\s+name=["\']twitter:image["\']\s+content=["\'][^"\']*["\']\s*/?>',
+                        '<meta name="twitter:image" content="https://oxxpharma.com.br/api/site-settings/share-image" />',
+                        html,
+                        flags=re.IGNORECASE
+                    )
 
                     if share_title:
                         html = re.sub(
