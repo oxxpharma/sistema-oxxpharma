@@ -38,6 +38,7 @@ export function CartProvider({ children }) {
           image: (product.images || [])[0] || null,
           total,
           stock: product.stock,
+          manage_stock: product.manage_stock !== false,
         });
       } catch {}
     }

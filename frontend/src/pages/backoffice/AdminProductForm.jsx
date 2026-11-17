@@ -12,6 +12,7 @@ import { optimizeImageFile } from '../../lib/imageOptimizer';
 const emptyForm = {
   name: '', description: '', description_html: '', price: 0, discount_price: null,
   category: '', categories: [], subcategory: '', subcategories: [], images: [], stock: 0,
+  manage_stock: true,
   active: true, featured: false, brand: '', points_value: 0,
   weight: null, length_cm: null, width_cm: null, height_cm: null,
   pricing_tiers: [],
@@ -87,7 +88,9 @@ export default function AdminProductForm() {
               subcategory: prod.subcategory || '',
               subcategories: Array.isArray(prod.subcategories) ? prod.subcategories : [],
               images: prod.images || [],
-              stock: prod.stock, active: prod.active, featured: prod.featured,
+              stock: prod.stock,
+              manage_stock: prod.manage_stock !== false,
+              active: prod.active, featured: prod.featured,
               brand: prod.brand || '', points_value: prod.points_value || 0,
               weight: prod.weight ?? null, length_cm: prod.length_cm ?? null,
               width_cm: prod.width_cm ?? null, height_cm: prod.height_cm ?? null,
@@ -147,7 +150,8 @@ export default function AdminProductForm() {
       ...form,
       price: parseFloat(form.price),
       discount_price: form.discount_price ? parseFloat(form.discount_price) : null,
-      stock: parseInt(form.stock, 10) || 0,
+      stock: form.manage_stock !== false ? (parseInt(form.stock, 10) || 0) : 0,
+      manage_stock: form.manage_stock !== false,
       points_value: parseFloat(form.points_value || 0),
       pricing_tiers: tiers,
       sku: form.sku?.trim() || null,
@@ -449,7 +453,40 @@ export default function AdminProductForm() {
         <div className="grid grid-cols-3 gap-3">
           <Input label="Preço*" type="number" step="0.01" required value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
           <Input label="Preço promocional" type="number" step="0.01" value={form.discount_price || ''} onChange={e => setForm({ ...form, discount_price: e.target.value || null })} />
-          <Input label="Estoque" type="number" required value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-txt-primary">Estoque</label>
+              <label className="inline-flex items-center gap-1.5 text-xs text-txt-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={form.manage_stock !== false}
+                  onChange={e => setForm({ ...form, manage_stock: e.target.checked })}
+                  className="rounded text-brand-main focus:ring-brand-main h-3.5 w-3.5"
+                  data-testid="toggle-manage-stock"
+                />
+                <span className="font-medium text-txt-secondary">Controlar estoque</span>
+              </label>
+            </div>
+            {form.manage_stock !== false ? (
+              <Input
+                type="number"
+                min="0"
+                required
+                value={form.stock}
+                onChange={e => setForm({ ...form, stock: e.target.value })}
+                placeholder="Ex: 100"
+                data-testid="input-stock"
+              />
+            ) : (
+              <div className="h-11 px-4 bg-blue-50/80 border border-blue-200 rounded-lg flex items-center justify-between text-xs text-blue-800">
+                <span className="font-semibold flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  Desativado · Venda Ilimitada
+                </span>
+                <span className="text-[11px] text-blue-600 bg-blue-100 px-2 py-0.5 rounded font-medium">Sem controle</span>
+              </div>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-3">
           <Input label="Pontos por unidade" type="number" step="0.01" value={form.points_value} onChange={e => setForm({ ...form, points_value: e.target.value })} placeholder="Ex: 10" />

@@ -162,8 +162,12 @@ def _normalize_product_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     effective_price = discount_price if (discount_price and discount_price > 0) else price
 
+    manage_stock = doc.get("manage_stock", True)
     try:
-        stock = int(doc.get("stock") if doc.get("stock") is not None else 0)
+        if manage_stock is False:
+            stock = 999
+        else:
+            stock = int(doc.get("stock") if doc.get("stock") is not None else 0)
     except (ValueError, TypeError):
         stock = 0
 

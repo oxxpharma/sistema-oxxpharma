@@ -179,7 +179,7 @@ function ProductSearch({ onPick }) {
       {open && results.length > 0 && (
         <div className="absolute z-20 mt-1 w-full max-h-72 overflow-auto bg-white border border-border rounded-lg shadow-lg">
           {results.map(p => {
-            const oos = (Number(p.stock) || 0) <= 0;
+            const oos = p.manage_stock !== false && (Number(p.stock) || 0) <= 0;
             return (
               <button
                 key={p.product_id}
@@ -195,7 +195,7 @@ function ProductSearch({ onPick }) {
                   {oos && <span className="text-[9px] font-bold uppercase text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">Sem estoque</span>}
                 </div>
                 <div className="text-xs text-txt-secondary">
-                  {formatCurrency(p.price)} · Estoque: {p.stock} {p.sku ? ` · ${p.sku}` : ''}
+                  {formatCurrency(p.price)} · Estoque: {p.manage_stock === false ? 'Ilimitado' : p.stock} {p.sku ? ` · ${p.sku}` : ''}
                 </div>
               </button>
             );
@@ -383,7 +383,7 @@ export default function AdminPDV() {
                   <div key={it.product_id} className="flex items-start gap-3 p-3 border border-border rounded-lg" data-testid={`pdv-item-row-${it.product_id}`}>
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-sm truncate">{p?.name || it.product_id}</div>
-                      <div className="text-[11px] text-txt-secondary">Estoque: {p?.stock ?? '—'} · SKU: {p?.sku || '—'}</div>
+                      <div className="text-[11px] text-txt-secondary">Estoque: {p?.manage_stock === false ? 'Ilimitado' : (p?.stock ?? '—')} · SKU: {p?.sku || '—'}</div>
                       <div className="mt-2">
                         <ItemPriceSelect
                           product={p}

@@ -150,7 +150,7 @@ export default function ProductDetails() {
             "@type": "Offer",
             "priceCurrency": "BRL",
             "price": price,
-            "availability": product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+            "availability": (product.manage_stock === false || (product.stock || 0) > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
             "url": typeof window !== 'undefined' ? window.location.href : undefined,
           },
         }}
@@ -291,11 +291,17 @@ export default function ProductDetails() {
                 <Minus className="w-4 h-4" />
               </button>
               <span className="w-10 text-center font-semibold" data-testid="qty-value">{qty}</span>
-              <button onClick={() => setQty(Math.min(product.stock, qty + 1))} className="w-10 h-11 flex items-center justify-center hover:bg-bg-secondary" data-testid="qty-plus">
+              <button
+                onClick={() => setQty(product.manage_stock === false ? Math.min(99, qty + 1) : Math.min(product.stock, qty + 1))}
+                className="w-10 h-11 flex items-center justify-center hover:bg-bg-secondary"
+                data-testid="qty-plus"
+              >
                 <Plus className="w-4 h-4" />
               </button>
             </div>
-            <span className="text-xs text-txt-secondary">{product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque'}</span>
+            <span className="text-xs text-txt-secondary">
+              {product.manage_stock === false ? 'Em estoque' : (product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque')}
+            </span>
           </div>
 
           {/* Iter 61: combo pricing selector */}
@@ -309,7 +315,7 @@ export default function ProductDetails() {
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => setQty(Math.min(product.stock, opt.qty))}
+                    onClick={() => setQty(product.manage_stock === false ? opt.qty : Math.min(product.stock, opt.qty))}
                     className={`text-left rounded-lg border-2 px-3 py-2.5 transition ${active ? 'border-brand-main bg-brand-light/60' : 'border-border hover:border-brand-main/40'}`}
                     data-testid={`combo-opt-${opt.qty}`}
                   >
@@ -352,7 +358,7 @@ export default function ProductDetails() {
               variant="outline"
               onClick={addToCart}
               loading={adding}
-              disabled={!product.active || product.stock <= 0}
+              disabled={!product.active || (product.manage_stock !== false && (product.stock || 0) <= 0)}
               data-testid="add-cart-btn"
             >
               <ShoppingCart className="w-4 h-4" /> {!product.active ? 'Produto inativo' : 'Adicionar'}
@@ -360,7 +366,7 @@ export default function ProductDetails() {
             <Button
               onClick={buyNow}
               loading={adding}
-              disabled={!product.active || product.stock <= 0}
+              disabled={!product.active || (product.manage_stock !== false && (product.stock || 0) <= 0)}
               data-testid="buy-now-btn"
             >
               {!product.active ? 'Indisponível (Inativo)' : 'Comprar agora'}

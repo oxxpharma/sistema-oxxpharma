@@ -171,7 +171,7 @@ export default function CartPage() {
                       <Minus className="w-3.5 h-3.5" />
                     </button>
                     <span className="w-8 text-center text-sm font-semibold">{item.quantity}</span>
-                    <button onClick={() => onQty(item.product_id, item.quantity + 1)} disabled={updating === item.product_id || item.quantity >= (item.stock || 999)} className="w-8 h-8 flex items-center justify-center hover:bg-bg-secondary">
+                    <button onClick={() => onQty(item.product_id, item.quantity + 1)} disabled={updating === item.product_id || (item.manage_stock !== false && item.quantity >= (item.stock || 999))} className="w-8 h-8 flex items-center justify-center hover:bg-bg-secondary">
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>

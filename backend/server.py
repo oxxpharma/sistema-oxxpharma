@@ -343,6 +343,7 @@ class ProductCreate(BaseModel):
     subcategories: List[str] = []  # Iter 61: multi-subcategoria
     images: List[str] = []
     stock: int = 0
+    manage_stock: Optional[bool] = True  # True: controla estoque (bloqueia quando zerar); False: vende ilimitado sem controle
     active: bool = True
     featured: bool = False
     brand: Optional[str] = None
@@ -1921,9 +1922,11 @@ async def admin_list_products(
         conditions.append({"active": False})
 
     if stock_status == "in_stock":
-        conditions.append({"stock": {"$gt": 0}})
+        conditions.append({"$or": [{"manage_stock": False}, {"stock": {"$gt": 0}}]})
     elif stock_status == "out_of_stock":
-        conditions.append({"$or": [{"stock": {"$lte": 0}}, {"stock": None}]})
+        conditions.append({"$and": [{"manage_stock": {"$ne": False}}, {"$or": [{"stock": {"$lte": 0}}, {"stock": None}]}]})
+    elif stock_status == "no_control":
+        conditions.append({"manage_stock": False})
 
     if date_from:
         from_str = f"{date_from}T00:00:00"
@@ -2081,6 +2084,7 @@ async def admin_reorder_products(request: Request, user: dict = Depends(require_
 async def create_product(request: Request, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     payload = data.model_dump()
+    payload["manage_stock"] = payload.get("manage_stock") if payload.get("manage_stock") is not None else True
     if payload.get("categories") and isinstance(payload["categories"], list) and len(payload["categories"]) > 0:
         first_cat = await db.categories.find_one({"category_id": payload["categories"][0]}, {"_id": 0, "name": 1})
         if first_cat and first_cat.get("name"):
@@ -2104,6 +2108,7 @@ async def create_product(request: Request, data: ProductCreate, user: dict = Dep
 async def update_product(request: Request, product_id: str, data: ProductCreate, user: dict = Depends(require_admin())):
     db = request.app.db
     update = data.model_dump()
+    update["manage_stock"] = update.get("manage_stock") if update.get("manage_stock") is not None else True
     if update.get("categories") and isinstance(update["categories"], list) and len(update["categories"]) > 0:
         first_cat = await db.categories.find_one({"category_id": update["categories"][0]}, {"_id": 0, "name": 1})
         if first_cat and first_cat.get("name"):
@@ -2211,6 +2216,7 @@ async def get_cart(request: Request, user: dict = Depends(get_current_user)):
                 "image": (prod.get("images") or [None])[0],
                 "total": total,
                 "stock": prod.get("stock", 0),
+                "manage_stock": prod.get("manage_stock", True),
                 "points_value": float(prod.get("points_value") or 0),
                 "sku": prod.get("sku"),
                 "ean": prod.get("ean"),
@@ -2225,7 +2231,8 @@ async def add_to_cart(request: Request, data: CartItemAdd, user: dict = Depends(
     prod = await db.products.find_one({"product_id": data.product_id, "active": True}, {"_id": 0})
     if not prod:
         raise HTTPException(status_code=404, detail="Produto nao encontrado")
-    if prod.get("stock", 0) < data.quantity:
+    manage_stock = prod.get("manage_stock", True)
+    if manage_stock and prod.get("stock", 0) < data.quantity:
         raise HTTPException(status_code=400, detail="Estoque insuficiente")
     cart = await db.carts.find_one({"user_id": user["user_id"]})
     if not cart:
@@ -2251,7 +2258,8 @@ async def update_cart_item(request: Request, product_id: str, user: dict = Depen
     if qty <= 0:
         return await remove_from_cart(request, product_id, user)
     prod = await db.products.find_one({"product_id": product_id}, {"_id": 0})
-    if prod and qty > prod.get("stock", 0):
+    manage_stock = prod.get("manage_stock", True) if prod else True
+    if prod and manage_stock and qty > prod.get("stock", 0):
         raise HTTPException(status_code=400, detail="Estoque insuficiente")
     cart = await db.carts.find_one({"user_id": user["user_id"]})
     if cart:
@@ -2423,7 +2431,8 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                 continue
 
             # Estoque seguro
-            if prod.get("stock") is not None:
+            manage_stock = prod.get("manage_stock", True)
+            if manage_stock and prod.get("stock") is not None:
                 current_stock = int(prod.get("stock") or 0)
                 if current_stock < qty:
                     raise HTTPException(status_code=400, detail=f"Estoque insuficiente para o produto: {prod.get('name', pid)}")
@@ -2478,8 +2487,10 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
                 "ean": prod.get("ean"),
                 "is_kit": bool(prod.get("is_kit", False)),
                 "kit_items": prod.get("kit_items") or [],
+                "manage_stock": manage_stock,
             })
-            stock_to_decrement.append((prod["product_id"], qty))
+            if manage_stock:
+                stock_to_decrement.append((prod["product_id"], qty))
 
         if not items:
             raise HTTPException(status_code=400, detail="Nenhum produto valido")
@@ -3451,9 +3462,11 @@ async def admin_update_order_status(request: Request, order_id: str, user: dict 
         update["delivered_at"] = now_iso()
     elif status == "cancelled":
         update["cancelled_at"] = now_iso()
-        # Restore stock
+        # Restore stock (apenas produtos com controle de estoque ativo)
         for item in o.get("items", []):
-            await db.products.update_one({"product_id": item["product_id"]}, {"$inc": {"stock": item["quantity"]}})
+            prod = await db.products.find_one({"product_id": item["product_id"]}, {"manage_stock": 1})
+            if not prod or prod.get("manage_stock", True):
+                await db.products.update_one({"product_id": item["product_id"]}, {"$inc": {"stock": item["quantity"]}})
     await db.orders.update_one({"order_id": order_id}, {"$set": update})
     # Iter 42c+d: comissoes NAO transitam mais para "paid" automaticamente.
     # Iter 42d: AO marcar pedido como "paid" pela primeira vez, criamos as comissoes
@@ -3692,10 +3705,12 @@ async def admin_delete_order(
         # evitamos dupla restauracao checando o status.
         if order.get("order_status") not in ("cancelled",):
             for it in order["items"]:
-                await db.products.update_one(
-                    {"product_id": it["product_id"]},
-                    {"$inc": {"stock": int(it.get("quantity", 0))}},
-                )
+                prod = await db.products.find_one({"product_id": it["product_id"]}, {"manage_stock": 1})
+                if not prod or prod.get("manage_stock", True):
+                    await db.products.update_one(
+                        {"product_id": it["product_id"]},
+                        {"$inc": {"stock": int(it.get("quantity", 0))}},
+                    )
             summary["stock_restored"] = True
 
     # 5) Reverter usage_count do cupom (se o pedido usou)
@@ -4002,7 +4017,8 @@ async def admin_create_manual_order(request: Request, body: PDVOrderIn, user: di
         qty = int(it.quantity or 1)
         if qty <= 0:
             continue
-        if int(p.get("stock") or 0) < qty:
+        manage_stock = p.get("manage_stock", True)
+        if manage_stock and int(p.get("stock") or 0) < qty:
             raise HTTPException(status_code=400, detail=f"Estoque insuficiente para {p.get('name')}")
         resolved = _resolve_pdv_price(p, it, order_user, tenant)
         unit_price = resolved["price"]
@@ -4021,6 +4037,7 @@ async def admin_create_manual_order(request: Request, body: PDVOrderIn, user: di
             "ean": p.get("ean"),
             "is_kit": bool(p.get("is_kit", False)),
             "kit_items": p.get("kit_items") or [],
+            "manage_stock": manage_stock,
         })
     if not order_items:
         raise HTTPException(status_code=400, detail="Nenhum item válido")
@@ -4090,7 +4107,8 @@ async def admin_create_manual_order(request: Request, body: PDVOrderIn, user: di
     }
     await db.orders.insert_one(order)
     for it in order_items:
-        await db.products.update_one({"product_id": it["product_id"]}, {"$inc": {"stock": -it["quantity"]}})
+        if it.get("manage_stock", True):
+            await db.products.update_one({"product_id": it["product_id"]}, {"$inc": {"stock": -it["quantity"]}})
 
     # 7) Hooks (se marcado como pago)
     if is_paid:

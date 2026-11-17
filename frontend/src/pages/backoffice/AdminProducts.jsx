@@ -580,6 +580,7 @@ export default function AdminProducts() {
                 <option value="all">Todo estoque</option>
                 <option value="in_stock">Em estoque (&gt; 0)</option>
                 <option value="out_of_stock">Esgotado / Sem estoque</option>
+                <option value="no_control">Sem controle de estoque (Ilimitado)</option>
               </select>
             </div>
 
@@ -866,15 +867,21 @@ export default function AdminProducts() {
 
                       <div className="text-right">
                         <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-0.5">Estoque</div>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          (p.stock || 0) <= 0
-                            ? 'bg-red-50 text-red-600'
-                            : (p.stock || 0) < 5
-                            ? 'bg-amber-50 text-amber-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}>
-                          {p.stock ?? 0} unid.
-                        </span>
+                        {p.manage_stock === false ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200" title="Vendas ilimitadas (sem controle de estoque)">
+                            Ilimitado
+                          </span>
+                        ) : (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            (p.stock || 0) <= 0
+                              ? 'bg-red-50 text-red-600'
+                              : (p.stock || 0) < 5
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}>
+                            {p.stock ?? 0} unid.
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1115,15 +1122,21 @@ export default function AdminProducts() {
 
                       {/* Estoque */}
                       <td className="p-3.5 text-right">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          (p.stock || 0) <= 0
-                            ? 'bg-red-50 text-red-600'
-                            : (p.stock || 0) < 5
-                            ? 'bg-amber-50 text-amber-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}>
-                          {p.stock ?? 0}
-                        </span>
+                        {p.manage_stock === false ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200" title="Vendas ilimitadas (sem controle de estoque)">
+                            Ilimitado
+                          </span>
+                        ) : (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            (p.stock || 0) <= 0
+                              ? 'bg-red-50 text-red-600'
+                              : (p.stock || 0) < 5
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}>
+                            {p.stock ?? 0}
+                          </span>
+                        )}
                       </td>
 
                       {/* Status */}
