@@ -17,7 +17,8 @@ import {
   ChevronDown,
   Loader2,
   ArrowRight,
-  Tag
+  Tag,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
@@ -97,7 +98,7 @@ export default function StoreHeader() {
   // Busca avançada instantânea ao digitar
   useEffect(() => {
     if (!searchOpen || !searchTerm.trim()) {
-      setSearchResults({ products: [], categories: [], subcategories: [] });
+      setSearchResults({ products: [], categories: [], subcategories: [], did_you_mean: null });
       setSearchLoading(false);
       return;
     }
@@ -108,7 +109,8 @@ export default function StoreHeader() {
         setSearchResults({
           products: data.products || [],
           categories: data.categories || [],
-          subcategories: data.subcategories || []
+          subcategories: data.subcategories || [],
+          did_you_mean: data.did_you_mean || null
         });
       } catch (err) {
         console.error('Falha na busca live:', err);
@@ -133,15 +135,21 @@ export default function StoreHeader() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Itens do menu superior customizáveis (com fallback padrão)
-  const navItems = Array.isArray(settings?.header_nav_items) && settings.header_nav_items.length > 0
+  // Itens do menu superior customizáveis (com fallback padrão e normalização de URLs canônicas)
+  const rawNavItems = Array.isArray(settings?.header_nav_items) && settings.header_nav_items.length > 0
     ? settings.header_nav_items
     : [
         { label: 'Protocolo Dr.Bactéria', url: '/p/protocolo-dr-bacteria' },
-        { label: 'Óleos Ozonizados', url: '/produtos?categoria=oleos-ozonizados' },
+        { label: 'Óleos Ozonizados', url: '/categoria/oleos-ozonizados' },
         { label: 'Quem Somos', url: '/p/sobre' },
         { label: 'Contato', url: '/p/contato' },
       ];
+
+  const navItems = rawNavItems.map(item => {
+    if (!item?.url) return item;
+    const normalizedUrl = item.url.replace(/^\/produtos\?(?:categoria|category)=([^&]+)$/, '/categoria/$1');
+    return { ...item, url: normalizedUrl };
+  });
 
   // Helper para verificar item ativo e mostrar barra laranja discreta
   const isItemActive = (url) => {
@@ -154,7 +162,8 @@ export default function StoreHeader() {
         location.pathname.startsWith('/subcategoria')
       );
     }
-    return location.pathname === url || (url !== '/' && location.pathname.startsWith(url));
+    const cleanUrl = url.replace(/^\/produtos\?(?:categoria|category)=([^&]+)$/, '/categoria/$1');
+    return location.pathname === cleanUrl || (cleanUrl !== '/' && location.pathname.startsWith(cleanUrl));
   };
 
   const handleProductsEnter = () => {
@@ -738,6 +747,27 @@ export default function StoreHeader() {
 
               {!searchLoading && searchTerm.trim() && (
                 <>
+                  {/* Sugestão de Correção Inteligente (Typo Tolerance / Estilo SmartHint) */}
+                  {searchResults.did_you_mean && (
+                    <div className="flex items-center justify-between p-3 bg-orange-50/90 border border-orange-200 rounded-2xl text-xs text-orange-950 animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-brand-main shrink-0" />
+                        <span>
+                          Você quis dizer: <strong className="text-brand-main font-bold">{searchResults.did_you_mean}</strong>?
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm(searchResults.did_you_mean);
+                        }}
+                        className="text-brand-main font-bold hover:underline shrink-0 text-xs px-2.5 py-1 rounded-xl bg-white border border-orange-200 hover:bg-orange-100/70 transition shadow-xs"
+                      >
+                        Buscar "{searchResults.did_you_mean}" &rarr;
+                      </button>
+                    </div>
+                  )}
+
                   {/* Seções de Categorias e Subcategorias encontradas */}
                   {(searchResults.categories.length > 0 || searchResults.subcategories.length > 0) && (
                     <div>

@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { refreshSiteSettings } from '../../hooks/useSiteSettings';
 import { optimizeImageFile } from '../../lib/imageOptimizer';
 import { Button } from '../../components/ui/Button';
-import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink, Monitor, Smartphone, Share2, Check } from 'lucide-react';
+import { Loader2, Save, Image as ImageIcon, Palette, Layout, Megaphone, Trash2, PlusCircle, Upload, BadgeCheck, Gift, Truck, Award, Plus, X, Store, AlertTriangle, ArrowUp, ArrowDown, RotateCcw, ExternalLink, Monitor, Smartphone, Share2, Check, Search, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { ICON_LIBRARY, ICON_LABELS, ICON_KEYS, getIcon } from '../../lib/iconLibrary';
 
@@ -11,6 +11,7 @@ const TABS = [
   { key: 'identity', label: 'Identidade', icon: Palette },
   { key: 'social_share', label: 'Compartilhamento (WhatsApp)', icon: Share2 },
   { key: 'navigation', label: 'Menu Superior (Topbar)', icon: Layout },
+  { key: 'search', label: 'Busca Inteligente & Sinônimos', icon: Search },
   { key: 'logo_sizes', label: 'Logo por local', icon: ImageIcon },
   { key: 'hero', label: 'Banner principal', icon: Layout },
   { key: 'announcement', label: 'Barra de aviso', icon: Megaphone },
@@ -53,6 +54,9 @@ export default function AdminAppearance() {
   const [userCategories, setUserCategories] = useState([]);
   const [cmsPages, setCmsPages] = useState([]);
   const [categoriesList, setCategoriesList] = useState([]);
+  const [newSynTerm, setNewSynTerm] = useState('');
+  const [newSynValues, setNewSynValues] = useState('');
+  const [showDefaultSyns, setShowDefaultSyns] = useState(false);
   // Iter 44: aparencia por marca. Carrega tenants e escolhe um pra editar.
   const [tenants, setTenants] = useState([]);
   const [editingTenant, setEditingTenant] = useState(
@@ -598,6 +602,156 @@ export default function AdminAppearance() {
                 </span>
               ))}
             </div>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'search' && (
+        <div className="space-y-5 max-w-4xl">
+          {/* Banner explicativo */}
+          <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-2xl p-5 flex items-start gap-3.5">
+            <Sparkles className="w-6 h-6 text-brand-main shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs text-gray-700">
+              <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                Motor de Busca Inteligente Ativo (Estilo SmartHint)
+              </h4>
+              <p>
+                O sistema de busca da OxxPharma analisa automaticamente sinônimos, erros de digitação (typo tolerance), variações fonéticas (s/z, consoantes duplas) e termos sem acento (ex: <i>"magnesio"</i> ou <i>"magnezio"</i> encontram <i>"magnésio"</i>).
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
+                <div className="bg-white/80 border border-orange-100 rounded-xl p-2.5">
+                  <p className="font-bold text-brand-main">✓ Acentos & Cedilhas</p>
+                  <p className="text-[11px] text-txt-secondary">Ignora acentos automaticamente na busca de produtos e categorias.</p>
+                </div>
+                <div className="bg-white/80 border border-orange-100 rounded-xl p-2.5">
+                  <p className="font-bold text-brand-main">✓ Tolerância a Erros</p>
+                  <p className="text-[11px] text-txt-secondary">Sugere "Você quis dizer" para erros como <i>"magneso"</i> ou <i>"cretina"</i>.</p>
+                </div>
+                <div className="bg-white/80 border border-orange-100 rounded-xl p-2.5">
+                  <p className="font-bold text-brand-main">✓ Sinônimos Médicos</p>
+                  <p className="text-[11px] text-txt-secondary">Equivalências de princípios ativos, benefícios e indicações.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Adicionar Sinônimo Personalizado */}
+          <Card title="Adicionar Sinônimo ou Termo Equivalente">
+            <p className="text-xs text-txt-secondary -mt-1 mb-4">
+              Defina palavras que, ao serem digitadas pelo cliente no campo de busca, trarão produtos correspondentes aos termos equivalentes.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-[11px] font-semibold text-txt-secondary block mb-1">Palavra que o cliente digita*</label>
+                <input
+                  type="text"
+                  value={newSynTerm}
+                  onChange={e => setNewSynTerm(e.target.value)}
+                  placeholder="Ex: emagrecer, dormir, dor, vitamina c"
+                  className="w-full px-3 py-2 border border-border bg-white rounded-xl text-sm focus:outline-none focus:border-brand-main"
+                />
+                <p className="text-[11px] text-txt-secondary mt-1">Palavra-chave principal que ativa os sinônimos.</p>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-txt-secondary block mb-1">Termos equivalentes (separados por vírgula)*</label>
+                <input
+                  type="text"
+                  value={newSynValues}
+                  onChange={e => setNewSynValues(e.target.value)}
+                  placeholder="Ex: slim, appetite control, blocker, less"
+                  className="w-full px-3 py-2 border border-border bg-white rounded-xl text-sm focus:outline-none focus:border-brand-main"
+                />
+                <p className="text-[11px] text-txt-secondary mt-1">Produtos com esses nomes ou termos serão buscados.</p>
+              </div>
+            </div>
+            <div className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const term = newSynTerm.trim().toLowerCase();
+                  const vals = newSynValues.split(',').map(v => v.trim()).filter(Boolean);
+                  if (!term || vals.length === 0) {
+                    toast.error('Informe a palavra e pelo menos um termo equivalente');
+                    return;
+                  }
+                  const updated = { ...(s.search_synonyms || {}), [term]: vals };
+                  set('search_synonyms', updated);
+                  setNewSynTerm('');
+                  setNewSynValues('');
+                  toast.success(`Sinônimo para "${term}" adicionado! Clique em Salvar para aplicar.`);
+                }}
+              >
+                <PlusCircle className="w-4 h-4 mr-1.5" /> Adicionar Equivalência
+              </Button>
+            </div>
+          </Card>
+
+          {/* Lista de Sinônimos Personalizados */}
+          <Card title="Sinônimos Personalizados Ativos">
+            {Object.keys(s.search_synonyms || {}).length === 0 ? (
+              <div className="py-6 text-center text-txt-secondary text-xs">
+                Nenhum sinônimo personalizado cadastrado ainda. Use o formulário acima para adicionar termos sob medida para o seu público.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(s.search_synonyms || {}).map(([term, vals]) => (
+                  <div key={term} className="flex items-center justify-between p-3 bg-bg-secondary/40 border border-border rounded-xl">
+                    <div>
+                      <span className="font-bold text-sm text-gray-900">{term}</span>
+                      <span className="text-xs text-txt-secondary mx-2">&rarr;</span>
+                      <span className="text-xs text-brand-main font-medium">
+                        {Array.isArray(vals) ? vals.join(', ') : String(vals)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...(s.search_synonyms || {}) };
+                        delete updated[term];
+                        set('search_synonyms', updated);
+                        toast.info(`Sinônimo "${term}" removido.`);
+                      }}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition"
+                      title="Excluir"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* Dicionário padrão nativo (mais de 30 categorias integradas) */}
+          <Card title="Dicionário Nativo Integrado (Mais de 30 Categorias)">
+            <p className="text-xs text-txt-secondary mb-3">
+              O sistema já conta de fábrica com reconhecimento pré-programado para Magnésios, Óleos Ozonizados, Sono, Emagrecimento, Creatinas, Intestino, Gestantes, Pele, Articulações, Foco e Libido.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowDefaultSyns(!showDefaultSyns)}
+              className="text-xs font-bold text-brand-main underline hover:text-brand-dark"
+            >
+              {showDefaultSyns ? 'Ocultar termos pré-configurados' : 'Ver todos os termos pré-configurados'}
+            </button>
+            {showDefaultSyns && (
+              <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-xl max-h-60 overflow-y-auto space-y-1.5 text-xs">
+                <p className="text-[11px] text-gray-500 mb-2">Estes termos já funcionam automaticamente na loja sem precisar cadastrar:</p>
+                <div><b>magnesio / magnezio</b>: magnésio, dimalato, treonato, quelato, bisglicinato, mag duo, mag day, mag night</div>
+                <div><b>oleo / oleos / ozonio</b>: óleo ozonizado, ozoxx, spa, ozonizado</div>
+                <div><b>sono / dormir / insonia</b>: sleep dream, melatonina, mag night, serenny, relaxamento</div>
+                <div><b>emagrecer / apetite / doces</b>: duo control, sweet control, appetite control, blocker, less, progo, morosil, cactin, slim</div>
+                <div><b>creatina / forca</b>: creatina monohidratada, brigadeiro, caramelo, performance</div>
+                <div><b>intestino / estomago</b>: corebiome, gastroshield, biointestil, ibs care, glutamina, probiótico</div>
+                <div><b>gestante / gravidez / estrias</b>: kit mom care, nutri mom, repellent mom, sun mom, glow mom, body mom</div>
+                <div><b>pele / manchas / melasma</b>: skin essentials, skin ghk-cu, skinrefine, skinclean, glow mom, colágeno</div>
+                <div><b>dor / articulacao</b>: articulare, colágeno tipo ii, canela-de-velho, sucupira</div>
+                <div><b>foco / memoria</b>: concentra, cognição, memória</div>
+                <div><b>libido / vitalidade</b>: alpha power, femme power, duo power</div>
+              </div>
+            )}
           </Card>
         </div>
       )}

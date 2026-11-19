@@ -45,6 +45,7 @@ import opery_routes
 import audit_service
 import pg_catalog_sync
 import image_optimizer
+import smart_search
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -169,7 +170,38 @@ async def get_settings(db):
         await db.settings.insert_one(s)
     # Garantir campos novos (merge com defaults)
     merged = {**DEFAULT_SETTINGS, **{k: v for k, v in s.items() if k != "_id"}}
+    if "header_nav_items" in merged and isinstance(merged["header_nav_items"], list):
+        merged["header_nav_items"] = [
+            {
+                **it,
+                "url": re.sub(r"^/produtos\?(?:categoria|category)=", "/categoria/", it.get("url", ""))
+            } if isinstance(it, dict) and ("/produtos?categoria=" in it.get("url", "") or "/produtos?category=" in it.get("url", "")) else it
+            for it in merged["header_nav_items"]
+        ]
     return merged
+
+
+_search_vocab_cache = {"vocab": set(), "timestamp": 0}
+
+async def get_cached_search_vocabulary(db) -> Set[str]:
+    import time
+    now = time.time()
+    if _search_vocab_cache["vocab"] and (now - _search_vocab_cache["timestamp"] < 300):
+        return _search_vocab_cache["vocab"]
+
+    try:
+        prods = await db.products.find({"active": True}, {"_id": 0, "name": 1, "description": 1, "brand": 1, "category": 1, "seo_keywords": 1}).to_list(500)
+        cats = await db.categories.find({"active": True}, {"_id": 0, "name": 1}).to_list(100)
+        subs = await db.subcategories.find({"active": True}, {"_id": 0, "name": 1}).to_list(100)
+        stg = await _get_site_settings(db)
+        custom_syns = stg.get("search_synonyms") or {}
+        vocab = smart_search.build_vocabulary_from_db_items(prods, cats, subs, custom_synonyms=custom_syns)
+        _search_vocab_cache["vocab"] = vocab
+        _search_vocab_cache["timestamp"] = now
+        return vocab
+    except Exception as e:
+        logger.warning(f"Erro ao construir vocabulário de busca: {e}")
+        return set()
 
 
 def get_app_url():
@@ -569,6 +601,22 @@ async def lifespan(app: FastAPI):
             await app.db.subcategories.update_one({"subcategory_id": sc["subcategory_id"]}, {"$set": {"slug": unique}})
     except Exception as e:
         logger.warning(f"Slug backfill falhou (nao critico): {e}")
+    # Iter 67 (Navegação & SEO): normaliza links legados em header_nav_items (/produtos?categoria=... -> /categoria/...)
+    try:
+        async for doc in app.db.settings.find({"_id": {"$in": ["site", "site:oxxpharma", "global"]}}):
+            nav = doc.get("header_nav_items") or []
+            if isinstance(nav, list) and any(("/produtos?categoria=" in (it.get("url") or "") or "/produtos?category=" in (it.get("url") or "")) for it in nav):
+                fixed_nav = [
+                    {
+                        **it,
+                        "url": re.sub(r"^/produtos\?(?:categoria|category)=", "/categoria/", it.get("url", ""))
+                    } if isinstance(it, dict) and ("/produtos?categoria=" in (it.get("url") or "") or "/produtos?category=" in (it.get("url") or "")) else it
+                    for it in nav
+                ]
+                await app.db.settings.update_one({"_id": doc["_id"]}, {"$set": {"header_nav_items": fixed_nav}})
+                logger.info(f"Normalizado header_nav_items no startup para {doc['_id']}")
+    except Exception as e:
+        logger.warning(f"Aviso ao normalizar header_nav_items no startup: {e}")
     await app.db.withdrawals.create_index("withdrawal_id", unique=True)
     await app.db.withdrawals.create_index("user_id")
     await app.db.withdrawals.create_index([("status", 1), ("created_at", -1)])
@@ -1700,27 +1748,110 @@ async def list_products(request: Request, category: Optional[str] = None, subcat
     db = request.app.db
     q = {"active": True}
     if category:
-        # Iter 61: aceita category legado (case-insensitive) OU categories[] (id exato)
-        q["$or"] = [
-            {"category": {"$regex": f"^{re.escape(category)}$", "$options": "i"}},
-            {"categories": category},
-        ]
+        cat_clean = category.strip()
+        cat_doc = await db.categories.find_one(
+            {"$or": [
+                {"slug": cat_clean},
+                {"category_id": cat_clean},
+                {"name": {"$regex": f"^{re.escape(cat_clean)}$", "$options": "i"}},
+                {"name": {"$regex": f"^{re.escape(cat_clean)}\\s*$", "$options": "i"}},
+            ]},
+            {"_id": 0, "category_id": 1, "name": 1}
+        )
+        if cat_doc:
+            cat_name = cat_doc["name"].strip()
+            cat_id = cat_doc["category_id"]
+            cat_filter = [
+                {"categories": cat_id},
+                {"category": {"$regex": f"^{re.escape(cat_name)}", "$options": "i"}},
+                {"category": {"$regex": f"^{re.escape(cat_clean)}", "$options": "i"}},
+                {"categories": cat_clean}
+            ]
+        else:
+            cat_filter = [
+                {"category": {"$regex": f"^{re.escape(cat_clean)}$", "$options": "i"}},
+                {"categories": cat_clean}
+            ]
+        if q.get("$or"):
+            q = {"$and": [q, {"$or": cat_filter}]}
+        else:
+            q["$or"] = cat_filter
     if subcategory:
         sub_filter = [{"subcategory": subcategory}, {"subcategories": subcategory}]
-        if q.get("$or"):
+        if q.get("$or") or q.get("$and"):
             q = {"$and": [q, {"$or": sub_filter}]}
         else:
             q["$or"] = sub_filter
     if featured:
         q["featured"] = True
+
+    did_you_mean = None
     if search:
-        search_or = [{"name": {"$regex": search, "$options": "i"}}, {"description": {"$regex": search, "$options": "i"}}, {"brand": {"$regex": search, "$options": "i"}}]
+        search_str = search.strip()
+        stg = await _get_site_settings(db)
+        custom_syns = stg.get("search_synonyms") or {}
+        query_pats, syn_pats = smart_search.generate_search_regex_list(search_str, custom_synonyms=custom_syns)
+
+        search_or = []
+        for pat in query_pats:
+            search_or.extend([
+                {"name": {"$regex": pat, "$options": "i"}},
+                {"description": {"$regex": pat, "$options": "i"}},
+                {"brand": {"$regex": pat, "$options": "i"}},
+                {"category": {"$regex": pat, "$options": "i"}},
+                {"seo_keywords": {"$regex": pat, "$options": "i"}},
+            ])
+        for pat in syn_pats:
+            search_or.extend([
+                {"name": {"$regex": pat, "$options": "i"}},
+                {"description": {"$regex": pat, "$options": "i"}},
+                {"brand": {"$regex": pat, "$options": "i"}},
+                {"category": {"$regex": pat, "$options": "i"}},
+                {"seo_keywords": {"$regex": pat, "$options": "i"}},
+            ])
+
         if q.get("$or") or q.get("$and"):
-            base = q if not q.get("$and") else q
-            q = {"$and": [base, {"$or": search_or}]}
+            main_q = {"$and": [dict(q), {"$or": search_or}]}
         else:
-            q["$or"] = search_or
-    total = await db.products.count_documents(q)
+            main_q = dict(q)
+            main_q["$or"] = search_or
+
+        total = await db.products.count_documents(main_q)
+        if total == 0:
+            # Fallback para correção de digitação (typo tolerance)
+            vocab = await get_cached_search_vocabulary(db)
+            correction = smart_search.suggest_correction(search_str, vocab)
+            if correction and correction.lower() != search_str.lower():
+                did_you_mean = correction
+                s_query_pats, s_syn_pats = smart_search.generate_search_regex_list(correction, custom_synonyms=custom_syns)
+                corr_search_or = []
+                for pat in (s_query_pats + s_syn_pats):
+                    corr_search_or.extend([
+                        {"name": {"$regex": pat, "$options": "i"}},
+                        {"description": {"$regex": pat, "$options": "i"}},
+                        {"brand": {"$regex": pat, "$options": "i"}},
+                        {"category": {"$regex": pat, "$options": "i"}},
+                        {"seo_keywords": {"$regex": pat, "$options": "i"}},
+                    ])
+                if q.get("$or") or q.get("$and"):
+                    fallback_q = {"$and": [dict(q), {"$or": corr_search_or}]}
+                else:
+                    fallback_q = dict(q)
+                    fallback_q["$or"] = corr_search_or
+
+                corr_total = await db.products.count_documents(fallback_q)
+                if corr_total > 0:
+                    q = fallback_q
+                    total = corr_total
+                else:
+                    q = main_q
+            else:
+                q = main_q
+        else:
+            q = main_q
+    else:
+        total = await db.products.count_documents(q)
+
     products = await db.products.find(q, {"_id": 0}).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
     user = await get_optional_user(request)
     _tenant = tenant_service.get_tenant(request)
@@ -1729,43 +1860,117 @@ async def list_products(request: Request, category: Optional[str] = None, subcat
     emp_ctx = await convenio_routes.get_employee_context(db, user) if user else None
     if emp_ctx and emp_ctx.get("discount_percent", 0) > 0:
         products = [_apply_convenio_discount(p, emp_ctx) for p in products]
-    return {"products": products, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+    return {
+        "products": products,
+        "total": total,
+        "page": page,
+        "pages": max(1, (total + limit - 1) // limit),
+        "did_you_mean": did_you_mean,
+        "query": search
+    }
 
 
 @app.get("/api/search/live")
 async def live_search(request: Request, q: str = Query("", min_length=1)):
-    """Busca avançada instantânea entre produtos, categorias e subcategorias."""
+    """Busca avançada instantânea inteligente entre produtos, categorias e subcategorias."""
     db = request.app.db
     query_str = q.strip()
     if not query_str:
-        return {"products": [], "categories": [], "subcategories": []}
+        return {"products": [], "categories": [], "subcategories": [], "query": "", "did_you_mean": None}
+
+    stg = await _get_site_settings(db)
+    custom_syns = stg.get("search_synonyms") or {}
+    query_pats, syn_pats = smart_search.generate_search_regex_list(query_str, custom_synonyms=custom_syns)
 
     # 1. Categorias ativas correspondentes
+    cat_clauses = [{"name": {"$regex": p, "$options": "i"}} for p in query_pats]
+    if syn_pats:
+        cat_clauses.extend([{"name": {"$regex": p, "$options": "i"}} for p in syn_pats[:4]])
     cats = await db.categories.find(
-        {"active": True, "name": {"$regex": re.escape(query_str), "$options": "i"}},
+        {"active": True, "$or": cat_clauses},
         {"_id": 0, "category_id": 1, "name": 1, "slug": 1}
     ).limit(6).to_list(6)
 
     # 2. Subcategorias ativas correspondentes
+    sub_clauses = [{"name": {"$regex": p, "$options": "i"}} for p in query_pats]
+    if syn_pats:
+        sub_clauses.extend([{"name": {"$regex": p, "$options": "i"}} for p in syn_pats[:4]])
     subs = await db.subcategories.find(
-        {"active": True, "name": {"$regex": re.escape(query_str), "$options": "i"}},
+        {"active": True, "$or": sub_clauses},
         {"_id": 0, "subcategory_id": 1, "name": 1, "slug": 1, "category_ids": 1}
     ).limit(8).to_list(8)
 
-    # 3. Produtos ativos correspondentes (nome, descrição, marca, palavras-chave)
-    prod_q = {
-        "active": True,
-        "$or": [
-            {"name": {"$regex": re.escape(query_str), "$options": "i"}},
-            {"description": {"$regex": re.escape(query_str), "$options": "i"}},
-            {"brand": {"$regex": re.escape(query_str), "$options": "i"}},
-            {"seo_keywords": {"$regex": re.escape(query_str), "$options": "i"}},
-        ]
-    }
-    products = await db.products.find(
-        prod_q,
+    # 3. Produtos ativos correspondentes (diretos)
+    direct_prod_clauses = []
+    for pat in query_pats:
+        direct_prod_clauses.extend([
+            {"name": {"$regex": pat, "$options": "i"}},
+            {"description": {"$regex": pat, "$options": "i"}},
+            {"brand": {"$regex": pat, "$options": "i"}},
+            {"seo_keywords": {"$regex": pat, "$options": "i"}},
+            {"category": {"$regex": pat, "$options": "i"}},
+        ])
+
+    direct_products = await db.products.find(
+        {"active": True, "$or": direct_prod_clauses},
         {"_id": 0, "product_id": 1, "name": 1, "price": 1, "sale_price": 1, "effective_price": 1, "images": 1, "category": 1, "brand": 1}
     ).limit(6).to_list(6)
+
+    products = list(direct_products)
+    did_you_mean = None
+    smart_applied = False
+
+    # Se faltar espaço para 6 produtos, preenche com sinônimos
+    if len(products) < 6 and syn_pats:
+        existing_ids = [p["product_id"] for p in products]
+        syn_prod_clauses = []
+        for pat in syn_pats:
+            syn_prod_clauses.extend([
+                {"name": {"$regex": pat, "$options": "i"}},
+                {"description": {"$regex": pat, "$options": "i"}},
+                {"brand": {"$regex": pat, "$options": "i"}},
+                {"seo_keywords": {"$regex": pat, "$options": "i"}},
+                {"category": {"$regex": pat, "$options": "i"}},
+            ])
+        if syn_prod_clauses:
+            syn_q = {"active": True, "$or": syn_prod_clauses}
+            if existing_ids:
+                syn_q["product_id"] = {"$nin": existing_ids}
+            more_prods = await db.products.find(
+                syn_q,
+                {"_id": 0, "product_id": 1, "name": 1, "price": 1, "sale_price": 1, "effective_price": 1, "images": 1, "category": 1, "brand": 1}
+            ).limit(6 - len(products)).to_list(6 - len(products))
+            if more_prods:
+                products.extend(more_prods)
+                smart_applied = True
+
+    # Se ainda estiver com 0 produtos e 0 categorias, testa erro de digitação (typo tolerance)
+    if len(products) == 0 and len(cats) == 0 and len(subs) == 0:
+        vocab = await get_cached_search_vocabulary(db)
+        correction = smart_search.suggest_correction(query_str, vocab)
+        if correction and correction.lower() != query_str.lower():
+            did_you_mean = correction
+            s_query_pats, s_syn_pats = smart_search.generate_search_regex_list(correction, custom_synonyms=custom_syns)
+            
+            # Categorias com a correção
+            c_clauses = [{"name": {"$regex": p, "$options": "i"}} for p in s_query_pats]
+            cats = await db.categories.find({"active": True, "$or": c_clauses}, {"_id": 0, "category_id": 1, "name": 1, "slug": 1}).limit(6).to_list(6)
+            
+            # Produtos com a correção
+            corr_prod_clauses = []
+            for pat in (s_query_pats + s_syn_pats[:4]):
+                corr_prod_clauses.extend([
+                    {"name": {"$regex": pat, "$options": "i"}},
+                    {"description": {"$regex": pat, "$options": "i"}},
+                    {"brand": {"$regex": pat, "$options": "i"}},
+                    {"seo_keywords": {"$regex": pat, "$options": "i"}},
+                    {"category": {"$regex": pat, "$options": "i"}},
+                ])
+            products = await db.products.find(
+                {"active": True, "$or": corr_prod_clauses},
+                {"_id": 0, "product_id": 1, "name": 1, "price": 1, "sale_price": 1, "effective_price": 1, "images": 1, "category": 1, "brand": 1}
+            ).limit(6).to_list(6)
+            smart_applied = True
 
     user = await get_optional_user(request)
     _tenant = tenant_service.get_tenant(request)
@@ -1773,6 +1978,8 @@ async def live_search(request: Request, q: str = Query("", min_length=1)):
 
     return {
         "query": query_str,
+        "did_you_mean": did_you_mean,
+        "smart_applied": smart_applied,
         "products": products,
         "categories": cats,
         "subcategories": subs
@@ -9744,7 +9951,7 @@ DEFAULT_SITE_SETTINGS = {
     # ============ Menu de navegação superior (Topbar customizável) ============
     "header_nav_items": [
         {"label": "Protocolo Dr.Bactéria", "url": "/p/protocolo-dr-bacteria"},
-        {"label": "Óleos Ozonizados", "url": "/produtos?categoria=oleos-ozonizados"},
+        {"label": "Óleos Ozonizados", "url": "/categoria/oleos-ozonizados"},
         {"label": "Quem Somos", "url": "/p/sobre"},
         {"label": "Blog", "url": "/p/blog"},
         {"label": "Contato", "url": "/p/contato"},
@@ -9812,6 +10019,8 @@ DEFAULT_SITE_SETTINGS = {
         "email_header":  {"height": 48, "max_width": 200},
         "email_footer":  {"height": 32, "max_width": 140},
     },
+    # ============ Busca Inteligente & Sinônimos (Estilo SmartHint) ============
+    "search_synonyms": {},
 }
 
 
@@ -9832,6 +10041,15 @@ async def _get_site_settings(db, tenant_id: Optional[str] = None) -> dict:
         if k != "_id":
             out[k] = v
     out["tenant_id"] = tid
+    # Normaliza header_nav_items se contiver /produtos?categoria=...
+    if "header_nav_items" in out and isinstance(out["header_nav_items"], list):
+        out["header_nav_items"] = [
+            {
+                **it,
+                "url": re.sub(r"^/produtos\?(?:categoria|category)=", "/categoria/", it.get("url", ""))
+            } if isinstance(it, dict) and ("/produtos?categoria=" in it.get("url", "") or "/produtos?category=" in it.get("url", "")) else it
+            for it in out["header_nav_items"]
+        ]
     return out
 
 
@@ -10141,6 +10359,14 @@ async def admin_site_settings(request: Request, user: dict = Depends(require_sup
     body = await request.json() or {}
     body.pop("tenant_id", None)
     body["updated_at"] = now_iso()
+    if "header_nav_items" in body and isinstance(body["header_nav_items"], list):
+        body["header_nav_items"] = [
+            {
+                **it,
+                "url": re.sub(r"^/produtos\?(?:categoria|category)=", "/categoria/", it.get("url", ""))
+            } if isinstance(it, dict) and ("/produtos?categoria=" in it.get("url", "") or "/produtos?category=" in it.get("url", "")) else it
+            for it in body["header_nav_items"]
+        ]
     db = request.app.db
     sel = (request.query_params.get("tenant") or request.headers.get("x-tenant") or "").strip().lower()
     tid = sel if sel and sel != "all" else tenant_service.DEFAULT_TENANT
@@ -10157,6 +10383,38 @@ async def admin_site_settings(request: Request, user: dict = Depends(require_sup
     await db.settings.update_one({"_id": doc_id}, {"$set": body}, upsert=True)
     _sync_share_meta_to_disk(body)
     return await _get_site_settings(db, tid)
+
+
+@app.get("/api/admin/search-synonyms")
+async def admin_get_search_synonyms(request: Request, user: dict = Depends(require_admin())):
+    """Retorna sinônimos customizados do lojista e sinônimos padrão do sistema (Estilo SmartHint)."""
+    db = request.app.db
+    tid = tenant_service.get_tenant(request)
+    stg = await _get_site_settings(db, tid)
+    custom = stg.get("search_synonyms") or {}
+    return {
+        "custom_synonyms": custom,
+        "default_synonyms": smart_search.DEFAULT_SEARCH_SYNONYMS
+    }
+
+
+@app.put("/api/admin/search-synonyms")
+async def admin_update_search_synonyms(request: Request, user: dict = Depends(require_admin())):
+    """Atualiza lista de sinônimos customizados do lojista (Estilo SmartHint)."""
+    db = request.app.db
+    body = await request.json() or {}
+    custom = body.get("custom_synonyms")
+    if custom is None or not isinstance(custom, dict):
+        raise HTTPException(status_code=400, detail="Formato inválido de sinônimos (esperado dicionário)")
+
+    # Limpa cache do vocabulário
+    global _search_vocab_cache
+    _search_vocab_cache = {"vocab": set(), "timestamp": 0}
+
+    tid = tenant_service.get_tenant(request)
+    doc_id = f"site:{tid}"
+    await db.settings.update_one({"_id": doc_id}, {"$set": {"search_synonyms": custom, "updated_at": now_iso()}}, upsert=True)
+    return {"message": "Sinônimos atualizados com sucesso", "custom_synonyms": custom}
 
 
 @app.post("/api/admin/upload-image")
