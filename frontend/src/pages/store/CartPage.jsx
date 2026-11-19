@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { api } from '../../lib/api';
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2, Award, Store, FileText } from 'lucide-react';
+import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, Ticket, X, Loader2, Award, Store, FileText, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSiteSettings } from '../../hooks/useSiteSettings';
 import ShippingCalculator, { loadSelectedShipping, saveSelectedShipping } from '../../components/store/ShippingCalculator';
@@ -41,6 +41,7 @@ export default function CartPage() {
     try { return JSON.parse(localStorage.getItem(COUPON_KEY) || 'null'); } catch { return null; }
   });
   const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState(null);
 
   const subtotal = cart.subtotal || 0;
 
@@ -59,28 +60,36 @@ export default function CartPage() {
   const discount = coupon?.discount || 0;
   const total = Math.max(0, subtotal + shipping - discount);
 
-  // Re-valida cupom quando subtotal muda (item adicionado/removido)
+  // Re-valida cupom quando subtotal ou itens mudam (item adicionado/removido)
   useEffect(() => {
     const code = coupon?.code;
     if (!code || subtotal <= 0) return;
     let alive = true;
     (async () => {
       try {
-        const r = await api.post('/api/coupons/validate', { code, subtotal });
+        const cartItems = (cart.items || []).map(i => ({
+          product_id: i.product_id,
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+        }));
+        const r = await api.post('/api/coupons/validate', { code, subtotal, items: cartItems });
         if (!alive) return;
         if (r.valid) {
           setCoupon({ code, discount: r.discount, description: r.coupon?.description, type: r.coupon?.type, value: r.coupon?.value });
           localStorage.setItem(COUPON_KEY, JSON.stringify({ code, discount: r.discount }));
+          setCouponError(null);
         } else {
           setCoupon(null);
+          setCouponError(r);
           localStorage.removeItem(COUPON_KEY);
-          toast.warning(r.reason || 'Cupom não é mais válido');
+          toast.warning(r.reason || 'Cupom não é mais válido para os itens do carrinho', { duration: 8000 });
         }
       } catch { /* silencioso */ }
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subtotal]);
+  }, [subtotal, cart.items]);
 
   const onQty = async (pid, qty) => {
     setUpdating(pid);
@@ -89,29 +98,46 @@ export default function CartPage() {
     finally { setUpdating(null); }
   };
   const onRemove = async (pid) => {
-    try { await removeItem(pid); toast.success('Item removido'); } catch (err) { toast.error(err.message); }
+    try {
+      await removeItem(pid);
+      toast.success('Item removido');
+      // Se era um item não elegível que bloqueava o cupom, limpa o erro para o usuário tentar novamente
+      setCouponError(null);
+    } catch (err) { toast.error(err.message); }
   };
 
   const applyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
     if (!code) return;
     setCouponLoading(true);
+    setCouponError(null);
     try {
-      const r = await api.post('/api/coupons/validate', { code, subtotal });
+      const cartItems = (cart.items || []).map(i => ({
+        product_id: i.product_id,
+        name: i.name,
+        quantity: i.quantity,
+        price: i.price,
+      }));
+      const r = await api.post('/api/coupons/validate', { code, subtotal, items: cartItems });
       if (r.valid) {
         setCoupon({ code, discount: r.discount, description: r.coupon?.description, type: r.coupon?.type, value: r.coupon?.value });
         localStorage.setItem(COUPON_KEY, JSON.stringify({ code, discount: r.discount }));
         setCouponInput('');
+        setCouponError(null);
         toast.success(`Cupom aplicado: -${formatCurrency(r.discount)}`);
       } else {
-        toast.error(r.reason || 'Cupom inválido');
+        setCouponError(r);
+        toast.error(r.reason || 'Cupom inválido', { duration: 8000 });
       }
-    } catch (e) { toast.error(e?.message || 'Erro ao validar cupom'); }
+    } catch (e) {
+      toast.error(e?.message || 'Erro ao validar cupom');
+    }
     finally { setCouponLoading(false); }
   };
 
   const removeCoupon = () => {
     setCoupon(null);
+    setCouponError(null);
     localStorage.removeItem(COUPON_KEY);
     toast.success('Cupom removido');
   };
@@ -222,6 +248,53 @@ export default function CartPage() {
                   <Button size="sm" variant="outline" onClick={applyCoupon} disabled={couponLoading || !couponInput.trim()} data-testid="apply-coupon-btn">
                     {couponLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Aplicar'}
                   </Button>
+                </div>
+              )}
+
+              {/* Alerta detalhado de não-elegibilidade ou restrição do cupom */}
+              {couponError && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 space-y-2 shadow-sm animate-in fade-in" data-testid="coupon-error-card">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Itens não elegíveis no carrinho</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCouponError(null)}
+                      className="text-amber-600 hover:text-amber-800 p-0.5 rounded"
+                      title="Fechar aviso"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-900/90 whitespace-pre-line">
+                    {couponError.reason}
+                  </p>
+                  {couponError.ineligible_items && couponError.ineligible_items.length > 0 && (
+                    <div className="pt-2 border-t border-amber-200/80 space-y-1.5">
+                      <span className="font-semibold text-[11px] text-amber-950 block">Remover para aplicar o cupom:</span>
+                      {couponError.ineligible_items.map((it) => (
+                        <div key={it.product_id} className="flex items-center justify-between bg-white/90 px-2 py-1.5 rounded-lg border border-amber-200">
+                          <span className="font-medium truncate max-w-[170px] text-[11px] text-gray-800" title={it.name}>
+                            {it.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await onRemove(it.product_id);
+                              if (couponInput.trim()) {
+                                setTimeout(() => applyCoupon(), 400);
+                              }
+                            }}
+                            className="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:underline shrink-0 ml-2"
+                          >
+                            Remover item
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

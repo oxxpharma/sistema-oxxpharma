@@ -2571,7 +2571,7 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
         coupon_code_applied = None
         coupon_id_applied = None
         if getattr(data, "coupon_code", None):
-            result = await store_extras.validate_coupon(db, data.coupon_code, round(subtotal, 2), user)
+            result = await store_extras.validate_coupon(db, data.coupon_code, round(subtotal, 2), user, items=items)
             if not result.get("valid"):
                 raise HTTPException(status_code=400, detail=result.get("reason") or "Cupom inválido")
             discount_amount = float(result.get("discount") or 0)
@@ -11998,13 +11998,14 @@ async def admin_delete_coupon(request: Request, coupon_id: str, user: dict = Dep
 class _CouponValidateBody(BaseModel):
     code: str
     subtotal: float
+    items: Optional[List[Dict[str, Any]]] = None
 
 
 @app.post("/api/coupons/validate")
 async def public_validate_coupon(request: Request, body: _CouponValidateBody):
     db = request.app.db
     user = await get_optional_user(request)
-    return await store_extras.validate_coupon(db, body.code, body.subtotal, user)
+    return await store_extras.validate_coupon(db, body.code, body.subtotal, user, items=body.items)
 
 
 # ==================== ADMIN ROLE PROFILES ====================

@@ -65,12 +65,32 @@ export default function CheckoutPage() {
         setEmployeeCtx(ec);
       } catch { setEmployeeCtx(null); }
     })();
-    // detecta cupom aplicado no localStorage
+    // detecta cupom aplicado no localStorage e revalida
     try {
       const c = JSON.parse(localStorage.getItem('oxx_coupon_v1') || 'null');
-      setAppliedCoupon(c);
+      if (c?.code && cart?.items?.length) {
+        const cartItems = cart.items.map(i => ({
+          product_id: i.product_id,
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+        }));
+        api.post('/api/coupons/validate', { code: c.code, subtotal: cart.subtotal || 0, items: cartItems })
+          .then(r => {
+            if (r.valid) {
+              setAppliedCoupon({ code: c.code, discount: r.discount });
+            } else {
+              setAppliedCoupon(null);
+              localStorage.removeItem('oxx_coupon_v1');
+              toast.warning(r.reason || 'Cupom removido pois não é válido para todos os itens do carrinho', { duration: 8000 });
+            }
+          })
+          .catch(() => setAppliedCoupon(c));
+      } else {
+        setAppliedCoupon(c);
+      }
     } catch { /* noop */ }
-  }, []);
+  }, [cart.items, cart.subtotal]);
 
   useEffect(() => {
     (async () => {

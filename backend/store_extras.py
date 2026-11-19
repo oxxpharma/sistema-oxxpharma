@@ -55,6 +55,9 @@ class CouponIn(BaseModel):
     per_user_limit: Optional[int] = None  # por usuario
     requires_login: bool = False
     applicable_user_categories: List[str] = []  # category_ids; vazio = todos
+    applicable_products: List[str] = []  # product_ids; vazio = todos
+    applicable_categories: List[str] = []  # category_ids ou category names; vazio = todas
+    applicable_subcategories: List[str] = []  # subcategory_ids ou subcategory names; vazio = todas
     description: Optional[str] = ""
     active: bool = True
 
@@ -340,6 +343,9 @@ async def create_coupon(db, payload: CouponIn) -> Dict[str, Any]:
         "per_user_limit": int(payload.per_user_limit) if payload.per_user_limit else None,
         "requires_login": bool(payload.requires_login),
         "applicable_user_categories": list(payload.applicable_user_categories or []),
+        "applicable_products": list(payload.applicable_products or []),
+        "applicable_categories": list(payload.applicable_categories or []),
+        "applicable_subcategories": list(payload.applicable_subcategories or []),
         "description": payload.description or "",
         "active": bool(payload.active),
         "usage_count": 0,
@@ -375,6 +381,9 @@ async def update_coupon(db, coupon_id: str, payload: CouponIn) -> Dict[str, Any]
         "per_user_limit": int(payload.per_user_limit) if payload.per_user_limit else None,
         "requires_login": bool(payload.requires_login),
         "applicable_user_categories": list(payload.applicable_user_categories or []),
+        "applicable_products": list(payload.applicable_products or []),
+        "applicable_categories": list(payload.applicable_categories or []),
+        "applicable_subcategories": list(payload.applicable_subcategories or []),
         "description": payload.description or "",
         "active": bool(payload.active),
         "updated_at": _now_iso(),
@@ -395,9 +404,10 @@ async def validate_coupon(
     code: str,
     subtotal: float,
     user: Optional[Dict[str, Any]] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Valida e calcula o desconto. Retorna dict com:
-      { valid: bool, reason?: str, discount: float, coupon: dict|None }
+      { valid: bool, reason?: str, discount: float, coupon: dict|None, ineligible_items?: list, target_description?: str }
     """
     coupon = await get_coupon_by_code(db, code)
     if not coupon:
@@ -423,6 +433,186 @@ async def validate_coupon(
         user_cats = set(user.get("category_ids") or [])
         if not user_cats.intersection(cats_required):
             return {"valid": False, "reason": "Você não pertence a uma categoria autorizada", "discount": 0, "coupon": None}
+
+    # ==================== RESTRIÇÕES POR PRODUTOS / CATEGORIAS / SUBCATEGORIAS ====================
+    app_prods = list(coupon.get("applicable_products") or [])
+    app_cats = list(coupon.get("applicable_categories") or [])
+    app_subs = list(coupon.get("applicable_subcategories") or [])
+    has_product_restrictions = bool(app_prods or app_cats or app_subs)
+
+    if has_product_restrictions:
+        # Monta descrição legível do que é elegível para o cupom
+        target_parts = []
+        if app_prods:
+            prod_names = []
+            async for p in db.products.find({"product_id": {"$in": app_prods}}, {"_id": 0, "name": 1}):
+                if p.get("name"):
+                    prod_names.append(p["name"])
+            if prod_names:
+                target_parts.append(f"Produto(s): {', '.join(prod_names)}")
+            else:
+                target_parts.append("Produto(s) selecionado(s)")
+
+        if app_cats:
+            cat_names = []
+            async for c in db.categories.find({"$or": [{"category_id": {"$in": app_cats}}, {"name": {"$in": app_cats}}]}, {"_id": 0, "name": 1}):
+                if c.get("name"):
+                    cat_names.append(c["name"])
+            if cat_names:
+                target_parts.append(f"Categoria(s): {', '.join(cat_names)}")
+            else:
+                target_parts.append("Categoria(s) selecionada(s)")
+
+        if app_subs:
+            sub_names = []
+            async for s in db.subcategories.find({"$or": [{"subcategory_id": {"$in": app_subs}}, {"name": {"$in": app_subs}}]}, {"_id": 0, "name": 1}):
+                if s.get("name"):
+                    sub_names.append(s["name"])
+            if sub_names:
+                target_parts.append(f"Subcategoria(s): {', '.join(sub_names)}")
+            else:
+                target_parts.append("Subcategoria(s) selecionada(s)")
+
+        target_description = " · ".join(target_parts) if target_parts else "itens específicos"
+
+        # Recupera os itens do carrinho se não foram passados diretamente
+        cart_items = items
+        if cart_items is None and user and user.get("user_id"):
+            ucart = await db.carts.find_one({"user_id": user["user_id"]})
+            if ucart:
+                cart_items = ucart.get("items", [])
+
+        if not cart_items:
+            return {
+                "valid": False,
+                "reason": f"Este cupom é restrito e válido exclusivamente para: {target_description}.",
+                "discount": 0,
+                "coupon": None,
+                "target_description": target_description,
+            }
+
+        # Busca dados completos dos produtos no banco
+        pids = [it.get("product_id") for it in cart_items if it.get("product_id")]
+        prods_map = {}
+        if pids:
+            async for p in db.products.find(
+                {"product_id": {"$in": pids}},
+                {"_id": 0, "product_id": 1, "name": 1, "category": 1, "categories": 1, "subcategory": 1, "subcategories": 1}
+            ):
+                prods_map[p["product_id"]] = p
+
+        # Dicionários de equivalência ID <-> Nome para categorias e subcategorias
+        cat_id_to_name = {}
+        cat_name_to_id = {}
+        async for c in db.categories.find({}, {"_id": 0, "category_id": 1, "name": 1}):
+            if c.get("category_id") and c.get("name"):
+                cat_id_to_name[c["category_id"]] = c["name"]
+                cat_name_to_id[c["name"]] = c["category_id"]
+
+        sub_id_to_name = {}
+        sub_name_to_id = {}
+        async for s in db.subcategories.find({}, {"_id": 0, "subcategory_id": 1, "name": 1}):
+            if s.get("subcategory_id") and s.get("name"):
+                sub_id_to_name[s["subcategory_id"]] = s["name"]
+                sub_name_to_id[s["name"]] = s["subcategory_id"]
+
+        norm_app_cats = set(app_cats)
+        for ac in list(norm_app_cats):
+            if ac in cat_id_to_name:
+                norm_app_cats.add(cat_id_to_name[ac])
+            if ac in cat_name_to_id:
+                norm_app_cats.add(cat_name_to_id[ac])
+
+        norm_app_subs = set(app_subs)
+        for asub in list(norm_app_subs):
+            if asub in sub_id_to_name:
+                norm_app_subs.add(sub_id_to_name[asub])
+            if asub in sub_name_to_id:
+                norm_app_subs.add(sub_name_to_id[asub])
+
+        norm_app_prods = set(app_prods)
+
+        eligible_items = []
+        ineligible_items = []
+
+        for it in cart_items:
+            pid = it.get("product_id")
+            prod = prods_map.get(pid)
+            it_name = it.get("name") or (prod.get("name") if prod else pid)
+
+            if not prod:
+                ineligible_items.append({"product_id": pid, "name": it_name})
+                continue
+
+            is_match = False
+            # 1. Correspondência de produto
+            if norm_app_prods and pid in norm_app_prods:
+                is_match = True
+
+            # 2. Correspondência de categoria
+            if not is_match and norm_app_cats:
+                p_cats = set(prod.get("categories") or [])
+                if prod.get("category"):
+                    p_cats.add(prod["category"])
+                expanded_p_cats = set(p_cats)
+                for pc in p_cats:
+                    if pc in cat_id_to_name:
+                        expanded_p_cats.add(cat_id_to_name[pc])
+                    if pc in cat_name_to_id:
+                        expanded_p_cats.add(cat_name_to_id[pc])
+                if expanded_p_cats.intersection(norm_app_cats):
+                    is_match = True
+
+            # 3. Correspondência de subcategoria
+            if not is_match and norm_app_subs:
+                p_subs = set(prod.get("subcategories") or [])
+                if prod.get("subcategory"):
+                    p_subs.add(prod["subcategory"])
+                expanded_p_subs = set(p_subs)
+                for ps in p_subs:
+                    if ps in sub_id_to_name:
+                        expanded_p_subs.add(sub_id_to_name[ps])
+                    if ps in sub_name_to_id:
+                        expanded_p_subs.add(sub_name_to_id[ps])
+                if expanded_p_subs.intersection(norm_app_subs):
+                    is_match = True
+
+            if is_match:
+                eligible_items.append({"product_id": pid, "name": it_name, "quantity": it.get("quantity", 1), "price": it.get("price", 0)})
+            else:
+                ineligible_items.append({"product_id": pid, "name": it_name, "quantity": it.get("quantity", 1), "price": it.get("price", 0)})
+
+        # Nenhum produto elegível
+        if not eligible_items:
+            return {
+                "valid": False,
+                "reason": f"Nenhum produto do seu carrinho é elegível para este cupom. Este cupom é válido apenas para: {target_description}.",
+                "discount": 0,
+                "coupon": None,
+                "ineligible_items": ineligible_items,
+                "target_description": target_description,
+            }
+
+        # Contém produtos elegíveis E produtos não elegíveis misturados
+        if ineligible_items:
+            inelig_names = ", ".join([f"'{it['name']}'" for it in ineligible_items])
+            plur = len(ineligible_items) > 1
+            art = "Os produtos" if plur else "O produto"
+            verb = "não são elegíveis" if plur else "não é elegível"
+            pron = "estes itens" if plur else "este item"
+            reason = (
+                f"{art} {inelig_names} no seu carrinho {verb} para este cupom. "
+                f"Recomendamos remover {pron} do carrinho e comprar separadamente para aproveitar o desconto. "
+                f"Este cupom é válido exclusivamente para: {target_description}."
+            )
+            return {
+                "valid": False,
+                "reason": reason,
+                "discount": 0,
+                "coupon": None,
+                "ineligible_items": ineligible_items,
+                "target_description": target_description,
+            }
 
     if subtotal < float(coupon.get("min_subtotal") or 0):
         return {
