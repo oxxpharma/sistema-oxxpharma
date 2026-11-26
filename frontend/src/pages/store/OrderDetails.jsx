@@ -342,7 +342,13 @@ export default function OrderDetails() {
           <div className="flex justify-between"><span className="text-txt-secondary">Frete</span><span>{formatCurrency(order.shipping_cost)}</span></div>
           {order.discount_amount > 0 && (
             <div className="flex justify-between text-emerald-600">
-              <span>Desconto ({order.coupon_code || 'cupom'})</span>
+              <span>
+                {order.coupon_code
+                  ? `Cupom (${order.coupon_code})`
+                  : order.discount_rules_applied?.length
+                  ? `Desconto (${order.discount_rules_applied.map(r => r.badge_text || r.name).join(', ')})`
+                  : 'Desconto'}
+              </span>
               <span className="font-semibold">−{formatCurrency(order.discount_amount)}</span>
             </div>
           )}

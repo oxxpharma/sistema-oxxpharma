@@ -46,6 +46,7 @@ import audit_service
 import pg_catalog_sync
 import image_optimizer
 import smart_search
+import discount_rules_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2774,16 +2775,35 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             pass
 
         # Cupom (opcional)
-        discount_amount = 0.0
+        coupon_discount = 0.0
         coupon_code_applied = None
         coupon_id_applied = None
         if getattr(data, "coupon_code", None):
             result = await store_extras.validate_coupon(db, data.coupon_code, round(subtotal, 2), user, items=items)
             if not result.get("valid"):
                 raise HTTPException(status_code=400, detail=result.get("reason") or "Cupom inválido")
-            discount_amount = float(result.get("discount") or 0)
+            coupon_discount = float(result.get("discount") or 0)
             coupon_code_applied = result["coupon"]["code"]
             coupon_id_applied = result["coupon"]["coupon_id"]
+
+        # Regras de Desconto Dinâmicas (OxxPharma: usuário, categoria, funcionário, região, 1ª compra, produtos/exceções)
+        automatic_discount = 0.0
+        discount_rules_applied = []
+        try:
+            rules_eval = await discount_rules_service.evaluate_discount_rules(
+                db=db,
+                items=items,
+                user=user,
+                shipping_address=addr,
+                payment_method=data.payment_method,
+                coupon_applied=coupon_code_applied,
+            )
+            automatic_discount = float(rules_eval.get("total_discount") or 0)
+            discount_rules_applied = rules_eval.get("rules_applied") or []
+        except Exception as e_rules:
+            logger.warning(f"Erro ao avaliar regras de desconto no checkout: {e_rules}")
+
+        discount_amount = round(coupon_discount + automatic_discount, 2)
 
         settings = await get_settings(db)
         try:
@@ -2969,6 +2989,9 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             "items": items, "subtotal": round(subtotal, 2),
             "shipping_cost": shipping,
             **shipping_meta,
+            "coupon_discount": round(coupon_discount, 2),
+            "automatic_discount": round(automatic_discount, 2),
+            "discount_rules_applied": discount_rules_applied,
             "discount_amount": round(discount_amount, 2),
             "coupon_code": coupon_code_applied,
             "voucher_used": voucher_used,
@@ -2994,6 +3017,12 @@ async def checkout(request: Request, data: CheckoutData, user: dict = Depends(ge
             "notes": data.notes, "created_at": now_iso(),
         }
         await db.orders.insert_one(order)
+
+        if discount_rules_applied:
+            try:
+                await discount_rules_service.record_discount_rules_usage(db, discount_rules_applied)
+            except Exception as e_usage:
+                logger.warning(f"Erro registrando uso de regras de desconto: {e_usage}")
 
         # Decrement stock now that order is securely saved
         for pid, q in stock_to_decrement:
@@ -12278,6 +12307,71 @@ async def public_validate_coupon(request: Request, body: _CouponValidateBody):
     db = request.app.db
     user = await get_optional_user(request)
     return await store_extras.validate_coupon(db, body.code, body.subtotal, user, items=body.items)
+
+
+# ==================== REGRAS DE DESCONTO (DISCOUNT RULES) ====================
+
+@app.get("/api/admin/discount-rules")
+async def admin_list_discount_rules(request: Request, user: dict = Depends(require_admin())):
+    return {"rules": await discount_rules_service.list_discount_rules(request.app.db)}
+
+
+@app.get("/api/admin/discount-rules/{rule_id}")
+async def admin_get_discount_rule(request: Request, rule_id: str, user: dict = Depends(require_admin())):
+    r = await discount_rules_service.get_discount_rule(request.app.db, rule_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Regra de desconto não encontrada")
+    return r
+
+
+@app.post("/api/admin/discount-rules")
+async def admin_create_discount_rule(request: Request, payload: Dict[str, Any], user: dict = Depends(require_admin())):
+    return await discount_rules_service.create_discount_rule(request.app.db, payload, author=user)
+
+
+@app.put("/api/admin/discount-rules/{rule_id}")
+async def admin_update_discount_rule(request: Request, rule_id: str, payload: Dict[str, Any], user: dict = Depends(require_admin())):
+    res = await discount_rules_service.update_discount_rule(request.app.db, rule_id, payload, author=user)
+    if not res:
+        raise HTTPException(status_code=404, detail="Regra de desconto não encontrada")
+    return res
+
+
+@app.delete("/api/admin/discount-rules/{rule_id}")
+async def admin_delete_discount_rule(request: Request, rule_id: str, user: dict = Depends(require_admin())):
+    ok = await discount_rules_service.delete_discount_rule(request.app.db, rule_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Regra de desconto não encontrada")
+    return {"deleted": True, "rule_id": rule_id}
+
+
+@app.patch("/api/admin/discount-rules/{rule_id}/toggle")
+async def admin_toggle_discount_rule(request: Request, rule_id: str, user: dict = Depends(require_admin())):
+    res = await discount_rules_service.toggle_discount_rule(request.app.db, rule_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Regra de desconto não encontrada")
+    return res
+
+
+class _DiscountCalculateBody(BaseModel):
+    items: List[Dict[str, Any]] = []
+    shipping_address: Optional[Dict[str, Any]] = None
+    payment_method: Optional[str] = None
+    coupon_code: Optional[str] = None
+
+
+@app.post("/api/discount-rules/calculate")
+async def public_calculate_discounts(request: Request, body: _DiscountCalculateBody):
+    db = request.app.db
+    user = await get_optional_user(request)
+    return await discount_rules_service.evaluate_discount_rules(
+        db=db,
+        items=body.items,
+        user=user,
+        shipping_address=body.shipping_address,
+        payment_method=body.payment_method,
+        coupon_applied=body.coupon_code,
+    )
 
 
 # ==================== ADMIN ROLE PROFILES ====================

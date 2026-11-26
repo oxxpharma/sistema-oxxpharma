@@ -552,7 +552,16 @@ export default function AdminOrders() {
                 <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(selected.subtotal)}</span></div>
                 <div className="flex justify-between"><span>Frete</span><span>{formatCurrency(selected.shipping_cost)}</span></div>
                 {selected.discount_amount > 0 && (
-                  <div className="flex justify-between text-emerald-600"><span>Cupom ({selected.coupon_code || 'desconto'})</span><span>−{formatCurrency(selected.discount_amount)}</span></div>
+                  <div className="flex justify-between text-emerald-600">
+                    <span>
+                      {selected.coupon_code
+                        ? `Cupom (${selected.coupon_code})`
+                        : selected.discount_rules_applied?.length
+                        ? `Desconto (${selected.discount_rules_applied.map(r => r.badge_text || r.name).join(', ')})`
+                        : 'Desconto'}
+                    </span>
+                    <span>−{formatCurrency(selected.discount_amount)}</span>
+                  </div>
                 )}
                 {selected.cashback_discount > 0 && (
                   <div className="flex justify-between text-amber-700 font-medium" data-testid="admin-order-cashback-discount">

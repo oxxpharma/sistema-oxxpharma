@@ -5,7 +5,7 @@ import {
   Network, Award, FileText, Settings, Wallet, Receipt, Mail, Webhook, CreditCard,
   Star, Truck, Palette, FileEdit, Repeat, ChevronDown, Tag, Ticket, UserCheck, Send,
   GitMerge, Calculator, LayoutGrid, Shield, ShoppingCart, Zap, ShieldAlert, Database,
-  PanelLeftClose, PanelLeftOpen, Terminal,
+  PanelLeftClose, PanelLeftOpen, Terminal, Percent,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from '../components/branding/BrandLogo';
@@ -38,6 +38,7 @@ const NAV_GROUPS = [
       { to: '/backoffice/pdv', icon: ShoppingCart, label: 'PDV (Balcão)', testId: 'nav-pdv', perm: 'editOrders' },
       { to: '/backoffice/campanha', icon: Zap, label: 'Campanha Multi', testId: 'nav-campaign', perm: 'integrations' },
       { to: '/backoffice/cupons', icon: Ticket, label: 'Cupons', testId: 'nav-coupons', perm: 'editCoupons' },
+      { to: '/backoffice/descontos', icon: Percent, label: 'Regras de Desconto', testId: 'nav-discounts', perm: 'editCoupons' },
       { to: '/backoffice/faturamento', icon: Receipt, label: 'Faturamento', testId: 'nav-invoices', perm: 'financial' },
       { to: '/backoffice/pagamentos', icon: Wallet, label: 'Pagamentos', testId: 'nav-payments', perm: 'integrations' },
       { to: '/backoffice/catalogo-pg', icon: Database, label: 'Catálogo PostgreSQL', testId: 'nav-pg-catalog', perm: 'integrations' },

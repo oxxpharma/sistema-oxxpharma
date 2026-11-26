@@ -57,6 +57,8 @@ export default function CheckoutPage() {
   const [bonusUnitsToUse, setBonusUnitsToUse] = useState(0);
   // Iter 66.3: cupom aplicado (para avisar sobre incompatibilidade com desconto convenio)
   const [appliedCoupon, setAppliedCoupon] = useState(null);
+  // Regras de Desconto dinâmicas (funcionário, região, 1ª compra, etc.)
+  const [automaticDiscounts, setAutomaticDiscounts] = useState({ total_discount: 0, rules_applied: [] });
 
   useEffect(() => {
     (async () => {
@@ -100,6 +102,33 @@ export default function CheckoutPage() {
       } catch { /* noop */ }
     })();
   }, []);
+
+  // Calcula regras de desconto automáticas aplicáveis ao carrinho e ao cliente
+  useEffect(() => {
+    if (!cart?.items?.length) {
+      setAutomaticDiscounts({ total_discount: 0, rules_applied: [] });
+      return;
+    }
+    const selectedAddressObj = addresses.find((a) => a.address_id === selectedAddr);
+    const cartItems = cart.items.map((i) => ({
+      product_id: i.product_id,
+      name: i.name,
+      quantity: i.quantity,
+      price: i.price,
+    }));
+    api.post('/api/discount-rules/calculate', {
+      items: cartItems,
+      shipping_address: selectedAddressObj,
+      payment_method: paymentMethod,
+      coupon_code: appliedCoupon?.code,
+    })
+      .then((res) => {
+        setAutomaticDiscounts(res || { total_discount: 0, rules_applied: [] });
+      })
+      .catch(() => {
+        setAutomaticDiscounts({ total_discount: 0, rules_applied: [] });
+      });
+  }, [cart.items, selectedAddr, addresses, paymentMethod, appliedCoupon]);
 
   useEffect(() => {
     (async () => {
@@ -246,12 +275,15 @@ export default function CheckoutPage() {
     } catch { return 0; }
   })();
 
-  // Iter 67: Base de cálculo para o cashback (máximo 30% do valor dos produtos após cupom)
-  const eligibleSubtotal = Math.max(0, subtotal - couponDiscount);
+  const autoDiscountAmount = Number(automaticDiscounts?.total_discount || 0);
+  const totalDiscounts = couponDiscount + autoDiscountAmount;
+
+  // Iter 67: Base de cálculo para o cashback (máximo 30% do valor dos produtos após descontos)
+  const eligibleSubtotal = Math.max(0, subtotal - totalDiscounts);
   const maxCashbackForOrder = Math.round(eligibleSubtotal * 0.30 * 100) / 100;
   const cashbackToUse = useCashback ? Math.min(cashbackBalance, maxCashbackForOrder) : 0;
 
-  const grandBeforeVoucher = Math.max(0, subtotal + shipping - couponDiscount - cashbackToUse);
+  const grandBeforeVoucher = Math.max(0, subtotal + shipping - totalDiscounts - cashbackToUse);
   // Iter 38: Voucher abate ate o valor total. Se cobrir tudo, total = 0 e nao vai ao MP.
   const voucherToUse = useVoucher ? Math.min(voucherBalance, grandBeforeVoucher) : 0;
   // Iter 66.3: bonus de garantia
@@ -848,6 +880,19 @@ export default function CheckoutPage() {
               )}
               {couponDiscount > 0 && (
                 <div className="flex justify-between text-emerald-600"><span>Cupom</span><span className="font-semibold">−{formatCurrency(couponDiscount)}</span></div>
+              )}
+              {autoDiscountAmount > 0 && (
+                <div className="space-y-1">
+                  {(automaticDiscounts.rules_applied || []).map((r) => (
+                    <div key={r.rule_id} className="flex justify-between text-emerald-600" data-testid={`summary-rule-${r.rule_id}`}>
+                      <span className="flex items-center gap-1 text-xs">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{r.badge_text || r.name}</span>
+                      </span>
+                      <span className="font-semibold">−{formatCurrency(r.discount_amount)}</span>
+                    </div>
+                  ))}
+                </div>
               )}
               {cashbackToUse > 0 && (
                 <div className="flex justify-between text-amber-700" data-testid="summary-cashback-line">

@@ -97,6 +97,7 @@ const AdminPagesList = React.lazy(() => import('./pages/backoffice/AdminPages').
 const AdminPageEditor = React.lazy(() => import('./pages/backoffice/AdminPages').then(m => ({ default: m.AdminPageEditor })));
 const AdminUserCategories = React.lazy(() => import('./pages/backoffice/AdminUserCategories'));
 const AdminCoupons = React.lazy(() => import('./pages/backoffice/AdminCoupons'));
+const AdminDiscountRules = React.lazy(() => import('./pages/backoffice/AdminDiscountRules'));
 const AdminReferralEnrollments = React.lazy(() => import('./pages/backoffice/AdminReferralEnrollments'));
 const AdminMergeUsers = React.lazy(() => import('./pages/backoffice/AdminMergeUsers'));
 const AdminRecalcCommissions = React.lazy(() => import('./pages/backoffice/AdminRecalcCommissions'));
@@ -204,6 +205,7 @@ function AppRoutes() {
         <Route path="usuarios/:user_id" element={<AdminUserDetails />} />
         <Route path="categorias-usuarios" element={<AdminUserCategories />} />
         <Route path="cupons" element={<AdminCoupons />} />
+        <Route path="descontos" element={<AdminDiscountRules />} />
         <Route path="redes" element={<AdminNetworks />} />
         <Route path="candidatos" element={<AdminCandidates />} />
         <Route path="adesoes-indicacao" element={<AdminReferralEnrollments />} />
