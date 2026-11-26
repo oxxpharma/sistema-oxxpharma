@@ -107,10 +107,6 @@ export default function OrderDetails() {
   };
 
   const handlePayNow = async () => {
-    if (order?.payment_url) {
-      window.location.href = order.payment_url;
-      return;
-    }
     setRedirectingToPay(true);
     try {
       const res = await api.post(`/api/payments/create/${order.order_id}`);
@@ -126,12 +122,18 @@ export default function OrderDetails() {
       } else if (res && res.paid) {
         toast.success('Pedido pago com sucesso!');
         await load();
+      } else if (order?.payment_url) {
+        window.location.href = order.payment_url;
       } else {
         toast.info('Link de pagamento criado.');
         await load();
       }
     } catch (err) {
-      toast.error(err.message || 'Erro ao carregar checkout de pagamento');
+      if (order?.payment_url) {
+        window.location.href = order.payment_url;
+      } else {
+        toast.error(err.message || 'Erro ao carregar checkout de pagamento');
+      }
     } finally {
       setRedirectingToPay(false);
     }

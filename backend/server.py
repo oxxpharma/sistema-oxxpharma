@@ -6123,10 +6123,24 @@ async def create_payment(request: Request, order_id: str, user: dict = Depends(g
 
     voucher_used = float(order.get("voucher_used") or 0)
     discount_amount = float(order.get("discount_amount") or 0)
-    if (voucher_used > 0 or discount_amount > 0) and order_total > 0:
+    cashback_discount = float(order.get("cashback_discount") or 0)
+    warranty_bonus_amount = float(order.get("warranty_bonus_amount") or 0)
+    total_discounts = round(voucher_used + discount_amount + cashback_discount + warranty_bonus_amount, 2)
+    items_sum = round(sum(float(it.get("price") or it.get("unit_price") or 0) * int(it.get("quantity", 1) or 1) for it in items_full), 2)
+
+    if (total_discounts > 0 or abs(items_sum - order_total) > 0.005) and order_total > 0:
+        prod_names = [it.get("name") for it in order.get("items", []) if it.get("name")]
+        short_id = str(order.get("order_id") or "")[-8:].upper()
+        if len(prod_names) == 1:
+            desc_title = f"{prod_names[0][:40]} (Pedido #{short_id})"
+        elif len(prod_names) > 1:
+            desc_title = f"Pedido #{short_id} ({len(prod_names)} itens)"
+        else:
+            desc_title = f"Pedido #{order.get('order_id')}"
+
         items_full = [{
             "product_id": order.get("order_id"),
-            "name": f"Pedido #{order.get('order_id')}",
+            "name": desc_title,
             "price": round(order_total, 2),
             "quantity": 1,
         }]

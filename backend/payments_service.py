@@ -169,6 +169,26 @@ async def create_preference(db, order: Dict, user: Dict, items_full: List[Dict],
         raise RuntimeError(f"MercadoPago token not configured for {env}")
 
     sdk = mercadopago.SDK(token)
+
+    order_total = round(float(order.get("total") or 0), 2)
+    items_sum = round(sum(float(it.get("price") or it.get("unit_price") or 0) * int(it.get("quantity", 1) or 1) for it in items_full), 2)
+    if order_total > 0 and abs(items_sum - order_total) > 0.005:
+        prod_names = [it.get("name") for it in order.get("items", []) if it.get("name")]
+        short_id = str(order.get("order_id") or "")[-8:].upper()
+        if len(prod_names) == 1:
+            desc_title = f"{prod_names[0][:40]} (Pedido #{short_id})"
+        elif len(prod_names) > 1:
+            desc_title = f"Pedido #{short_id} ({len(prod_names)} itens)"
+        else:
+            desc_title = f"Pedido #{order.get('order_id')}"
+
+        items_full = [{
+            "product_id": str(order.get("order_id")),
+            "name": desc_title,
+            "price": order_total,
+            "quantity": 1,
+        }]
+
     mp_items = [{
         "id": str(it.get("product_id") or it.get("id") or it.get("name", "item"))[:50],
         "title": (it.get("name") or "Produto")[:60],
